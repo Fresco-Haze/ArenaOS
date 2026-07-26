@@ -1,0 +1,22 @@
+# Build artifacts
+dist-newstyle/
+.stack-work/
+*.o
+*.hi
+
+# Databases (dev/test — regenerated, shouldn't be tracked)
+*.db
+test/arenaos-test.db
+arenaos-dev.db
+
+# Logs
+build.log
+test.log
+*.log
+
+# Editor backup/autosave files
+*.save0
+*.save1
+
+# OS/editor cruft
+.DS_Store
