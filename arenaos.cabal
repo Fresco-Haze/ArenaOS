@@ -1,0 +1,65 @@
+cabal-version:      3.0
+name:                arenaos
+version:             0.1.0.0
+build-type:          Simple
+
+library
+    exposed-modules:  Shell.Persistence.SQLite.Error
+                      Shell.Persistence.SQLite.Connection
+                      Shell.Persistence.SQLite.Schema
+                      Shell.Persistence.SQLite.ParticipantRepository
+                      Shell.Persistence.Port
+                      Domain.Participant
+                      Domain.Tournament
+                      Shell.Persistence.SQLite.TournamentRepository
+                      Domain.Registration
+                      Shell.Persistence.SQLite.RegistrationRepository
+                      Shell.Persistence.SQLite.BracketRepository
+                      Shell.Persistence.SQLite.Common
+                      Domain.Bracket
+                      Domain.Match
+                      Shell.Persistence.SQLite.MatchRepository
+                      Engine.Error
+                      Engine.Validation
+                      Engine.BracketGeneration
+                      Engine.Seeding
+                      Engine.ByeResolution
+                      Engine.Advancement
+                      Engine.Materialization
+                      Application.UseCases.CreateTournament
+                      Application.UseCases.RegisterParticipant
+                      Application.UseCases.StartMatch
+                      Domain.MatchError
+                      Application.UseCases.CompleteTournament
+                      Domain.TournamentError
+                      Application.UseCases.RecordMatchResult
+                      Application.UseCases.GenerateBracket
+                      Domain.Ids
+                      Application.Internal.MatchCreation
+    hs-source-dirs:   .
+    build-depends:    base
+                    , sqlite-simple
+                    , mtl
+                    , text
+                    , containers
+    default-language: Haskell2010
+
+executable arenaos
+    main-is:          Main.hs
+    hs-source-dirs:   app
+    build-depends:    base
+                    , arenaos
+                    , mtl
+    default-language: Haskell2010
+
+test-suite arenaos-test
+    type:             exitcode-stdio-1.0
+    main-is:          Spec.hs
+    hs-source-dirs:   test
+    build-depends:    base
+                    , arenaos
+                    , hspec
+                    , sqlite-simple
+                    , directory
+                    , mtl
+    default-language: Haskell2010
