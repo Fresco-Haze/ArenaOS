@@ -52,9 +52,15 @@ An integration test suite (hspec) covers:
 
 ## Usage
 
-Build:cabal build
+Build:
+
+```
+cabal build
+```
 
 Run the CLI:
+
+```
 cabal run arenaos -- create-tournament "My Cup" "Organizer Name" 4
 cabal run arenaos -- register 1 Alice
 cabal run arenaos -- register 1 Bob
@@ -65,8 +71,11 @@ cabal run arenaos -- list-matches 1
 cabal run arenaos -- start-match 1
 cabal run arenaos -- record-result 1 A
 cabal run arenaos -- complete-tournament 1
+```
 
 Full command reference:
+
+```
 create-tournament <name> <organizer> <maxParticipants>
 register <tournamentId> <playerName>
 generate-bracket <tournamentId>
@@ -74,6 +83,10 @@ list-matches <bracketId>
 start-match <matchId>
 record-result <matchId> <A|B>
 complete-tournament <tournamentId>
+```
 
 Run tests:
+
+```
 cabal test
+```
