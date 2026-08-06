@@ -1,14 +1,17 @@
 module Application.UseCases.RecordMatchResult
   ( recordMatchResult
+  , RecordMatchResultError(..)
   ) where
 
 import Control.Exception (assert)
+import Data.Bifunctor (first)
 
 import Domain.Match (Match(..), MatchId, MatchStatus(..), MatchOutcome(..))
 import Domain.Bracket (BracketId, BracketNode(..), MatchSlot(..), BracketNodeId)
 import Domain.Participant (Participant)
 import Domain.Tournament (TournamentId)
 import Domain.MatchError (MatchError(..))
+import Domain.Ids (UserId)
 import Data.List (find)
 import qualified Data.Map.Strict as Map
 import Control.Monad(forM_)
@@ -18,6 +21,7 @@ import Shell.Persistence.Port
   ( MatchRepository
   , BracketRepository
   , ParticipantRepository
+  , TournamentRepository
   , Transactional(..)
   , NewMatch(..)
   )
@@ -27,35 +31,48 @@ import qualified Engine.Advancement     as Advancement
 import qualified Engine.Materialization as Materialization
 import Shell.Persistence.SQLite.BracketRepository ()
 import Application.Internal.MatchCreation (createMatchForReadyNode)
+import Application.Internal.Authorization (AuthorizationError, requireTournamentOwner)
+
+data RecordMatchResultError
+  = Unauthorized AuthorizationError
+  | InvalidMatch MatchError
+  deriving (Eq, Show)
 
 recordMatchResult
   :: ( MatchRepository m
      , BracketRepository m
      , ParticipantRepository m
+     , TournamentRepository m
      , Transactional m
      )
-  => MatchId
+  => UserId
+  -> MatchId
   -> MatchOutcome
-  -> m (Either MatchError Match)
-recordMatchResult matchId outcome = do
-  match <- Repo.getMatch matchId
-  case outcomeParticipant outcome of
-    Just p | p /= matchCompetitorA match && p /= matchCompetitorB match ->
-      pure (Left (ParticipantNotInMatch p))
-    _ -> case matchStatus match of
-      InProgress -> withTxN $ do
-        let completed = Advancement.completeMatch outcome match
-        Repo.saveMatch completed
+  -> m (Either RecordMatchResultError Match)
+recordMatchResult currentUser matchId outcome = do
+  match      <- Repo.getMatch matchId
+  tournament <- Repo.getTournament (matchTournament match)
 
-        case outcome of
-          Winner p           -> advanceAndMaterialize completed p
-          Forfeit p          -> advanceAndMaterialize completed p
-          Disqualification p -> advanceAndMaterialize completed p
-          Draw                -> pure ()
-          NoContest           -> pure ()
+  case first Unauthorized (requireTournamentOwner currentUser tournament) of
+    Left err -> pure (Left err)
+    Right () ->
+      fmap (first InvalidMatch) $ case outcomeParticipant outcome of
+        Just p | p /= matchCompetitorA match && p /= matchCompetitorB match ->
+          pure (Left (ParticipantNotInMatch p))
+        _ -> case matchStatus match of
+          InProgress -> withTxN $ do
+            let completed = Advancement.completeMatch outcome match
+            Repo.saveMatch completed
 
-        pure (Right completed)
-      status -> pure (Left (MatchNotInProgress status))
+            case outcome of
+              Winner p           -> advanceAndMaterialize completed p
+              Forfeit p          -> advanceAndMaterialize completed p
+              Disqualification p -> advanceAndMaterialize completed p
+              Draw                -> pure ()
+              NoContest           -> pure ()
+
+            pure (Right completed)
+          status -> pure (Left (MatchNotInProgress status))
 
 -- | Draw and NoContest carry no advancing participant, so there's
 -- nothing to validate against the match's competitors.

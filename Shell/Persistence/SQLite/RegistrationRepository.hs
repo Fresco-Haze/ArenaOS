@@ -1,6 +1,5 @@
 {-# LANGUAGE InstanceSigs #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
 -- Shell.Persistence.SQLite.RegistrationRepository
 module Shell.Persistence.SQLite.RegistrationRepository () where

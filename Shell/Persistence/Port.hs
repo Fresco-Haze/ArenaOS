@@ -27,15 +27,25 @@ module Shell.Persistence.Port
   , NewMatch(..)
   ,RegistrationId(..)
   ,ParticipantId(..)
+  ,UserId(..)
   ,Transactional(..)
+  ,UserRepository(..)
+  ,PasswordHasher(..)
+  ,NewUser(..)
+  ,TournamentHistoryRepository(..)
+  
   ) where
 
 import Domain.Participant (Player, PlayerName, Team, TeamName, Participant, ParticipantId)
-import Domain.Tournament (Tournament, TournamentId, TournamentName, OrganizerName, TournamentFormat, Visibility)
+import Domain.Tournament (Tournament, TournamentId, TournamentName, OrganizerName, TournamentFormat, Visibility, TournamentState)
 import Domain.Registration (Registration, RegistrationId)
 import Domain.Bracket (Bracket, BracketId, BracketNode, BracketNodeId)
 import Domain.Match (Match, MatchId)
+import Domain.User (User(..), Username(..), Email(..), PasswordHash(..), AccountStatus(..))
+import Domain.Ids ( UserId(..))
+import Domain.TournamentHistory (TournamentHistoryEvent, TournamentHistoryEntry)
 import Data.Map.Strict (Map)
+import Data.Text (Text)
 -- Owns Participant identity (ADR-006) and its constituents (Player, Team).
 -- resolveParticipant is the one operation every other repository depends
 -- on indirectly -- it belongs here, per DP-002, not duplicated at each
@@ -70,6 +80,7 @@ data NewTournament = NewTournament
     , newTournamentFormat          :: TournamentFormat
     , newTournamentVisibility      :: Visibility
     , newTournamentMaxParticipants :: Int
+    , newTournamentOwner :: UserId
     }
 
 -- createTournament is NOT covered by RC-01 -- it has no natural key
@@ -84,6 +95,12 @@ class Monad m => TournamentRepository m where
     saveTournament   :: Tournament -> m ()
     getTournament    :: TournamentId -> m Tournament
     deleteTournament :: TournamentId -> m ()
+    listTournamentsByOwner :: UserId -> m [Tournament]
+    updateTournamentState    :: TournamentId -> TournamentState -> m ()
+    updateTournamentName     :: TournamentId -> TournamentName -> m ()
+    updateTournamentMaxParticipants :: TournamentId -> Int -> m ()
+    updateTournamentVisibility :: TournamentId -> Visibility -> m ()
+    updateTournamentFormat   :: TournamentId -> TournamentFormat -> m ()
 
 -- Creation-shaped input for RegistrationRepository.createRegistration.
 -- No status field -- RegistrationStatus has exactly one constructor
@@ -135,3 +152,29 @@ class Monad m => MatchRepository m where
 
 class Monad m => Transactional m where
     withTxN :: m a -> m a
+
+data NewUser = NewUser
+    { newUserUsername     :: Username
+    , newUserEmail        :: Email
+    , newUserPasswordHash :: PasswordHash
+    }
+
+class Monad m =>  UserRepository m where
+  createUser         :: NewUser -> m UserId
+  findUserByUsername :: Username -> m (Maybe User)
+  findUserByEmail     :: Email -> m (Maybe User)
+  findUserById        :: UserId -> m (Maybe User)
+  updatePasswordHash     :: UserId -> PasswordHash -> m ()
+  updateUsername :: UserId -> Username -> m ()
+  updateEmail    :: UserId -> Email -> m ()
+  updateAccountStatus :: UserId -> AccountStatus -> m ()
+
+class Monad m => PasswordHasher m where
+    hashPassword   :: Text -> m PasswordHash
+    verifyPassword :: Text -> PasswordHash -> m Bool
+
+class TournamentHistoryRepository m where
+    recordHistoryEvent  :: TournamentId -> TournamentHistoryEvent -> m ()
+    getTournamentHistory :: TournamentId -> m [TournamentHistoryEntry]
+
+

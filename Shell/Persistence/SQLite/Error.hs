@@ -25,6 +25,7 @@ data PersistenceError
   = NotFound String
   | ConstraintViolation String
   | StorageFailure String
+  | HashFailure String
   deriving (Show, Eq)
 
 instance Exception PersistenceError

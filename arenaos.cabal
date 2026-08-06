@@ -36,12 +36,44 @@ library
                       Application.UseCases.GenerateBracket
                       Domain.Ids
                       Application.Internal.MatchCreation
+                      Domain.User
+                      Engine.User
+                      Shell.Persistence.SQLite.UserRepository
+                      Application.UseCases.RegisterUser
+                      Application.UseCases.LoginUser
+                      Application.Internal.Authorization
+                      Shell.Auth.Session
+                      Application.UseCases.LogoutUser
+                      Shell.Infrastructure.PasswordHasher
+                      Application.UseCases.ChangePassword
+                      Application.UseCases.UpdateProfile
+                      Application.UseCases.SetAccountStatus
+                      Application.Internal.LifecycleTransition
+                      Application.UseCases.PublishTournament
+                      Application.UseCases.OpenRegistration
+                      Application.UseCases.CloseRegistration    
+                      Application.UseCases.StartTournament
+                      Application.UseCases.CancelTournament
+                      Application.UseCases.UpdateTournamentName
+                      Application.UseCases.UpdateTournamentMaxParticipants
+                      Application.UseCases.UpdateTournamentVisibility
+                      Application.UseCases.UpdateTournamentFormat
+                      Application.UseCases.GetOrganizerDashboard
+                      Domain.TournamentHistory
+                      Shell.Persistence.SQLite.TournamentHistoryRepository
+                      Application.UseCases.GetTournamentHistory
+
     hs-source-dirs:   .
     build-depends:    base
                     , sqlite-simple
                     , mtl
                     , text
                     , containers
+                    , argon2
+                    , entropy
+                    , directory
+                    , filepath
+                    , text-short
     default-language: Haskell2010
 
 executable arenaos
@@ -50,6 +82,7 @@ executable arenaos
     build-depends:    base
                     , arenaos
                     , mtl
+                    , text
     default-language: Haskell2010
 
 test-suite arenaos-test
@@ -62,4 +95,5 @@ test-suite arenaos-test
                     , sqlite-simple
                     , directory
                     , mtl
+                    , text
     default-language: Haskell2010

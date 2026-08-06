@@ -12,7 +12,7 @@ module Domain.Tournament
     , Tournament(..)
     ) where
 
-import Domain.Ids (TournamentId(..), BracketId(..))
+import Domain.Ids (TournamentId(..), BracketId(..),UserId(..))
 
 
 newtype TournamentName = TournamentName {unTournamentName :: String} deriving (Show, Eq)
@@ -44,4 +44,5 @@ data Tournament = Tournament
     , tournamentVisibility :: Visibility
     , tournamentMaxParticipants :: Int
     , tournamentBracket :: Maybe BracketId
+    , tournamentOwner :: UserId
     } deriving (Show, Eq)

@@ -63,6 +63,7 @@ statements =
     \  id                 INTEGER PRIMARY KEY, \
     \  name               TEXT NOT NULL, \
     \  organizer_name     TEXT NOT NULL, \
+    \  owner_id           INTEGER NOT NULL REFERENCES users(id), \
     \  format             TEXT NOT NULL CHECK (format IN \
     \                        ('SingleElimination', 'DoubleElimination', 'RoundRobin')), \
     \  state              TEXT NOT NULL CHECK (state IN \
@@ -128,6 +129,27 @@ statements =
     \  CHECK (competitor_a_participant_id <> competitor_b_participant_id) \
     \)"
     -- DI-06, DI-11.
+
+  , " CREATE TABLE IF NOT EXISTS users (\
+     \ id            INTEGER PRIMARY KEY AUTOINCREMENT,\
+     \ username      TEXT NOT NULL UNIQUE,\
+     \ email         TEXT NOT NULL UNIQUE,\
+     \ password_hash TEXT NOT NULL,\
+     \ account_status TEXT NOT NULL DEFAULT 'Active' CHECK (account_status IN ('Active', 'Suspended', 'Deactivated'))\
+      \)"
+
+  , "CREATE TABLE IF NOT EXISTS tournament_history (\
+    \id                  INTEGER PRIMARY KEY AUTOINCREMENT,\
+    \tournament_id       INTEGER NOT NULL REFERENCES tournaments(id),\
+    \event_type          TEXT NOT NULL,\
+    \cancellation_reason TEXT,\
+    \changed_field       TEXT,\
+    \CHECK (\
+    \(event_type != 'TournamentCancelled' OR cancellation_reason IS NOT NULL) AND\
+    \(event_type != 'ConfigurationChanged' OR changed_field IS NOT NULL) AND\
+    \(event_type NOT IN ('TournamentCancelled','ConfigurationChanged') OR TRUE))\   
+    \)"
+  
 
   , "CREATE INDEX IF NOT EXISTS idx_registrations_tournament ON registrations(tournament_id)"
   , "CREATE INDEX IF NOT EXISTS idx_matches_bracket          ON matches(bracket_id)"
