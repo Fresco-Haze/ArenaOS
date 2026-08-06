@@ -14,17 +14,19 @@ import Shell.Persistence.Port (NewTournament(..))
 -- Bringing SQLiteM's repository instances into scope (unused import list
 -- is fine -- instances aren't named, so they come in regardless).
 import Shell.Persistence.SQLite.ParticipantRepository ()
+import Shell.Persistence.SQLite.UserRepository ()
 import Shell.Persistence.SQLite.TournamentRepository ()
 import Shell.Persistence.SQLite.RegistrationRepository ()
 import Shell.Persistence.SQLite.BracketRepository ()
 import Shell.Persistence.SQLite.MatchRepository ()
 
-import Domain.Ids (TournamentId(..), BracketId(..))
+import Domain.Ids (TournamentId(..), BracketId(..),UserId(..))
 import Domain.Participant (Participant(..), Player(..), PlayerName(..))
 import Domain.Tournament
   ( TournamentName(..), OrganizerName(..), TournamentFormat(..)
   , Visibility(..)
   )
+import Domain.User (User(..), Username(..), Email(..), AccountStatus(..))
 import Domain.Match (Match(..), MatchId(..), MatchOutcome(..))
 
 import Application.UseCases.CreateTournament (createTournament)
@@ -58,18 +60,30 @@ main = do
 dispatch :: [String] -> SQLiteM ()
 dispatch args = case args of
 
-  ["create-tournament", name, organizer, maxStr] ->
-    case readMaybe maxStr :: Maybe Int of
-      Nothing -> liftIO $ putStrLn "maxParticipants must be an integer"
-      Just maxP -> do
-        tid <- createTournament NewTournament
-          { newTournamentName            = TournamentName name
-          , newTournamentOrganizer       = OrganizerName organizer
-          , newTournamentFormat          = SingleElimination
-          , newTournamentVisibility      = Public
-          , newTournamentMaxParticipants = maxP
-          }
-        liftIO $ putStrLn ("Created tournament " ++ show (unTournamentId tid))
+  ["create-tournament", uidStr, name, organizer, maxStr] ->
+   case (readMaybe uidStr :: Maybe Int, readMaybe maxStr :: Maybe Int) of
+    (Nothing, _) -> liftIO $ putStrLn "userId must be an integer"
+    (_, Nothing) -> liftIO $ putStrLn "maxParticipants must be an integer"
+    (Just uidInt, Just maxP) -> do
+      tid <- createTournament NewTournament
+        { newTournamentName            = TournamentName name
+        , newTournamentOrganizer       = OrganizerName organizer
+        , newTournamentOwner           = UserId uidInt
+        , newTournamentFormat          = SingleElimination
+        , newTournamentVisibility      = Public
+        , newTournamentMaxParticipants = maxP
+        }
+      liftIO $ putStrLn ("Created tournament " ++ show (unTournamentId tid))
+
+  ["register-user", username, email, password] -> do
+    outcome <- registerUser RegisterUserRequest
+      { registerUsername = Username (pack username)
+      , registerEmail    = Email (pack email)
+      , registerPassword = pack password
+      }
+    case outcome of
+      Left err   -> liftIO $ putStrLn ("Registration failed: " ++ show err)
+      Right user -> liftIO $ putStrLn ("Registered user " ++ show (unUserId (userId user)))
 
   ["register", tidStr, playerName] ->
     case readMaybe tidStr :: Maybe Int of
@@ -80,11 +94,12 @@ dispatch args = case args of
         _ <- registerParticipant (TournamentId tidInt) participant
         liftIO $ putStrLn (playerName ++ " registered into tournament " ++ show tidInt)
 
-  ["generate-bracket", tidStr] ->
-    case readMaybe tidStr :: Maybe Int of
-      Nothing -> liftIO $ putStrLn "tournamentId must be an integer"
-      Just tidInt -> do
-        outcome <- generateBracket (TournamentId tidInt)
+  ["generate-bracket", uidStr, tidStr] ->
+    case (readMaybe uidStr :: Maybe Int, readMaybe tidStr :: Maybe Int) of
+      (Nothing, _) -> liftIO $ putStrLn "userId must be an integer"
+      (_, Nothing) -> liftIO $ putStrLn "tournamentId must be an integer"
+      (Just uidInt, Just tidInt) -> do
+        outcome <- generateBracket (UserId uidInt) (TournamentId tidInt)
         case outcome of
           Left err        -> liftIO $ putStrLn ("Bracket generation failed: " ++ show err)
           Right bracketId -> liftIO $ putStrLn ("Bracket generated: " ++ show (unBracketId bracketId))
