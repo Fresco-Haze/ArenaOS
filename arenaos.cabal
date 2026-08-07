@@ -62,6 +62,9 @@ library
                       Domain.TournamentHistory
                       Shell.Persistence.SQLite.TournamentHistoryRepository
                       Application.UseCases.GetTournamentHistory
+                      Application.UseCases.CreateTeam
+                      Application.UseCases.RegisterCodParticipant
+                      Application.UseCases.RegisterPubgParticipant
 
     hs-source-dirs:   .
     build-depends:    base

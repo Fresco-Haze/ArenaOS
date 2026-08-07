@@ -27,7 +27,7 @@ import Shell.Persistence.SQLite.MatchRepository ()
 import Shell.Persistence.SQLite.UserRepository ()
 import Shell.Persistence.SQLite.TournamentHistoryRepository ()
 
-import Domain.Participant (Participant(..), Player(..), PlayerName(..))
+import Domain.Participant (Participant(..), Player(..), PlayerName(..), Team(..), TeamName(..), TeamCaptain(..))
 import Domain.Tournament
   ( TournamentName(..), OrganizerName(..), TournamentFormat(..)
   , Visibility(..), TournamentState(..), Tournament(..), TournamentId(..)
@@ -36,7 +36,7 @@ import Domain.Match (Match(..), MatchStatus(Scheduled), MatchOutcome(..))
 import Domain.User (Email(..), PasswordHash(..), Username(..))
 
 import Application.UseCases.CreateTournament (createTournament)
-import Application.UseCases.RegisterParticipant (registerParticipant)
+import Application.UseCases.RegisterParticipant (registerParticipant, RegisterParticipantError(..))
 import Application.UseCases.GenerateBracket (generateBracket, GenerateBracketError(..))
 import Application.UseCases.StartMatch (startMatch, StartMatchError(..))
 import Application.UseCases.RecordMatchResult (recordMatchResult, RecordMatchResultError(..))
@@ -70,6 +70,9 @@ import qualified Application.UseCases.UpdateTournamentName as UTN
 import qualified Application.UseCases.UpdateTournamentVisibility as UTV
 import qualified Application.UseCases.UpdateTournamentMaxParticipants as UTM
 import qualified Application.UseCases.UpdateTournamentFormat as UTF
+import Application.UseCases.CreateTeam (createTeam, CreateTeamError(..))
+import Application.UseCases.RegisterCodParticipant (registerCodParticipant, RegisterCodParticipantError(..))
+import Application.UseCases.RegisterPubgParticipant (registerPubgParticipant, RegisterPubgParticipantError(..))
 
 testDbPath :: FilePath
 testDbPath = "test/arenaos-test.db"
@@ -97,16 +100,27 @@ unwrap (Left e)  = liftIO $ do
   expectationFailure (show e)
   error "unreachable"
 
+-- Advances a freshly-created (Draft) tournament to RegistrationOpen.
+-- Needed before any registerParticipant call now that FR-TM-009's
+-- retrofit gates registration on TournamentState == RegistrationOpen.
+advanceToRegistrationOpen :: UserId -> TournamentId -> SQLiteM ()
+advanceToRegistrationOpen ownerId tid = do
+  _ <- unwrap =<< publishTournament ownerId tid
+  _ <- unwrap =<< openRegistration ownerId tid
+  pure ()
+
 -- Advances a freshly-created (Draft) tournament through Published ->
 -- RegistrationOpen -> RegistrationClosed. Needed by every existing
 -- v0.1/v0.2 test that calls generateBracket, now that FR-LIFE-004
 -- requires RegistrationClosed as a precondition -- those tests
 -- previously ran generateBracket straight off Draft, which is no
--- longer valid.
+-- longer valid. NOTE: as of the FR-TM-009 retrofit, any
+-- registerParticipant calls must happen strictly between
+-- advanceToRegistrationOpen and this function's closeRegistration
+-- step -- registration is no longer legal in Draft.
 advanceToRegistrationClosed :: UserId -> TournamentId -> SQLiteM ()
 advanceToRegistrationClosed ownerId tid = do
-  _ <- unwrap =<< publishTournament ownerId tid
-  _ <- unwrap =<< openRegistration ownerId tid
+  advanceToRegistrationOpen ownerId tid
   _ <- unwrap =<< closeRegistration ownerId tid
   pure ()
 
@@ -142,8 +156,9 @@ spec = before_ resetTestDb $ do
           Individual player -> Repo.savePlayer player
           Squad team         -> Repo.saveTeam team
 
-        forM_ participants (registerParticipant tid)
-        advanceToRegistrationClosed ownerId tid
+        advanceToRegistrationOpen ownerId tid
+        forM_ participants (\p -> unwrap =<< registerParticipant tid p)
+        _ <- unwrap =<< closeRegistration ownerId tid
 
         bracketId <- unwrap =<< generateBracket ownerId tid
 
@@ -194,8 +209,9 @@ spec = before_ resetTestDb $ do
           Individual player -> Repo.savePlayer player
           Squad team         -> Repo.saveTeam team
 
-        forM_ participants (registerParticipant tid)
-        advanceToRegistrationClosed ownerId tid
+        advanceToRegistrationOpen ownerId tid
+        forM_ participants (\p -> unwrap =<< registerParticipant tid p)
+        _ <- unwrap =<< closeRegistration ownerId tid
 
         bracketId <- unwrap =<< generateBracket ownerId tid
 
@@ -245,8 +261,9 @@ spec = before_ resetTestDb $ do
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
           Squad team         -> Repo.saveTeam team
-        forM_ participants (registerParticipant tid)
-        advanceToRegistrationClosed ownerId tid
+        advanceToRegistrationOpen ownerId tid
+        forM_ participants (\p -> unwrap =<< registerParticipant tid p)
+        _ <- unwrap =<< closeRegistration ownerId tid
         bracketId <- unwrap =<< generateBracket ownerId tid
         matches <- Repo.listMatchesForBracket bracketId
         let m = head matches
@@ -278,8 +295,9 @@ spec = before_ resetTestDb $ do
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
           Squad team         -> Repo.saveTeam team
-        forM_ participants (registerParticipant tid)
-        advanceToRegistrationClosed ownerId tid
+        advanceToRegistrationOpen ownerId tid
+        forM_ participants (\p -> unwrap =<< registerParticipant tid p)
+        _ <- unwrap =<< closeRegistration ownerId tid
         bracketId <- unwrap =<< generateBracket ownerId tid
         matches <- Repo.listMatchesForBracket bracketId
         let m = head matches
@@ -313,7 +331,8 @@ spec = before_ resetTestDb $ do
         case eve of
           Individual player -> Repo.savePlayer player
           Squad team         -> Repo.saveTeam team
-        forM_ participants (registerParticipant tid)
+        advanceToRegistrationOpen ownerId tid
+        forM_ participants (\p -> unwrap =<< registerParticipant tid p)
         otherTid <- createTournament NewTournament
           { newTournamentName            = TournamentName "Unrelated Tournament"
           , newTournamentOrganizer       = OrganizerName "Test Organizer"
@@ -322,8 +341,9 @@ spec = before_ resetTestDb $ do
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 2
           }
-        _ <- registerParticipant otherTid eve
-        advanceToRegistrationClosed ownerId tid
+        advanceToRegistrationOpen ownerId otherTid
+        _ <- unwrap =<< registerParticipant otherTid eve
+        _ <- unwrap =<< closeRegistration ownerId tid
         bracketId <- unwrap =<< generateBracket ownerId tid
         matches <- Repo.listMatchesForBracket bracketId
         let m = head matches
@@ -354,8 +374,9 @@ spec = before_ resetTestDb $ do
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
           Squad team         -> Repo.saveTeam team
-        forM_ participants (registerParticipant tid)
-        advanceToRegistrationClosed ownerId tid
+        advanceToRegistrationOpen ownerId tid
+        forM_ participants (\p -> unwrap =<< registerParticipant tid p)
+        _ <- unwrap =<< closeRegistration ownerId tid
         _ <- unwrap =<< generateBracket ownerId tid
 
         completeTournament ownerId tid
@@ -384,7 +405,8 @@ spec = before_ resetTestDb $ do
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
           Squad team         -> Repo.saveTeam team
-        forM_ participants (registerParticipant tid)
+        advanceToRegistrationOpen ownerId tid
+        forM_ participants (\p -> unwrap =<< registerParticipant tid p)
         -- Not advanced to RegistrationClosed on purpose: authorization
         -- runs before the state check (FR-LIFE-006 / the same ordering
         -- as v0.2), so an impostor is rejected regardless of state.
@@ -414,8 +436,9 @@ spec = before_ resetTestDb $ do
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
           Squad team         -> Repo.saveTeam team
-        forM_ participants (registerParticipant tid)
-        advanceToRegistrationClosed ownerId tid
+        advanceToRegistrationOpen ownerId tid
+        forM_ participants (\p -> unwrap =<< registerParticipant tid p)
+        _ <- unwrap =<< closeRegistration ownerId tid
         bracketId <- unwrap =<< generateBracket ownerId tid
         matches <- Repo.listMatchesForBracket bracketId
         let m = head matches
@@ -446,8 +469,9 @@ spec = before_ resetTestDb $ do
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
           Squad team         -> Repo.saveTeam team
-        forM_ participants (registerParticipant tid)
-        advanceToRegistrationClosed ownerId tid
+        advanceToRegistrationOpen ownerId tid
+        forM_ participants (\p -> unwrap =<< registerParticipant tid p)
+        _ <- unwrap =<< closeRegistration ownerId tid
         _ <- unwrap =<< generateBracket ownerId tid
 
         completeTournament impostorId tid
@@ -473,19 +497,18 @@ spec = before_ resetTestDb $ do
           }
         _ <- unwrap =<< publishTournament ownerId tid
         _ <- unwrap =<< openRegistration ownerId tid
-        _ <- unwrap =<< closeRegistration ownerId tid
 
         let alice = Individual (Player (PlayerName "Alice"))
             bob   = Individual (Player (PlayerName "Bob"))
         Repo.savePlayer (Player (PlayerName "Alice"))
         Repo.savePlayer (Player (PlayerName "Bob"))
-        -- Registration happens before CloseRegistration in the "real"
-        -- flow; done out of order here only because this test's focus
-        -- is the state machine, not registration timing -- acceptable
-        -- since FR-LIFE doesn't gate registerParticipant on state.
-        _ <- registerParticipant tid alice
-        _ <- registerParticipant tid bob
+        -- Registration must happen here, between RegistrationOpen and
+        -- CloseRegistration, now that FR-TM-009's retrofit gates
+        -- registerParticipant on TournamentState == RegistrationOpen.
+        _ <- unwrap =<< registerParticipant tid alice
+        _ <- unwrap =<< registerParticipant tid bob
 
+        _ <- unwrap =<< closeRegistration ownerId tid
         bracketId <- unwrap =<< generateBracket ownerId tid
         _ <- unwrap =<< startTournament ownerId tid
 
@@ -551,14 +574,15 @@ spec = before_ resetTestDb $ do
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
           Squad team         -> Repo.saveTeam team
-        forM_ participants (registerParticipant tid)
-        -- Deliberately still Draft -- no lifecycle advancement.
+        advanceToRegistrationOpen ownerId tid
+        forM_ participants (\p -> unwrap =<< registerParticipant tid p)
+        -- Deliberately still RegistrationOpen, not Closed.
         generateBracket ownerId tid
 
       case result of
         Left err     -> expectationFailure ("runSQLiteM failed: " ++ show err)
         Right inner  -> inner `shouldBe`
-          Left (GB.InvalidLifecycle (InvalidTransition Draft RegistrationClosed))
+          Left (GB.InvalidLifecycle (InvalidTransition RegistrationOpen RegistrationClosed))
 
     it "rejects StartTournament when no bracket has been generated" $ do
       result <- runSQLiteM testDbPath $ do
@@ -597,8 +621,9 @@ spec = before_ resetTestDb $ do
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
           Squad team         -> Repo.saveTeam team
-        forM_ participants (registerParticipant tid)
-        advanceToRegistrationClosed ownerId tid
+        advanceToRegistrationOpen ownerId tid
+        forM_ participants (\p -> unwrap =<< registerParticipant tid p)
+        _ <- unwrap =<< closeRegistration ownerId tid
         _ <- unwrap =<< generateBracket ownerId tid
         _ <- unwrap =<< startTournament ownerId tid
         Repo.getTournament tid
@@ -656,8 +681,9 @@ spec = before_ resetTestDb $ do
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
           Squad team         -> Repo.saveTeam team
-        forM_ participants (registerParticipant tidInProgress)
-        advanceToRegistrationClosed ownerId tidInProgress
+        advanceToRegistrationOpen ownerId tidInProgress
+        forM_ participants (\p -> unwrap =<< registerParticipant tidInProgress p)
+        _ <- unwrap =<< closeRegistration ownerId tidInProgress
         _ <- unwrap =<< generateBracket ownerId tidInProgress
         _ <- unwrap =<< startTournament ownerId tidInProgress
         _ <- unwrap =<< cancelTournament ownerId tidInProgress "no longer needed"
@@ -688,8 +714,9 @@ spec = before_ resetTestDb $ do
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
           Squad team         -> Repo.saveTeam team
-        forM_ participants (registerParticipant tid)
-        advanceToRegistrationClosed ownerId tid
+        advanceToRegistrationOpen ownerId tid
+        forM_ participants (\p -> unwrap =<< registerParticipant tid p)
+        _ <- unwrap =<< closeRegistration ownerId tid
         bracketId <- unwrap =<< generateBracket ownerId tid
         matches <- Repo.listMatchesForBracket bracketId
         let m = head matches
@@ -807,8 +834,9 @@ spec = before_ resetTestDb $ do
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
           Squad team         -> Repo.saveTeam team
-        forM_ participants (registerParticipant tid)
-        advanceToRegistrationClosed ownerId tid
+        advanceToRegistrationOpen ownerId tid
+        forM_ participants (\p -> unwrap =<< registerParticipant tid p)
+        _ <- unwrap =<< closeRegistration ownerId tid
         _ <- unwrap =<< generateBracket ownerId tid
         _ <- unwrap =<< startTournament ownerId tid
 
@@ -837,8 +865,9 @@ spec = before_ resetTestDb $ do
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
           Squad team         -> Repo.saveTeam team
-        forM_ participants (registerParticipant tid)
-        advanceToRegistrationClosed ownerId tid
+        advanceToRegistrationOpen ownerId tid
+        forM_ participants (\p -> unwrap =<< registerParticipant tid p)
+        _ <- unwrap =<< closeRegistration ownerId tid
         bracketId <- unwrap =<< generateBracket ownerId tid
         matches <- Repo.listMatchesForBracket bracketId
         let m = head matches
@@ -913,7 +942,8 @@ spec = before_ resetTestDb $ do
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
           Squad team         -> Repo.saveTeam team
-        forM_ participants (registerParticipant tid)
+        advanceToRegistrationOpen ownerId tid
+        forM_ participants (\p -> unwrap =<< registerParticipant tid p)
 
         updateTournamentMaxParticipants ownerId tid 2
 
@@ -939,7 +969,8 @@ spec = before_ resetTestDb $ do
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
           Squad team         -> Repo.saveTeam team
-        forM_ participants (registerParticipant tid)
+        advanceToRegistrationOpen ownerId tid
+        forM_ participants (\p -> unwrap =<< registerParticipant tid p)
         _ <- unwrap =<< updateTournamentMaxParticipants ownerId tid 2
         Repo.getTournament tid
 
@@ -998,3 +1029,280 @@ spec = before_ resetTestDb $ do
         Right inner  -> case inner of
           Left dashErr -> expectationFailure (show dashErr)
           Right dash   -> length (dashboardTournaments dash) `shouldBe` 1
+
+  describe "Team Creation (FR-TEAMOPS)" $ do
+
+    it "creates a team when the captain is included in the member list" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        let captain = Player (PlayerName "Alice")
+            bob     = Player (PlayerName "Bob")
+            team = Team
+              { teamName    = TeamName "Alpha Squad"
+              , teamCaptain = captain
+              , teamMembers = [captain, bob]
+              }
+        _ <- unwrap =<< createTeam team
+        Repo.getTeam (TeamName "Alpha Squad")
+
+      case result of
+        Left err       -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right gotTeam  -> do
+          teamName gotTeam `shouldBe` TeamName "Alpha Squad"
+          teamCaptain gotTeam `shouldBe` Player (PlayerName "Alice")
+          teamMembers gotTeam `shouldMatchList`
+            [Player (PlayerName "Alice"), Player (PlayerName "Bob")]
+
+    it "rejects team creation when the captain isn't in the member list" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        let captain = Player (PlayerName "Alice")
+            bob     = Player (PlayerName "Bob")
+            team = Team
+              { teamName    = TeamName "Beta Squad"
+              , teamCaptain = captain
+              , teamMembers = [bob]
+              }
+        createTeam team
+
+      case result of
+        Left err    -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right inner -> inner `shouldBe` Left CaptainNotInMembers
+
+    it "rejects creating a team with a name that already exists" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        let captain = Player (PlayerName "Alice")
+            team = Team
+              { teamName    = TeamName "Gamma Squad"
+              , teamCaptain = captain
+              , teamMembers = [captain]
+              }
+        _ <- unwrap =<< createTeam team
+        createTeam team  -- second call, same name
+
+      case result of
+        Left err    -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right inner -> inner `shouldBe` Left (TeamNameAlreadyExists (TeamName "Gamma Squad"))
+
+    it "allows a team whose only member is the captain" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        let captain = Player (PlayerName "Solo Captain")
+            team = Team
+              { teamName    = TeamName "Solo Squad"
+              , teamCaptain = captain
+              , teamMembers = [captain]
+              }
+        _ <- unwrap =<< createTeam team
+        Repo.getTeam (TeamName "Solo Squad")
+
+      case result of
+        Left err      -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right gotTeam -> teamMembers gotTeam `shouldBe` [Player (PlayerName "Solo Captain")]
+
+  describe "Registration Validation (FR-TM-009)" $ do
+
+    it "rejects registration when the tournament isn't RegistrationOpen" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "owner"
+        tid <- createTournament NewTournament
+          { newTournamentName            = TournamentName "Draft Registration Cup"
+          , newTournamentOrganizer       = OrganizerName "Test Organizer"
+          , newTournamentOwner           = ownerId
+          , newTournamentFormat          = SingleElimination
+          , newTournamentVisibility      = Public
+          , newTournamentMaxParticipants = 2
+          }
+        let alice = Individual (Player (PlayerName "Alice"))
+        Repo.savePlayer (Player (PlayerName "Alice"))
+        -- Deliberately still Draft -- no lifecycle advancement.
+        registerParticipant tid alice
+
+      case result of
+        Left err    -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right inner -> inner `shouldBe`
+          Left (RegistrationLifecycleError (InvalidTransition Draft RegistrationOpen))
+
+    it "rejects registration once MaxParticipants is reached" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "owner"
+        let alice = Individual (Player (PlayerName "Alice"))
+            bob   = Individual (Player (PlayerName "Bob"))
+            carol = Individual (Player (PlayerName "Carol"))
+        tid <- createTournament NewTournament
+          { newTournamentName            = TournamentName "Capacity Test Cup"
+          , newTournamentOrganizer       = OrganizerName "Test Organizer"
+          , newTournamentOwner           = ownerId
+          , newTournamentFormat          = SingleElimination
+          , newTournamentVisibility      = Public
+          , newTournamentMaxParticipants = 2
+          }
+        forM_ [alice, bob, carol] $ \p -> case p of
+          Individual player -> Repo.savePlayer player
+          Squad team         -> Repo.saveTeam team
+        advanceToRegistrationOpen ownerId tid
+        _ <- unwrap =<< registerParticipant tid alice
+        _ <- unwrap =<< registerParticipant tid bob
+        registerParticipant tid carol  -- third registration, max is 2
+
+      case result of
+        Left err    -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right inner -> inner `shouldBe` Left RegistrationCapacityReached
+   
+  describe "CoD Registration (FR-CODOPS)" $ do
+
+    it "rejects an Individual participant" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "owner"
+        tid <- createTournament NewTournament
+          { newTournamentName            = TournamentName "CoD Solo Rejection Cup"
+          , newTournamentOrganizer       = OrganizerName "Test Organizer"
+          , newTournamentOwner           = ownerId
+          , newTournamentFormat          = SingleElimination
+          , newTournamentVisibility      = Public
+          , newTournamentMaxParticipants = 2
+          }
+        advanceToRegistrationOpen ownerId tid
+        let alice = Individual (Player (PlayerName "Alice"))
+        Repo.savePlayer (Player (PlayerName "Alice"))
+        registerCodParticipant tid alice
+
+      case result of
+        Left err    -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right inner -> inner `shouldBe` Left CodRequiresTeam
+
+    it "accepts a Squad participant and delegates through the real registration pipeline" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "owner"
+        let captain = Player (PlayerName "Alice")
+            bob     = Player (PlayerName "Bob")
+            team = Team
+              { teamName    = TeamName "CoD Alpha Squad"
+              , teamCaptain = captain
+              , teamMembers = [captain, bob]
+              }
+        _ <- unwrap =<< createTeam team
+        tid <- createTournament NewTournament
+          { newTournamentName            = TournamentName "CoD Squad Accept Cup"
+          , newTournamentOrganizer       = OrganizerName "Test Organizer"
+          , newTournamentOwner           = ownerId
+          , newTournamentFormat          = SingleElimination
+          , newTournamentVisibility      = Public
+          , newTournamentMaxParticipants = 2
+          }
+        advanceToRegistrationOpen ownerId tid
+        _ <- unwrap =<< registerCodParticipant tid (Squad team)
+        Repo.listRegistrations tid
+
+      case result of
+        Left err            -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right registrations -> length registrations `shouldBe` 1
+
+    it "rejects a Squad participant when the tournament isn't RegistrationOpen, via the delegated pipeline" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "owner"
+        let captain = Player (PlayerName "Alice")
+            team = Team
+              { teamName    = TeamName "CoD Beta Squad"
+              , teamCaptain = captain
+              , teamMembers = [captain]
+              }
+        _ <- unwrap =<< createTeam team
+        tid <- createTournament NewTournament
+          { newTournamentName            = TournamentName "CoD Draft Rejection Cup"
+          , newTournamentOrganizer       = OrganizerName "Test Organizer"
+          , newTournamentOwner           = ownerId
+          , newTournamentFormat          = SingleElimination
+          , newTournamentVisibility      = Public
+          , newTournamentMaxParticipants = 2
+          }
+        -- Deliberately still Draft -- no lifecycle advancement.
+        registerCodParticipant tid (Squad team)
+
+      case result of
+        Left err    -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right inner -> inner `shouldBe`
+          Left (CodRegistrationError (RegistrationLifecycleError (InvalidTransition Draft RegistrationOpen)))
+  describe "PUBG Registration (FR-PUBGOPS)" $ do
+
+    it "rejects an Individual participant" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "owner"
+        tid <- createTournament NewTournament
+          { newTournamentName            = TournamentName "PUBG Solo Rejection Cup"
+          , newTournamentOrganizer       = OrganizerName "Test Organizer"
+          , newTournamentOwner           = ownerId
+          , newTournamentFormat          = SingleElimination
+          , newTournamentVisibility      = Public
+          , newTournamentMaxParticipants = 2
+          }
+        advanceToRegistrationOpen ownerId tid
+        let alice = Individual (Player (PlayerName "Alice"))
+        Repo.savePlayer (Player (PlayerName "Alice"))
+        registerPubgParticipant tid alice
+
+      case result of
+        Left err    -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right inner -> inner `shouldBe` Left PubgRequiresTeam
+
+    it "accepts a Squad participant and delegates through the real registration pipeline" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "owner"
+        let captain = Player (PlayerName "Alice")
+            bob     = Player (PlayerName "Bob")
+            team = Team
+              { teamName    = TeamName "PUBG Alpha Squad"
+              , teamCaptain = captain
+              , teamMembers = [captain, bob]
+              }
+        _ <- unwrap =<< createTeam team
+        tid <- createTournament NewTournament
+          { newTournamentName            = TournamentName "PUBG Squad Accept Cup"
+          , newTournamentOrganizer       = OrganizerName "Test Organizer"
+          , newTournamentOwner           = ownerId
+          , newTournamentFormat          = SingleElimination
+          , newTournamentVisibility      = Public
+          , newTournamentMaxParticipants = 2
+          }
+        advanceToRegistrationOpen ownerId tid
+        _ <- unwrap =<< registerPubgParticipant tid (Squad team)
+        Repo.listRegistrations tid
+
+      case result of
+        Left err            -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right registrations -> length registrations `shouldBe` 1
+
+    it "rejects a Squad participant when the tournament isn't RegistrationOpen, via the delegated pipeline" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "owner"
+        let captain = Player (PlayerName "Alice")
+            team = Team
+              { teamName    = TeamName "PUBG Beta Squad"
+              , teamCaptain = captain
+              , teamMembers = [captain]
+              }
+        _ <- unwrap =<< createTeam team
+        tid <- createTournament NewTournament
+          { newTournamentName            = TournamentName "PUBG Draft Rejection Cup"
+          , newTournamentOrganizer       = OrganizerName "Test Organizer"
+          , newTournamentOwner           = ownerId
+          , newTournamentFormat          = SingleElimination
+          , newTournamentVisibility      = Public
+          , newTournamentMaxParticipants = 2
+          }
+        -- Deliberately still Draft -- no lifecycle advancement.
+        registerPubgParticipant tid (Squad team)
+
+      case result of
+        Left err    -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right inner -> inner `shouldBe`
+          Left (PubgRegistrationError (RegistrationLifecycleError (InvalidTransition Draft RegistrationOpen)))

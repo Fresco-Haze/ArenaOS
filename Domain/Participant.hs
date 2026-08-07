@@ -10,11 +10,14 @@ module Domain.Participant
   , Player(..)
   , Team(..)
   , Participant(..)
+  , TeamCaptain(..)
   ) where
 
 newtype PlayerName = PlayerName  String deriving (Show, Eq)
 newtype TeamName = TeamName {unTeamName :: String}  deriving (Show, Eq)
 newtype ParticipantId = ParticipantId {unParticipantId :: Int} deriving (Show, Eq)  -- ADR-006
+newtype TeamCaptain = TeamCaptain {unTeamCaptain :: PlayerName} deriving (Show, Eq)
+
 
 data Player = Player { playerName :: PlayerName } deriving (Show, Eq)
 

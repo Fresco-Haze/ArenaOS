@@ -150,6 +150,14 @@ instance ParticipantRepository SQLiteM where
                   (StorageFailure
                     ("participants row for id " ++ show pid ++ " violates kind/player_id/team_id invariant"))
 
+    teamExists :: TeamName -> SQLiteM Bool
+    teamExists (TeamName tname) = do
+        conn <- asks envConnection
+        rows <- liftIO (query conn
+          "SELECT 1 FROM teams WHERE name = ? LIMIT 1"
+          (Only tname) :: IO [Only Int])
+        pure (not (null rows))
+
 
 -- Private helpers, not part of the port. The port speaks only in
 -- domain types (PlayerName, TeamName); these bridge to the surrogate

@@ -23,7 +23,7 @@ import Shell.Infrastructure.PasswordHasher ()
 import Shell.Persistence.SQLite.TournamentHistoryRepository ()
 
 import Domain.Ids (TournamentId(..), BracketId(..),UserId(..))
-import Domain.Participant (Participant(..), Player(..), PlayerName(..))
+import Domain.Participant (Participant(..), Player(..), PlayerName(..), Team(..), TeamName(..), TeamCaptain(..))
 import Domain.Tournament
   ( TournamentName(..), OrganizerName(..), TournamentFormat(..)
   , Visibility(..), TournamentState(..)
@@ -32,7 +32,7 @@ import Domain.User (User(..), Username(..), Email(..), AccountStatus(..))
 import Domain.Match (Match(..), MatchId(..), MatchOutcome(..))
 
 import Application.UseCases.CreateTournament (createTournament)
-import Application.UseCases.RegisterParticipant (registerParticipant)
+import Application.UseCases.RegisterParticipant (registerParticipant, RegisterParticipantError(..))
 import Application.UseCases.GenerateBracket (generateBracket)
 import Application.UseCases.StartMatch (startMatch)
 import Application.UseCases.RecordMatchResult (recordMatchResult)
@@ -54,8 +54,14 @@ import Application.UseCases.CancelTournament (cancelTournament)
 import Application.UseCases.UpdateTournamentName (updateTournamentName)
 import Application.UseCases.UpdateTournamentVisibility (updateTournamentVisibility)
 import Application.UseCases.UpdateTournamentFormat (updateTournamentFormat)
+import Application.UseCases.CreateTeam (createTeam)
 import Application.UseCases.UpdateTournamentMaxParticipants (updateTournamentMaxParticipants)
 import Application.UseCases.GetOrganizerDashboard (getOrganizerDashboard, GetOrganizerDashboardError(..), OrganizerDashboard(..), StateCounts(..))
+import Application.UseCases.RegisterCodParticipant (registerCodParticipant, RegisterCodParticipantError(..))
+import Application.UseCases.RegisterPubgParticipant
+  ( registerPubgParticipant
+  , RegisterPubgParticipantError(..)
+  )
 import Application.UseCases.GetOrganizerDashboard
     (getOrganizerDashboard, GetOrganizerDashboardError(..), OrganizerDashboard(..), StateCounts(..))
 import Application.UseCases.GetTournamentHistory
@@ -120,8 +126,10 @@ dispatch args = case args of
       Just tidInt -> do
         let participant = Individual (Player (PlayerName playerName))
         Repo.savePlayer (Player (PlayerName playerName))
-        _ <- registerParticipant (TournamentId tidInt) participant
-        liftIO $ putStrLn (playerName ++ " registered into tournament " ++ show tidInt)
+        outcome <- registerParticipant (TournamentId tidInt) participant
+        liftIO $ case outcome of
+          Left err -> putStrLn ("Registration failed: " ++ show err)
+          Right _  -> putStrLn (playerName ++ " registered into tournament " ++ show tidInt)
 
   ["generate-bracket", uidStr, tidStr] ->
     case (readMaybe uidStr :: Maybe Int, readMaybe tidStr :: Maybe Int) of
@@ -378,7 +386,112 @@ dispatch args = case args of
       describeField FieldVisibility       = "visibility"
       describeField FieldFormat           = "format"
       describeField FieldMaxParticipants  = "max participants"
-   
+
+  ("create-team":teamNameStr:captainNameStr:memberStrs) -> do
+    let team = Team
+          { teamName    = TeamName teamNameStr
+          , teamCaptain = Player (PlayerName captainNameStr)
+          , teamMembers = map (Player . PlayerName) memberStrs
+          }
+    outcome <- createTeam team
+    liftIO $ case outcome of
+      Left err -> putStrLn ("Failed to create team: " ++ show err)
+      Right () -> putStrLn "Team created successfully"
+
+  ("register-cod" : tidStr : teamNameStr : captainName : memberNames) ->
+    case readMaybe tidStr :: Maybe Int of
+      Nothing ->
+        liftIO $ putStrLn "tournamentId must be an integer"
+
+      Just tidInt ->
+        if null memberNames
+          then liftIO $ putStrLn
+            "CoD registration requires at least one team member."
+          else do
+            let captain = Player (PlayerName captainName)
+
+                members =
+                  captain : map (Player . PlayerName) memberNames
+
+                team = Team
+                  { teamName    = TeamName teamNameStr
+                  , teamCaptain = captain
+                  , teamMembers = members
+                  }
+
+            teamResult <- createTeam team
+
+            case teamResult of
+              Left err ->
+                liftIO $ putStrLn
+                  ("Team creation failed: " ++ show err)
+
+              Right () -> do
+                outcome <- registerCodParticipant
+                  (TournamentId tidInt)
+                  (Squad team)
+
+                liftIO $ case outcome of
+                  Left err ->
+                    putStrLn
+                      ("CoD registration failed: " ++ show err)
+
+                  Right registrationId ->
+                    putStrLn
+                      ( "CoD team '" ++ teamNameStr
+                      ++ "' registered into tournament "
+                      ++ show tidInt
+                      ++ " with registration "
+                      ++ show registrationId
+                      )
+
+  ("register-pubg" : tidStr : teamNameStr : captainName : memberNames) ->
+    case readMaybe tidStr :: Maybe Int of
+      Nothing ->
+        liftIO $ putStrLn "tournamentId must be an integer"
+
+      Just tidInt ->
+        if null memberNames
+          then liftIO $ putStrLn
+            "PUBG registration requires at least one team member."
+          else do
+            let captain = Player (PlayerName captainName)
+
+                members =
+                  captain : map (Player . PlayerName) memberNames
+
+                team = Team
+                  { teamName    = TeamName teamNameStr
+                  , teamCaptain = captain
+                  , teamMembers = members
+                  }
+
+            teamResult <- createTeam team
+
+            case teamResult of
+              Left err ->
+                liftIO $ putStrLn
+                  ("Team creation failed: " ++ show err)
+
+              Right () -> do
+                outcome <- registerPubgParticipant
+                  (TournamentId tidInt)
+                  (Squad team)
+
+                liftIO $ case outcome of
+                  Left err ->
+                    putStrLn
+                      ("PUBG registration failed: " ++ show err)
+
+                  Right registrationId ->
+                    putStrLn
+                      ( "PUBG team '" ++ teamNameStr
+                      ++ "' registered into tournament "
+                      ++ show tidInt
+                      ++ " with registration "
+                      ++ show registrationId
+                      )
+
   _ -> liftIO $ putStrLn usage
 
   
@@ -412,6 +525,9 @@ usage = unlines
   , "  update-tournament-max-participants <userId> <tournamentId> <maxParticipants>"
   , "  dashboard"
   , "  history <userId> <tournamentId>"
+  , "  create-team <teamName> <captainName> [member1 member2 ...]"
+  , "  register-cod <tournamentId> <teamName> <captainName> [member1 member2 ...]"
+  , "  register-pubg <tournamentId> <teamName> <captainName> [member1 member2 ...]"
   ]
 
 parseStatus :: String -> Maybe AccountStatus

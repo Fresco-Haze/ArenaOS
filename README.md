@@ -4,51 +4,62 @@
 
 A game-agnostic tournament management platform, built in pure Haskell.
 
-ArenaOS handles the backend logic for running tournament brackets — creating
-a tournament, registering participants, generating the bracket, and
-automatically advancing winners through each round as match results come in.
+ArenaOS handles the backend logic for running tournament brackets — creating a tournament, registering participants, generating the bracket, and automatically advancing winners through each round as match results come in — with full accounts, ownership, lifecycle management, and an audit trail of everything that happens to a tournament.
 
-## Status: v0.1
+**Status: v0.4**
 
-v0.1 proves the core engine works end-to-end, driven through a CLI:
+Four milestones in, driven entirely through a CLI:
 
-- Create a tournament
-- Register participants
-- Generate a single-elimination bracket
-- Play through matches (start → record result)
-- Automatic advancement of winners through each round, including bye
-  handling for uneven participant counts
+## v0.1 — Core Engine
+
+- Create a tournament, register participants, generate a single-elimination bracket
+- Play through matches (start → record result), with automatic advancement of winners through each round, including bye handling for uneven participant counts
 - Complete the tournament once a champion is determined
 
-This version deliberately excludes accounts and authentication — the goal
-was to get the engine itself right first. Accounts/auth are planned for
-v0.2.
+## v0.2 — Accounts, Authentication & Ownership
+
+- User registration, login/logout, password management
+- Every tournament has an owner; every mutating action is authorized against that ownership (`requireTournamentOwner`)
+- File-based CLI sessions (`login` persists a session; commands can act as the logged-in user)
+- Organizers can list their own tournaments
+
+## v0.3 — Lifecycle, Editing, Dashboard & History
+
+- A real tournament lifecycle: `Draft → Published → RegistrationOpen → RegistrationClosed → InProgress → Completed`, with cancellation permitted from any non-terminal state. Every transition is its own authorized, validated use case — no more implicit or skippable states.
+- Tournament editing (name, visibility, format, max participants) with lifecycle-aware guards — editable up through registration closing, locked once a tournament starts
+- A session-driven Organizer Dashboard — tournament counts by lifecycle state, at a glance, for the logged-in user
+- A full tournament history — every meaningful lifecycle transition, configuration change, and cancellation (with reason) is recorded as an append-only, ownership-protected audit trail
+
+## v0.4 — Teams, Call of Duty & PUBG Registration
+
+- **Team-based registration**, alongside individual players. A `Participant` is either an `Individual` player or a `Squad` (team) — the existing registration pipeline already supported this polymorphically; v0.4 added the missing `createTeam` use case (captain must be a team member, team names must be unique) to actually exercise it.
+- A retrofit to `registerParticipant` itself: registration now correctly enforces tournament state (`RegistrationOpen` only) and capacity limits, closing a gap between the original requirement and its implementation.
+- **Two concrete team-based games**, built as independent, deliberately non-abstracted consumers of team registration: **Call of Duty** and **PUBG**. Each rejects individual registrants and delegates team registrants through the standard pipeline, inheriting its state and capacity rules for free.
+- No persisted "game" concept, roster-size modeling, or scoring logic was introduced for either game — real competitive rules for both were researched directly, and neither justified more than a team-only registration gate at this stage. That's a deliberate choice: v0.4 is concrete, hardcoded, and intentionally *not* a general game-configuration framework. A future milestone (v0.5) will use what these two real implementations reveal to design that abstraction properly, rather than guessing at it upfront.
+
+v0.4 remains CLI-only, same as prior milestones. A frontend is planned but deferred to a future HTTP/web phase — the goal has been to get the domain model and business rules right first, not build a UI on top of a shifting foundation.
 
 ## Architecture
 
-A layered design, separating pure domain logic from persistence and
-orchestration:
+A layered design, separating pure domain logic from persistence and orchestration:
 
-- **Domain** — core types (Tournament, Match, Bracket, Participant) with no
-  dependency on storage or IO
-- **Engine** — pure bracket logic: validation, bracket generation, seeding,
-  bye resolution, advancement, materialization
-- **Application** — use cases that orchestrate the engine against
-  persistence (CreateTournament, RegisterParticipant, GenerateBracket,
-  StartMatch, RecordMatchResult, CompleteTournament)
-- **Shell** — SQLite persistence layer
-- **CLI** — a thin command dispatcher over the use cases
+- **Domain** — core types (Tournament, Match, Bracket, Participant, Team, User, TournamentHistory) with no dependency on storage or IO
+- **Engine** — pure bracket logic: validation, bracket generation, seeding, bye resolution, advancement, materialization
+- **Application** — use cases that orchestrate the engine and domain rules against persistence (tournament lifecycle transitions, editing, dashboard, history, accounts, matches, team creation, game-specific registration)
+- **Shell** — SQLite persistence layer, plus file-based CLI sessions
+- **CLI** — a thin command dispatcher over the use cases; all business logic lives below this layer, not in it
+
+Two cross-cutting rules hold throughout: every mutating use case checks ownership before doing anything else (`Application.Internal.Authorization`), and every lifecycle-sensitive use case validates tournament state before mutating (`Application.Internal.LifecycleTransition`). Persistence favors narrow, single-purpose update methods over whole-record saves wherever a use case only ever needs to change one thing.
 
 ## Testing
 
-An integration test suite (hspec) covers:
+An hspec integration suite covers the full stack — golden-path lifecycles, bye-path bracket generation, error paths (wrong state, non-owner, invalid transitions), the full v0.3 lifecycle/editing/history state machine, team creation, and CoD/PUBG registration (individual rejection, successful team registration, rejection outside the registration window).
 
-- The full golden-path lifecycle (4 participants, straight through to a
-  completed tournament)
-- A bye-path scenario (3 participants, exercising bye resolution)
-- Error paths — rejecting an already-started match, a result recorded
-  before a match starts, a winner who isn't a competitor in the match, and
-  completing a tournament with matches still pending
+Run the suite:
+
+```
+cabal test
+```
 
 ## Usage
 
@@ -58,35 +69,38 @@ Build:
 cabal build
 ```
 
-Run the CLI:
+Run a command:
 
 ```
-cabal run arenaos -- create-tournament "My Cup" "Organizer Name" 4
-cabal run arenaos -- register 1 Alice
-cabal run arenaos -- register 1 Bob
-cabal run arenaos -- register 1 Carol
-cabal run arenaos -- register 1 Dave
-cabal run arenaos -- generate-bracket 1
-cabal run arenaos -- list-matches 1
-cabal run arenaos -- start-match 1
-cabal run arenaos -- record-result 1 A
-cabal run arenaos -- complete-tournament 1
+cabal run arenaos -- <command> [arguments]
 ```
 
-Full command reference:
+Most commands are actor-first, taking `<userId>` as the first argument. Session-driven commands, like `dashboard`, act on whoever is currently logged in instead.
 
 ```
-create-tournament <name> <organizer> <maxParticipants>
+register-user <username> <email> <password>
+login <username> <password>
+logout
+
+create-tournament <userId> <name> <organizer> <maxParticipants>
+publish-tournament <userId> <tournamentId>
+open-registration <userId> <tournamentId>
+close-registration <userId> <tournamentId>
+generate-bracket <userId> <tournamentId>
+start-tournament <userId> <tournamentId>
+cancel-tournament <userId> <tournamentId> <reason>
+complete-tournament <userId> <tournamentId>
+
+update-tournament-name <userId> <tournamentId> <name>
+update-tournament-visibility <userId> <tournamentId> <visibility>
+update-tournament-format <userId> <tournamentId> <format>
+update-tournament-max-participants <userId> <tournamentId> <n>
+
 register <tournamentId> <playerName>
-generate-bracket <tournamentId>
-list-matches <bracketId>
-start-match <matchId>
-record-result <matchId> <A|B>
-complete-tournament <tournamentId>
-```
+create-team <teamName> <captainName> [member1 member2 ...]
+register-cod <tournamentId> <teamName> <captainName> [member1 member2 ...]
+register-pubg <tournamentId> <teamName> <captainName> [member1 member2 ...]
 
-Run tests:
-
-```
-cabal test
+dashboard
+history <userId> <tournamentId>
 ```
