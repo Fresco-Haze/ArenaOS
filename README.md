@@ -6,9 +6,9 @@ A game-agnostic tournament management platform, built in pure Haskell.
 
 ArenaOS handles the backend logic for running tournament brackets — creating a tournament, registering participants, generating the bracket, and automatically advancing winners through each round as match results come in — with full accounts, ownership, lifecycle management, and an audit trail of everything that happens to a tournament.
 
-**Status: v0.4**
+**Status: v0.5**
 
-Four milestones in, driven entirely through a CLI:
+Five milestones in, driven entirely through a CLI:
 
 ## v0.1 — Core Engine
 
@@ -38,6 +38,14 @@ Four milestones in, driven entirely through a CLI:
 - No persisted "game" concept, roster-size modeling, or scoring logic was introduced for either game — real competitive rules for both were researched directly, and neither justified more than a team-only registration gate at this stage. That's a deliberate choice: v0.4 is concrete, hardcoded, and intentionally *not* a general game-configuration framework. A future milestone (v0.5) will use what these two real implementations reveal to design that abstraction properly, rather than guessing at it upfront.
 
 v0.4 remains CLI-only, same as prior milestones. A frontend is planned but deferred to a future HTTP/web phase — the goal has been to get the domain model and business rules right first, not build a UI on top of a shifting foundation.
+
+## v0.5 — Registration Abstraction & Architecture Investigation
+
+- **`registerTeamOnly`**, a single reusable application-layer combinator (reject an individual, delegate a team through the standard registration pipeline, wrap its error) extracted after CoD and PUBG's registration use cases were compared and found alpha-equivalent — two independent implementations converging on the identical shape, not a resemblance assumed from two similar-looking files. `registerCodParticipant` and `registerPubgParticipant` now delegate to it as thin, pure translation adapters, preserving their own outward error vocabulary while the actual invariant lives once.
+- **No other v0.4/v0.5 duplication was collapsed** on sight. CoD's `CodRequiresTeam` and PUBG's `PubgRequiresTeam` looked identical from the start; only once both implementations and both test suites were checked for actual behavioral or semantic divergence — and found to have none — was the shared combinator extracted.
+- **An architecture investigation into Match/bracket support**, comparing what ArenaOS's current `Match`, `MatchOutcome`, and bracket-generation engine actually assume against what real competitive PUBG requires. This surfaced two independent findings, deliberately not merged into one: ArenaOS's bracket engine is pairwise by construction (from `Match`'s two competitor slots down through bracket topology, seeding, and advancement) versus PUBG's N-team matches; and `MatchOutcome` represents a single categorical result versus PUBG's per-team ranked, points-based result. Neither was implemented. Both a real single-elimination-only implementation gap (`DoubleElimination` and `RoundRobin` are declared `TournamentFormat` values with no corresponding engine behavior — confirmed pre-existing, unrelated to PUBG) and the PUBG-shaped tensions themselves were documented rather than acted on, since none of them are yet justified by repeated demand inside ArenaOS itself — only `registerTeamOnly` had that evidence.
+
+v0.5 intentionally shipped one small, well-earned abstraction rather than a general game-configuration framework speculatively built from a single external domain's rules. The Match/bracket findings remain on record for a future milestone, if and when ArenaOS's own requirements — not PUBG's — call for them.
 
 ## Architecture
 

@@ -3,12 +3,14 @@ module Application.UseCases.RegisterCodParticipant
   , RegisterCodParticipantError(..)
   ) where
 
-import Domain.Participant (Participant(..))
+import Domain.Participant (Participant)
 import Domain.Tournament (TournamentId)
-import Shell.Persistence.Port
-  ( TournamentRepository, ParticipantRepository, RegistrationRepository, RegistrationId )
-import Application.UseCases.RegisterParticipant
-  ( registerParticipant, RegisterParticipantError )
+
+import Shell.Persistence.Port ( TournamentRepository , ParticipantRepository , RegistrationRepository, RegistrationId )
+
+import Application.UseCases.RegisterParticipant( RegisterParticipantError )
+
+import Application.UseCases.RegisterTeamOnly( registerTeamOnly, RegisterTeamOnlyError(..))
 
 data RegisterCodParticipantError
   = CodRequiresTeam
@@ -21,7 +23,8 @@ registerCodParticipant
   -> Participant
   -> m (Either RegisterCodParticipantError RegistrationId)
 registerCodParticipant tournamentId participant =
-  case participant of
-    Individual _ -> pure (Left CodRequiresTeam)
-    Squad _      -> either (Left . CodRegistrationError) Right
-                      <$> registerParticipant tournamentId participant
+  either (Left . translate) Right
+    <$> registerTeamOnly tournamentId participant
+  where
+    translate RequiresTeam          = CodRequiresTeam
+    translate (RegistrationError e) = CodRegistrationError e

@@ -73,6 +73,7 @@ import qualified Application.UseCases.UpdateTournamentFormat as UTF
 import Application.UseCases.CreateTeam (createTeam, CreateTeamError(..))
 import Application.UseCases.RegisterCodParticipant (registerCodParticipant, RegisterCodParticipantError(..))
 import Application.UseCases.RegisterPubgParticipant (registerPubgParticipant, RegisterPubgParticipantError(..))
+import Application.UseCases.RegisterTeamOnly (registerTeamOnly, RegisterTeamOnlyError(..))
 
 testDbPath :: FilePath
 testDbPath = "test/arenaos-test.db"
@@ -1306,3 +1307,101 @@ spec = before_ resetTestDb $ do
         Left err    -> expectationFailure ("runSQLiteM failed: " ++ show err)
         Right inner -> inner `shouldBe`
           Left (PubgRegistrationError (RegistrationLifecycleError (InvalidTransition Draft RegistrationOpen)))
+
+  describe "Team-Only Registration (REG-AB-001)" $ do
+
+    it "rejects an Individual participant" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "owner"
+        tid <- createTournament NewTournament
+          { newTournamentName            = TournamentName "Team Only Solo Rejection Cup"
+          , newTournamentOrganizer       = OrganizerName "Test Organizer"
+          , newTournamentOwner           = ownerId
+          , newTournamentFormat          = SingleElimination
+          , newTournamentVisibility      = Public
+          , newTournamentMaxParticipants = 2
+          }
+
+        advanceToRegistrationOpen ownerId tid
+
+        let alice = Individual (Player (PlayerName "Alice"))
+
+        Repo.savePlayer (Player (PlayerName "Alice"))
+        registerTeamOnly tid alice
+
+      case result of
+        Left err    -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right inner -> inner `shouldBe` Left RequiresTeam
+
+
+    it "accepts a Squad participant and delegates through the real registration pipeline" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "owner"
+
+        let captain = Player (PlayerName "Alice")
+            bob     = Player (PlayerName "Bob")
+
+            team = Team
+              { teamName    = TeamName "Team Only Alpha Squad"
+              , teamCaptain = captain
+              , teamMembers = [captain, bob]
+              }
+
+        _ <- unwrap =<< createTeam team
+
+        tid <- createTournament NewTournament
+          { newTournamentName            = TournamentName "Team Only Squad Accept Cup"
+          , newTournamentOrganizer       = OrganizerName "Test Organizer"
+          , newTournamentOwner           = ownerId
+          , newTournamentFormat          = SingleElimination
+          , newTournamentVisibility      = Public
+          , newTournamentMaxParticipants = 2
+          }
+
+        advanceToRegistrationOpen ownerId tid
+
+        _ <- unwrap =<< registerTeamOnly tid (Squad team)
+
+        Repo.listRegistrations tid
+
+      case result of
+        Left err            -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right registrations -> length registrations `shouldBe` 1
+
+
+    it "rejects a Squad participant when the tournament isn't RegistrationOpen, via the delegated pipeline" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "owner"
+
+        let captain = Player (PlayerName "Alice")
+
+            team = Team
+              { teamName    = TeamName "Team Only Beta Squad"
+              , teamCaptain = captain
+              , teamMembers = [captain]
+              }
+
+        _ <- unwrap =<< createTeam team
+
+        tid <- createTournament NewTournament
+          { newTournamentName            = TournamentName "Team Only Draft Rejection Cup"
+          , newTournamentOrganizer       = OrganizerName "Test Organizer"
+          , newTournamentOwner           = ownerId
+          , newTournamentFormat          = SingleElimination
+          , newTournamentVisibility      = Public
+          , newTournamentMaxParticipants = 2
+          }
+
+        -- Deliberately still Draft. No lifecycle advancement.
+        registerTeamOnly tid (Squad team)
+
+      case result of
+        Left err    -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right inner -> inner `shouldBe`
+          Left
+            (RegistrationError
+              (RegistrationLifecycleError
+                (InvalidTransition Draft RegistrationOpen)))

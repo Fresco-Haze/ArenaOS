@@ -65,6 +65,7 @@ library
                       Application.UseCases.CreateTeam
                       Application.UseCases.RegisterCodParticipant
                       Application.UseCases.RegisterPubgParticipant
+                      Application.UseCases.RegisterTeamOnly
 
     hs-source-dirs:   .
     build-depends:    base
