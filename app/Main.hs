@@ -340,22 +340,6 @@ dispatch args = case args of
         putStrLn "--- Tournaments ---"
         mapM_ print (dashboardTournaments dash)
 
-  ["dashboard"] -> do
-    outcome <- getOrganizerDashboard
-    liftIO $ case outcome of
-      Left err   -> putStrLn ("Dashboard failed: " ++ show err)
-      Right dash -> do
-        putStrLn "=== Organizer Dashboard ==="
-        let c = dashboardCounts dash
-        putStrLn ("Draft: " ++ show (countDraft c))
-        putStrLn ("Published: " ++ show (countPublished c))
-        putStrLn ("RegistrationOpen: " ++ show (countRegistrationOpen c))
-        putStrLn ("RegistrationClosed: " ++ show (countRegistrationClosed c))
-        putStrLn ("InProgress: " ++ show (countInProgress c))
-        putStrLn ("Completed: " ++ show (countCompleted c))
-        putStrLn ("Cancelled: " ++ show (countCancelled c))
-        putStrLn "--- Tournaments ---"
-        mapM_ print (dashboardTournaments dash)
 
   ["history", uidStr, tidStr] ->
     case (readMaybe uidStr :: Maybe Int, readMaybe tidStr :: Maybe Int) of
