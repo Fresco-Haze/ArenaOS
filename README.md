@@ -121,7 +121,7 @@ register-pubg <tournamentId> <teamName> <captainName> [member1 member2 ...]
 
 dashboard
 history <userId> <tournamentId>
-```
+
 
 grant-role <actorId> <userId> <role>
 revoke-role <actorId> <userId> <role>
@@ -129,3 +129,4 @@ list-roles <userId>
 admin-dashboard <actorId>
 set-account-status <actorId> <userId> <status>
 audit-log <userId>
+'''
