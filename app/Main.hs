@@ -21,6 +21,7 @@ import Shell.Persistence.SQLite.BracketRepository ()
 import Shell.Persistence.SQLite.MatchRepository ()
 import Shell.Infrastructure.PasswordHasher ()
 import Shell.Persistence.SQLite.TournamentHistoryRepository ()
+import Shell.Persistence.SQLite.AuditLogRepository ()
 
 import Domain.Ids (TournamentId(..), BracketId(..),UserId(..))
 import Domain.Participant (Participant(..), Player(..), PlayerName(..), Team(..), TeamName(..), TeamCaptain(..))
@@ -31,6 +32,10 @@ import Domain.Tournament
 import Domain.User (User(..), Username(..), Email(..), AccountStatus(..))
 import Domain.Match (Match(..), MatchId(..), MatchOutcome(..))
 
+import Domain.Role (Role(..))
+import Shell.Persistence.SQLite.RoleRepository ()
+import Application.UseCases.GrantRole (grantRole, GrantRoleError(..))
+import Application.UseCases.RevokeRole (revokeRole, RevokeRoleError(..))
 import Application.UseCases.CreateTournament (createTournament)
 import Application.UseCases.RegisterParticipant (registerParticipant, RegisterParticipantError(..))
 import Application.UseCases.GenerateBracket (generateBracket)
@@ -56,18 +61,24 @@ import Application.UseCases.UpdateTournamentVisibility (updateTournamentVisibili
 import Application.UseCases.UpdateTournamentFormat (updateTournamentFormat)
 import Application.UseCases.CreateTeam (createTeam)
 import Application.UseCases.UpdateTournamentMaxParticipants (updateTournamentMaxParticipants)
-import Application.UseCases.GetOrganizerDashboard (getOrganizerDashboard, GetOrganizerDashboardError(..), OrganizerDashboard(..), StateCounts(..))
+import Application.UseCases.GetOrganizerDashboard (getOrganizerDashboard, GetOrganizerDashboardError(..))
 import Application.UseCases.RegisterCodParticipant (registerCodParticipant, RegisterCodParticipantError(..))
 import Application.UseCases.RegisterPubgParticipant
   ( registerPubgParticipant
   , RegisterPubgParticipantError(..)
   )
 import Application.UseCases.GetOrganizerDashboard
-    (getOrganizerDashboard, GetOrganizerDashboardError(..), OrganizerDashboard(..), StateCounts(..))
+    (getOrganizerDashboard, GetOrganizerDashboardError(..))
 import Application.UseCases.GetTournamentHistory
     (getTournamentHistory, GetTournamentHistoryError(..))
 import Domain.TournamentHistory
     (TournamentHistoryEntry(..), TournamentHistoryEvent(..), ChangedField(..))
+
+import Application.UseCases.GetAdministratorDashboard
+  (getAdministratorDashboard, GetAdministratorDashboardError(..))
+import Application.Internal.TournamentOverview (TournamentOverview(..), StateCounts(..))
+
+
 
 dbPath :: FilePath
 dbPath = "arenaos-dev.db"
@@ -199,6 +210,15 @@ dispatch args = case args of
           [] -> putStrLn "You don't own any tournaments."
           _  -> mapM_ print tournaments
 
+  ["list-roles", uidStr] ->
+    case readMaybe uidStr :: Maybe Int of
+      Nothing -> liftIO $ putStrLn "userId must be an integer"
+      Just uidInt -> do
+        roles <- Repo.getRoles (UserId uidInt)
+        liftIO $ case roles of
+          [] -> putStrLn "No roles assigned."
+          _  -> mapM_ print roles
+
   ["change-password", uidStr, currentPassword, newPassword] ->
     case readMaybe uidStr :: Maybe Int of
     Nothing -> liftIO $ putStrLn "userId must be an integer"
@@ -236,14 +256,16 @@ dispatch args = case args of
           Left err -> liftIO $ putStrLn ("Update profile failed: " ++ show err)
           Right () -> liftIO $ putStrLn "Profile updated."
 
-  ["set-account-status", uidStr, statusStr] ->
-    case (readMaybe uidStr :: Maybe Int, parseStatus statusStr) of
-      (Nothing, _) -> liftIO $ putStrLn "userId must be an integer"
-      (_, Nothing) -> liftIO $ putStrLn "status must be one of: Active, Suspended, Deactivated"
-      (Just uidInt, Just status) -> do
+  ["set-account-status", actorIdStr, uidStr, statusStr] ->
+    case (readMaybe actorIdStr :: Maybe Int, readMaybe uidStr :: Maybe Int, parseStatus statusStr) of
+      (Nothing, _, _) -> liftIO $ putStrLn "actorId must be an integer"
+      (_, Nothing, _) -> liftIO $ putStrLn "userId must be an integer"
+      (_, _, Nothing) -> liftIO $ putStrLn "status must be one of: Active, Suspended, Deactivated"
+      (Just actorInt, Just uidInt, Just status) -> do
         outcome <- setAccountStatus SetAccountStatusRequest
-          { statusUserId = UserId uidInt
-          , statusNew    = status
+          { statusActorId = UserId actorInt
+          , statusUserId  = UserId uidInt
+          , statusNew     = status
           }
         case outcome of
           Left err -> liftIO $ putStrLn ("Set status failed: " ++ show err)
@@ -329,7 +351,7 @@ dispatch args = case args of
       Left err   -> putStrLn ("Dashboard failed: " ++ show err)
       Right dash -> do
         putStrLn "=== Organizer Dashboard ==="
-        let c = dashboardCounts dash
+        let c = overviewCounts dash
         putStrLn ("Draft: " ++ show (countDraft c))
         putStrLn ("Published: " ++ show (countPublished c))
         putStrLn ("RegistrationOpen: " ++ show (countRegistrationOpen c))
@@ -338,8 +360,7 @@ dispatch args = case args of
         putStrLn ("Completed: " ++ show (countCompleted c))
         putStrLn ("Cancelled: " ++ show (countCancelled c))
         putStrLn "--- Tournaments ---"
-        mapM_ print (dashboardTournaments dash)
-
+        mapM_ print (overviewTournaments dash)
 
   ["history", uidStr, tidStr] ->
     case (readMaybe uidStr :: Maybe Int, readMaybe tidStr :: Maybe Int) of
@@ -475,6 +496,55 @@ dispatch args = case args of
                       ++ " with registration "
                       ++ show registrationId
                       )
+  
+  ["grant-role", actorIdStr, uidStr, roleStr] ->
+    case (readMaybe actorIdStr :: Maybe Int, readMaybe uidStr :: Maybe Int, parseRole roleStr) of
+      (Nothing, _, _) -> liftIO $ putStrLn "actorId must be an integer"
+      (_, Nothing, _) -> liftIO $ putStrLn "userId must be an integer"
+      (_, _, Nothing) -> liftIO $ putStrLn "role must be one of: Administrator"
+      (Just actorInt, Just uidInt, Just role) -> do
+        outcome <- grantRole (UserId actorInt) (UserId uidInt) role
+        liftIO $ either (putStrLn . ("Grant failed: " ++) . show) (const (putStrLn "Role granted.")) outcome
+
+  ["revoke-role", actorIdStr, uidStr, roleStr] ->
+    case (readMaybe actorIdStr :: Maybe Int, readMaybe uidStr :: Maybe Int, parseRole roleStr) of
+      (Nothing, _, _) -> liftIO $ putStrLn "actorId must be an integer"
+      (_, Nothing, _) -> liftIO $ putStrLn "userId must be an integer"
+      (_, _, Nothing) -> liftIO $ putStrLn "role must be one of: Administrator"
+      (Just actorInt, Just uidInt, Just role) -> do
+        outcome <- revokeRole (UserId actorInt) (UserId uidInt) role
+        liftIO $ either (putStrLn . ("Revoke failed: " ++) . show) (const (putStrLn "Role revoked.")) outcome
+
+  ["admin-dashboard", actorIdStr] ->
+    case readMaybe actorIdStr :: Maybe Int of
+      Nothing -> liftIO $ putStrLn "actorId must be an integer"
+      Just actorInt -> do
+        outcome <- getAdministratorDashboard (UserId actorInt)
+        liftIO $ case outcome of
+          Left err   -> putStrLn ("Admin dashboard failed: " ++ show err)
+          Right dash -> do
+            putStrLn "=== Administrator Dashboard (all tournaments) ==="
+            let c = overviewCounts dash
+            putStrLn ("Draft: " ++ show (countDraft c))
+            putStrLn ("Published: " ++ show (countPublished c))
+            putStrLn ("RegistrationOpen: " ++ show (countRegistrationOpen c))
+            putStrLn ("RegistrationClosed: " ++ show (countRegistrationClosed c))
+            putStrLn ("InProgress: " ++ show (countInProgress c))
+            putStrLn ("Completed: " ++ show (countCompleted c))
+            putStrLn ("Cancelled: " ++ show (countCancelled c))
+            putStrLn "--- Tournaments ---"
+            mapM_ print (overviewTournaments dash)
+
+  ["audit-log", uidStr] ->
+    case readMaybe uidStr :: Maybe Int of
+      Nothing -> liftIO $ putStrLn "userId must be an integer"
+      Just uidInt -> do
+        events <- Repo.listAuditEventsForEntity (UserId uidInt)
+        liftIO $ case events of
+          [] -> putStrLn "No audit events."
+          _  -> mapM_ print events
+
+  
 
   _ -> liftIO $ putStrLn usage
 
@@ -497,7 +567,7 @@ usage = unlines
   , "  change-password <userId> <currentPassword> <newPassword>"
   , "  profile <userId>"
   , "  update-profile <userId> <username> <email>"
-  , "  set-account-status <userId> <status>"
+  , "  set-account-status <actorId> <userId> <status>"
   , "  publish-tournament <userId> <tournamentId>"
     , "  open-registration <userId> <tournamentId>"
     , "  close-registration <userId> <tournamentId>"
@@ -512,6 +582,11 @@ usage = unlines
   , "  create-team <teamName> <captainName> [member1 member2 ...]"
   , "  register-cod <tournamentId> <teamName> <captainName> [member1 member2 ...]"
   , "  register-pubg <tournamentId> <teamName> <captainName> [member1 member2 ...]"
+  , "  grant-role <userId> <role>"
+  , "  revoke-role <userId> <role>"
+  , "  admin-dashboard <actorId>"
+  , "  list-roles <userId>"
+  , "  audit-log <userId>"
   ]
 
 parseStatus :: String -> Maybe AccountStatus
@@ -530,5 +605,10 @@ parseFormat "SingleElimination" = Just SingleElimination
 parseFormat "DoubleElimination" = Just DoubleElimination
 parseFormat "RoundRobin"        = Just RoundRobin
 parseFormat _                   = Nothing
+
+
+parseRole :: String -> Maybe Role
+parseRole "Administrator" = Just Administrator
+parseRole _               = Nothing
 
  

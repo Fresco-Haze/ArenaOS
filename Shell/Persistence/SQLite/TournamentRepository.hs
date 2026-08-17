@@ -10,7 +10,7 @@ import Control.Monad (when)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Reader (asks)
 
-import Database.SQLite.Simple (Only(..), changes, execute, query, lastInsertRowId)
+import Database.SQLite.Simple (Only(..), changes, execute, query, lastInsertRowId, query_)
 
 import Domain.Tournament
     ( Tournament(..)
@@ -288,3 +288,29 @@ instance TournamentRepository SQLiteM where
         n <- liftIO $ changes conn
         when (n == 0) $
             liftIO $ throwIO (NotFound ("Tournament not found: " ++ show tidInt))
+
+    listAllTournaments :: SQLiteM [Tournament]
+    listAllTournaments = do
+        conn <- asks envConnection
+        rows <- liftIO $
+         (query_ conn
+            "SELECT id, name, organizer_name, owner_id, format, state, visibility, max_participants, bracket_id \
+            \FROM tournaments"
+         :: IO [(Int, String, String, Int, String, String, String, Int, Maybe Int)])
+        mapM decodeRow rows
+     where
+      decodeRow (tidInt, name, organizer, owner_id, formatText, stateText, visText, maxP, bracketIdMaybe) = do
+        format <- liftIO $ textToFormat formatText
+        state  <- liftIO $ textToState stateText
+        vis    <- liftIO $ textToVisibility visText
+        pure Tournament
+            { tournamentId              = TournamentId tidInt
+            , tournamentName            = TournamentName name
+            , tournamentOrganizer       = OrganizerName organizer
+            , tournamentOwner           = UserId owner_id
+            , tournamentFormat          = format
+            , tournamentState           = state
+            , tournamentVisibility      = vis
+            , tournamentMaxParticipants = maxP
+            , tournamentBracket         = BracketId <$> bracketIdMaybe
+            }

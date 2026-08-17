@@ -6,6 +6,7 @@ import Control.Monad (forM_)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Reader (ask)
 import System.Directory (doesFileExist, removeFile)
+import Data.Time (getCurrentTime)
 
 import Shell.Persistence.SQLite.Connection (SQLiteM, SQLiteEnv(envConnection), runSQLiteM)
 import Shell.Persistence.SQLite.Schema (initializeSchema)
@@ -26,6 +27,8 @@ import Shell.Persistence.SQLite.BracketRepository ()
 import Shell.Persistence.SQLite.MatchRepository ()
 import Shell.Persistence.SQLite.UserRepository ()
 import Shell.Persistence.SQLite.TournamentHistoryRepository ()
+import Shell.Persistence.SQLite.RoleRepository ()
+import Shell.Persistence.SQLite.AuditLogRepository ()
 
 import Domain.Participant (Participant(..), Player(..), PlayerName(..), Team(..), TeamName(..), TeamCaptain(..))
 import Domain.Tournament
@@ -33,7 +36,7 @@ import Domain.Tournament
   , Visibility(..), TournamentState(..), Tournament(..), TournamentId(..)
   )
 import Domain.Match (Match(..), MatchStatus(Scheduled), MatchOutcome(..))
-import Domain.User (Email(..), PasswordHash(..), Username(..))
+import Domain.User (User(..),Email(..), PasswordHash(..), Username(..), AccountStatus(..))
 
 import Application.UseCases.CreateTournament (createTournament)
 import Application.UseCases.RegisterParticipant (registerParticipant, RegisterParticipantError(..))
@@ -65,7 +68,7 @@ import Application.UseCases.UpdateTournamentName (updateTournamentName, UpdateTo
 import Application.UseCases.UpdateTournamentVisibility (updateTournamentVisibility, UpdateTournamentVisibilityError(..))
 import Application.UseCases.UpdateTournamentMaxParticipants (updateTournamentMaxParticipants, UpdateTournamentMaxParticipantsError(..))
 import Application.UseCases.UpdateTournamentFormat (updateTournamentFormat, UpdateTournamentFormatError(..))
-import Application.UseCases.GetOrganizerDashboard (getOrganizerDashboard, GetOrganizerDashboardError(..), OrganizerDashboard(..), StateCounts(..), buildDashboard)
+import Application.UseCases.GetOrganizerDashboard (getOrganizerDashboard, GetOrganizerDashboardError(..))
 import qualified Application.UseCases.UpdateTournamentName as UTN
 import qualified Application.UseCases.UpdateTournamentVisibility as UTV
 import qualified Application.UseCases.UpdateTournamentMaxParticipants as UTM
@@ -74,6 +77,20 @@ import Application.UseCases.CreateTeam (createTeam, CreateTeamError(..))
 import Application.UseCases.RegisterCodParticipant (registerCodParticipant, RegisterCodParticipantError(..))
 import Application.UseCases.RegisterPubgParticipant (registerPubgParticipant, RegisterPubgParticipantError(..))
 import Application.UseCases.RegisterTeamOnly (registerTeamOnly, RegisterTeamOnlyError(..))
+import Domain.Role (Role(..))
+import Application.UseCases.GrantRole (grantRole, GrantRoleError(..))
+import Application.UseCases.RevokeRole (revokeRole, RevokeRoleError(..))
+import Application.Internal.Authorization (AuthorizationError(..), requireAdministrator)
+import Application.UseCases.SetAccountStatus (setAccountStatus, SetAccountStatusRequest(..), SetAccountStatusError(..))
+import qualified Application.UseCases.SetAccountStatus as SAS
+import Application.UseCases.GetAdministratorDashboard
+  (getAdministratorDashboard, GetAdministratorDashboardError(..))
+import Application.Internal.TournamentOverview (TournamentOverview(..), StateCounts(..), buildTournamentOverview)
+import qualified Application.UseCases.GetAdministratorDashboard as GAD
+import qualified Application.UseCases.GrantRole as GR
+import qualified Application.UseCases.RevokeRole as RR
+import Domain.Audit (AuditEvent(..), AuditOperation(..))
+
 
 testDbPath :: FilePath
 testDbPath = "test/arenaos-test.db"
@@ -994,11 +1011,11 @@ spec = before_ resetTestDb $ do
             , tournamentOwner = UserId 1
             }
           tournaments = map mkT [Draft, Draft, Published, InProgress, Completed, Completed, Completed, Cancelled]
-          dashboard = buildDashboard tournaments
-      dashboardCounts dashboard `shouldBe` StateCounts
+          overview = buildTournamentOverview tournaments
+      overviewCounts overview `shouldBe` StateCounts
         { countDraft = 2, countPublished = 1, countRegistrationOpen = 0
         , countRegistrationClosed = 0, countInProgress = 1, countCompleted = 3, countCancelled = 1 }
-      length (dashboardTournaments dashboard) `shouldBe` 8
+      length (overviewTournaments overview) `shouldBe` 8
 
     it "returns SessionAbsent when no one is logged in" $ do
       liftIO logoutUser  -- ensure no session file exists
@@ -1029,8 +1046,7 @@ spec = before_ resetTestDb $ do
         Left err     -> expectationFailure ("runSQLiteM failed: " ++ show err)
         Right inner  -> case inner of
           Left dashErr -> expectationFailure (show dashErr)
-          Right dash   -> length (dashboardTournaments dash) `shouldBe` 1
-
+          Right dash -> length (overviewTournaments dash) `shouldBe` 1
   describe "Team Creation (FR-TEAMOPS)" $ do
 
     it "creates a team when the captain is included in the member list" $ do
@@ -1405,3 +1421,336 @@ spec = before_ resetTestDb $ do
             (RegistrationError
               (RegistrationLifecycleError
                 (InvalidTransition Draft RegistrationOpen)))
+
+  describe "RoleRepository adapter (Thread 8)" $ do
+
+    it "returns [] for a user with no persisted roles" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        uid <- createTestUser "plain"
+        Repo.getRoles uid
+      case result of
+        Left err    -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right roles -> roles `shouldBe` []
+
+    it "returns the granted role after insertRoleMembership" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        uid <- createTestUser "insertable"
+        Repo.insertRoleMembership uid Administrator
+        Repo.getRoles uid
+      case result of
+        Left err    -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right roles -> roles `shouldBe` [Administrator]
+
+    it "rejects a duplicate insertRoleMembership at the persistence layer" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        uid <- createTestUser "raw-duplicate"
+        Repo.insertRoleMembership uid Administrator
+        Repo.insertRoleMembership uid Administrator
+      result `shouldSatisfy` isLeft
+
+    it "throws NotFound when deleteRoleMembership targets an absent membership" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        uid <- createTestUser "raw-absent"
+        Repo.deleteRoleMembership uid Administrator
+      result `shouldSatisfy` isLeft
+
+    it "keeps role memberships isolated per user" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        alice <- createTestUser "alice-admin"
+        bob   <- createTestUser "bob-plain"
+        Repo.insertRoleMembership alice Administrator
+        aliceRoles <- Repo.getRoles alice
+        bobRoles   <- Repo.getRoles bob
+        pure (aliceRoles, bobRoles)
+      case result of
+        Left err                       -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right (aliceRoles, bobRoles)   -> do
+          aliceRoles `shouldBe` [Administrator]
+          bobRoles   `shouldBe` []
+
+  describe "GrantRole / RevokeRole use cases" $ do
+
+    it "grants a role to a user with no existing roles" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        admin     <- createTestUser "seed-admin"
+        candidate <- createTestUser "candidate"
+        Repo.insertRoleMembership admin Administrator
+        outcome <- grantRole admin candidate Administrator
+        roles   <- Repo.getRoles candidate
+        pure (outcome, roles)
+      case result of
+        Left err               -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right (outcome, roles) -> do
+          outcome `shouldBe` Right ()
+          roles   `shouldBe` [Administrator]
+
+    it "rejects granting a role the target already has" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        admin <- createTestUser "seed-admin2"
+        Repo.insertRoleMembership admin Administrator
+        grantRole admin admin Administrator
+      case result of
+        Left err    -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right inner -> inner `shouldBe` Left RoleAlreadyAssigned
+
+    it "records a RoleGranted audit event on successful grant" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        admin     <- createTestUser "audit-grant-admin"
+        candidate <- createTestUser "audit-grant-target"
+        Repo.insertRoleMembership admin Administrator
+        _ <- unwrap =<< grantRole admin candidate Administrator
+        Repo.listAuditEventsForEntity candidate
+      case result of
+        Left err      -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right [event] -> do
+          auditOperation event `shouldBe` RoleGranted Administrator
+        Right other   -> expectationFailure ("expected exactly one event, got: " ++ show other)
+
+    it "rejects a grant from a non-admin actor" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        actor  <- createTestUser "non-admin-granter"
+        target <- createTestUser "grant-target"
+        grantRole actor target Administrator
+      case result of
+        Left err    -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right inner -> inner `shouldBe` Left (GR.Unauthorized NotAdministrator)
+
+    it "revokes an existing role when another Administrator remains" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        admin1 <- createTestUser "revoker"
+        admin2 <- createTestUser "revocable"
+        Repo.insertRoleMembership admin1 Administrator
+        Repo.insertRoleMembership admin2 Administrator
+        outcome <- revokeRole admin1 admin2 Administrator
+        roles   <- Repo.getRoles admin2
+        pure (outcome, roles)
+      case result of
+        Left err               -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right (outcome, roles) -> do
+          outcome `shouldBe` Right ()
+          roles   `shouldBe` []
+
+    it "rejects revoking a role the target doesn't have" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        admin  <- createTestUser "seed-admin3"
+        target <- createTestUser "unassigned-target"
+        Repo.insertRoleMembership admin Administrator
+        revokeRole admin target Administrator
+      case result of
+        Left err    -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right inner -> inner `shouldBe` Left RoleNotAssigned
+
+    it "records a RoleRevoked audit event on successful revoke" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        admin1 <- createTestUser "audit-revoke-admin1"
+        admin2 <- createTestUser "audit-revoke-admin2"
+        Repo.insertRoleMembership admin1 Administrator
+        Repo.insertRoleMembership admin2 Administrator
+        _ <- unwrap =<< revokeRole admin1 admin2 Administrator
+        Repo.listAuditEventsForEntity admin2
+      case result of
+        Left err      -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right [event] -> auditOperation event `shouldBe` RoleRevoked Administrator
+        Right other   -> expectationFailure ("expected exactly one event, got: " ++ show other)
+
+    it "rejects a revocation from a non-admin actor" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        actor  <- createTestUser "non-admin-revoker"
+        target <- createTestUser "revoke-target"
+        Repo.insertRoleMembership target Administrator
+        revokeRole actor target Administrator
+      case result of
+        Left err    -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right inner -> inner `shouldBe` Left (RR.Unauthorized NotAdministrator)
+
+    it "rejects revoking the last Administrator in the system" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        soleAdmin <- createTestUser "sole-admin"
+        Repo.insertRoleMembership soleAdmin Administrator
+        revokeRole soleAdmin soleAdmin Administrator
+      case result of
+        Left err    -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right inner -> inner `shouldBe` Left CannotRevokeLastAdministrator
+
+  describe "requireAdministrator (pure)" $ do
+
+    it "authorizes a user who has the Administrator role" $
+      requireAdministrator [Administrator] `shouldBe` Right ()
+
+    it "rejects a user with no roles" $
+      requireAdministrator [] `shouldBe` Left NotAdministrator
+
+  describe "SetAccountStatus authorization (Thread 9)" $ do
+
+    it "rejects a non-admin actor before mutating the target, and leaves status unchanged" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        actor  <- createTestUser "non-admin-actor"
+        target <- createTestUser "target-user"
+        outcome <- setAccountStatus SetAccountStatusRequest
+          { statusActorId = actor
+          , statusUserId  = target
+          , statusNew     = Suspended
+          }
+        maybeUser <- Repo.findUserById target
+        pure (outcome, maybeUser)
+      case result of
+        Left err                   -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right (outcome, maybeUser) -> do
+          outcome `shouldBe` Left (SAS.Unauthorized NotAdministrator)
+          fmap accountStatus maybeUser `shouldBe` Just Active
+
+    it "rejects an admin actor when the target doesn't exist" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        actor <- createTestUser "admin-actor"
+        Repo.insertRoleMembership actor Administrator
+        setAccountStatus SetAccountStatusRequest
+          { statusActorId = actor
+          , statusUserId  = UserId 9999
+          , statusNew     = Suspended
+          }
+      case result of
+        Left err    -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right inner -> inner `shouldBe` Left StatusUserNotFound
+
+    it "allows an admin actor to change an existing target's status" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        actor  <- createTestUser "admin-actor-2"
+        target <- createTestUser "target-user-2"
+        Repo.insertRoleMembership actor Administrator
+        outcome <- setAccountStatus SetAccountStatusRequest
+          { statusActorId = actor
+          , statusUserId  = target
+          , statusNew     = Suspended
+          }
+        maybeUser <- Repo.findUserById target
+        pure (outcome, maybeUser)
+      case result of
+        Left err                   -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right (outcome, maybeUser) -> do
+          outcome `shouldBe` Right ()
+          fmap accountStatus maybeUser `shouldBe` Just Suspended
+
+    it "records an AccountStatusChanged audit event with correct before/after" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        admin  <- createTestUser "audit-status-admin"
+        target <- createTestUser "audit-status-target"
+        Repo.insertRoleMembership admin Administrator
+        _ <- unwrap =<< setAccountStatus SetAccountStatusRequest
+          { statusActorId = admin, statusUserId = target, statusNew = Suspended }
+        Repo.listAuditEventsForEntity target
+      case result of
+        Left err      -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right [event] -> auditOperation event `shouldBe` AccountStatusChanged Active Suspended
+        Right other   -> expectationFailure ("expected exactly one event, got: " ++ show other)
+
+  describe "Administrator Dashboard (Thread 10)" $ do
+
+    it "rejects a non-admin actor" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        actor <- createTestUser "not-admin"
+        getAdministratorDashboard actor
+      case result of
+        Left err    -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right inner -> inner `shouldBe` Left (GAD.Unauthorized NotAdministrator)
+
+    it "shows tournaments across every owner, unfiltered" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        admin  <- createTestUser "the-admin"
+        owner1 <- createTestUser "owner-one"
+        owner2 <- createTestUser "owner-two"
+        Repo.insertRoleMembership admin Administrator
+        _ <- createTournament NewTournament
+          { newTournamentName = TournamentName "Owner1 Cup", newTournamentOrganizer = OrganizerName "x"
+          , newTournamentOwner = owner1, newTournamentFormat = SingleElimination
+          , newTournamentVisibility = Public, newTournamentMaxParticipants = 2 }
+        _ <- createTournament NewTournament
+          { newTournamentName = TournamentName "Owner2 Cup", newTournamentOrganizer = OrganizerName "x"
+          , newTournamentOwner = owner2, newTournamentFormat = SingleElimination
+          , newTournamentVisibility = Public, newTournamentMaxParticipants = 2 }
+        getAdministratorDashboard admin
+      case result of
+        Left err    -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right inner -> case inner of
+          Left dashErr -> expectationFailure (show dashErr)
+          Right dash   -> length (overviewTournaments dash) `shouldBe` 2
+
+  describe "AuditLogRepository adapter" $ do
+
+    it "returns [] for an entity with no audit events" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        target <- createTestUser "no-events-target"
+        Repo.listAuditEventsForEntity target
+      case result of
+        Left err     -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right events -> events `shouldBe` []
+
+    it "records and retrieves a RoleGranted event" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        actor  <- createTestUser "audit-actor"
+        target <- createTestUser "audit-target"
+        now    <- liftIO getCurrentTime
+        Repo.recordAuditEvent AuditEvent
+          { auditActor = actor, auditEntity = target
+          , auditOperation = RoleGranted Administrator, auditTime = now }
+        Repo.listAuditEventsForEntity target
+      case result of
+        Left err      -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right [event] -> do
+          auditOperation event `shouldBe` RoleGranted Administrator
+        Right other   -> expectationFailure ("expected exactly one event, got: " ++ show other)
+
+    it "records and retrieves an AccountStatusChanged event with before/after" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        actor  <- createTestUser "audit-actor-2"
+        target <- createTestUser "audit-target-2"
+        now    <- liftIO getCurrentTime
+        Repo.recordAuditEvent AuditEvent
+          { auditActor = actor, auditEntity = target
+          , auditOperation = AccountStatusChanged Active Suspended, auditTime = now }
+        Repo.listAuditEventsForEntity target
+      case result of
+        Left err      -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right [event] -> auditOperation event `shouldBe` AccountStatusChanged Active Suspended
+        Right other   -> expectationFailure ("expected exactly one event, got: " ++ show other)
+
+    it "keeps audit events isolated per entity" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        actor   <- createTestUser "audit-actor-3"
+        target1 <- createTestUser "audit-target-3a"
+        target2 <- createTestUser "audit-target-3b"
+        now     <- liftIO getCurrentTime
+        Repo.recordAuditEvent AuditEvent
+          { auditActor = actor, auditEntity = target1
+          , auditOperation = RoleGranted Administrator, auditTime = now }
+        events1 <- Repo.listAuditEventsForEntity target1
+        events2 <- Repo.listAuditEventsForEntity target2
+        pure (events1, events2)
+      case result of
+        Left err               -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right (events1, events2) -> do
+          length events1 `shouldBe` 1
+          events2        `shouldBe` []

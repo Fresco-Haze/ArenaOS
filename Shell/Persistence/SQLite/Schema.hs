@@ -138,6 +138,13 @@ statements =
      \ account_status TEXT NOT NULL DEFAULT 'Active' CHECK (account_status IN ('Active', 'Suspended', 'Deactivated'))\
       \)"
 
+  , "CREATE TABLE IF NOT EXISTS user_roles ( \
+    \  user_id INTEGER NOT NULL REFERENCES users(id), \
+    \  role    TEXT NOT NULL CHECK (role IN ('Administrator')), \
+    \  PRIMARY KEY (user_id, role) \
+    \)"
+
+
   , "CREATE TABLE IF NOT EXISTS tournament_history (\
     \id                  INTEGER PRIMARY KEY AUTOINCREMENT,\
     \tournament_id       INTEGER NOT NULL REFERENCES tournaments(id),\
@@ -149,6 +156,23 @@ statements =
     \(event_type != 'ConfigurationChanged' OR changed_field IS NOT NULL) AND\
     \(event_type NOT IN ('TournamentCancelled','ConfigurationChanged') OR TRUE))\   
     \)"
+
+  , "CREATE TABLE IF NOT EXISTS audit_log ( \
+    \  id              INTEGER PRIMARY KEY AUTOINCREMENT, \
+    \  actor_id        INTEGER NOT NULL REFERENCES users(id), \
+    \  entity_id       INTEGER NOT NULL REFERENCES users(id), \
+    \  operation       TEXT NOT NULL CHECK (operation IN \
+    \                    ('RoleGranted', 'RoleRevoked', 'AccountStatusChanged')), \
+    \  role            TEXT CHECK (role IN ('Administrator')), \
+    \  previous_status TEXT CHECK (previous_status IN ('Active', 'Suspended', 'Deactivated')), \
+    \  new_status      TEXT CHECK (new_status IN ('Active', 'Suspended', 'Deactivated')), \
+    \  occurred_at     TEXT NOT NULL, \
+    \  CHECK (operation NOT IN ('RoleGranted', 'RoleRevoked') OR role IS NOT NULL), \
+    \  CHECK (operation != 'AccountStatusChanged' \
+    \         OR (previous_status IS NOT NULL AND new_status IS NOT NULL)) \
+    \)"
+
+    
   
 
   , "CREATE INDEX IF NOT EXISTS idx_registrations_tournament ON registrations(tournament_id)"

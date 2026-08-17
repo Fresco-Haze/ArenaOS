@@ -33,6 +33,8 @@ module Shell.Persistence.Port
   ,PasswordHasher(..)
   ,NewUser(..)
   ,TournamentHistoryRepository(..)
+  ,RoleRepository(..)
+  ,AuditLogRepository(..)
   
   ) where
 
@@ -44,6 +46,8 @@ import Domain.Match (Match, MatchId)
 import Domain.User (User(..), Username(..), Email(..), PasswordHash(..), AccountStatus(..))
 import Domain.Ids ( UserId(..))
 import Domain.TournamentHistory (TournamentHistoryEvent, TournamentHistoryEntry)
+import Domain.Role (Role(..))
+import Domain.Audit (AuditEvent(..))
 import Data.Map.Strict (Map)
 import Data.Text (Text)
 -- Owns Participant identity (ADR-006) and its constituents (Player, Team).
@@ -102,6 +106,7 @@ class Monad m => TournamentRepository m where
     updateTournamentMaxParticipants :: TournamentId -> Int -> m ()
     updateTournamentVisibility :: TournamentId -> Visibility -> m ()
     updateTournamentFormat   :: TournamentId -> TournamentFormat -> m ()
+    listAllTournaments :: m [Tournament]
 
 -- Creation-shaped input for RegistrationRepository.createRegistration.
 -- No status field -- RegistrationStatus has exactly one constructor
@@ -178,4 +183,14 @@ class TournamentHistoryRepository m where
     recordHistoryEvent  :: TournamentId -> TournamentHistoryEvent -> m ()
     getTournamentHistory :: TournamentId -> m [TournamentHistoryEntry]
 
+
+class Monad m => RoleRepository m where
+    insertRoleMembership :: UserId -> Role -> m ()
+    deleteRoleMembership :: UserId -> Role -> m ()
+    getRoles             :: UserId -> m [Role]
+    listRoleHolders      :: Role -> m [UserId]
+
+class Monad m => AuditLogRepository m where
+    recordAuditEvent         :: AuditEvent -> m ()
+    listAuditEventsForEntity :: UserId -> m [AuditEvent]
 

@@ -66,6 +66,15 @@ library
                       Application.UseCases.RegisterCodParticipant
                       Application.UseCases.RegisterPubgParticipant
                       Application.UseCases.RegisterTeamOnly
+                      Domain.Role
+                      Shell.Persistence.SQLite.RoleRepository
+                      Application.UseCases.RevokeRole
+                      Application.UseCases.GrantRole
+                      Application.Internal.TournamentOverview
+                      Application.UseCases.GetAdministratorDashboard
+                      Domain.Audit
+                      Shell.Persistence.SQLite.AuditLogRepository
+
 
     hs-source-dirs:   .
     build-depends:    base
@@ -78,6 +87,7 @@ library
                     , directory
                     , filepath
                     , text-short
+                    , time
     default-language: Haskell2010
 
 executable arenaos
@@ -87,6 +97,7 @@ executable arenaos
                     , arenaos
                     , mtl
                     , text
+                    
     default-language: Haskell2010
 
 test-suite arenaos-test
@@ -100,4 +111,5 @@ test-suite arenaos-test
                     , directory
                     , mtl
                     , text
+                    , time
     default-language: Haskell2010

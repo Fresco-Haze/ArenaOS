@@ -47,6 +47,16 @@ v0.4 remains CLI-only, same as prior milestones. A frontend is planned but defer
 
 v0.5 intentionally shipped one small, well-earned abstraction rather than a general game-configuration framework speculatively built from a single external domain's rules. The Match/bracket findings remain on record for a future milestone, if and when ArenaOS's own requirements — not PUBG's — call for them.
 
+## v0.6 — Administrator Roles, Authorization & Audit Trail
+
+- **A role-based authorization mechanism**, added alongside the existing ownership-based one rather than replacing or generalizing it. `Role` currently has a single constructor, `Administrator` — deliberately not modeled as a mirror of every business responsibility in the system (Organizer, Player, Team Captain remain expressed through existing domain relationships — tournament ownership, team membership — not persisted role rows). New roles get added only when a concrete need for independent, cross-resource authority actually arises, the same evidence-first discipline v0.5 applied to registration abstraction.
+- **`grantRole` / `revokeRole`**, non-idempotent by design (matching every other relationship-establishing operation in ArenaOS — granting an already-held role, or revoking one that isn't held, is rejected rather than silently accepted). An existing Administrator can grant or revoke Administrator status from another user; the system refuses any revocation that would leave the platform with zero Administrators. The very first Administrator is established outside the application entirely, by direct database seeding — there's no in-app bootstrap command, and none was added speculatively.
+- **Administrative retrofits to two existing capabilities**: `set-account-status` now requires an authorized actor (previously callable by anyone, against any account) and rejects unauthorized attempts before ever checking whether the target exists. A new **Administrator dashboard** provides an unfiltered, platform-wide view of every tournament regardless of owner, distinct from the existing owner-scoped Organizer dashboard — both now share a single underlying aggregation (`TournamentOverview`), extracted once a genuine second consumer existed, rather than duplicated or built as one dashboard trying to serve two audiences.
+- **An audit trail for security-sensitive administrative actions** — every role grant, role revocation, and account status change is recorded with actor, affected user, operation, and a real UTC timestamp. Account status changes record both the previous and new value, not just the new one. Audit records are append-only, and a failed audit write rolls back the administrative action it would have recorded — an action that can't be logged doesn't happen.
+- Deliberately **not** built: audit coverage for administrative dashboard reads (read access wasn't judged clearly "security-sensitive" under the frozen requirements, and the frozen text doesn't say either way); tournament ownership transfer and other administrative intervention workflows (explicitly out of scope per the underlying requirement itself, not an oversight); any general-purpose role-assignment framework beyond what `Administrator` alone currently needs.
+
+Every decision above that wasn't directly specified by ArenaOS's frozen requirements — non-idempotent grants, who may manage Administrator, the last-Administrator safeguard, what counts as audit-worthy — is recorded as an explicit judgment call in the project's architecture decisions, not presented as something the requirements dictated.
+
 ## Architecture
 
 A layered design, separating pure domain logic from persistence and orchestration:
@@ -57,11 +67,11 @@ A layered design, separating pure domain logic from persistence and orchestratio
 - **Shell** — SQLite persistence layer, plus file-based CLI sessions
 - **CLI** — a thin command dispatcher over the use cases; all business logic lives below this layer, not in it
 
-Two cross-cutting rules hold throughout: every mutating use case checks ownership before doing anything else (`Application.Internal.Authorization`), and every lifecycle-sensitive use case validates tournament state before mutating (`Application.Internal.LifecycleTransition`). Persistence favors narrow, single-purpose update methods over whole-record saves wherever a use case only ever needs to change one thing.
+Two cross-cutting rules hold throughout: every mutating use case checks authorization before doing anything else — either ownership or, for administrative actions, Administrator role membership, both via `Application.Internal.Authorization` — and every lifecycle-sensitive use case validates tournament state before mutating (`Application.Internal.LifecycleTransition`).
 
 ## Testing
 
-An hspec integration suite covers the full stack — golden-path lifecycles, bye-path bracket generation, error paths (wrong state, non-owner, invalid transitions), the full v0.3 lifecycle/editing/history state machine, team creation, and CoD/PUBG registration (individual rejection, successful team registration, rejection outside the registration window).
+An hspec integration suite (71 examples) covers the full stack — golden-path lifecycles, bye-path bracket generation, error paths (wrong state, non-owner, invalid transitions), the full v0.3 lifecycle/editing/history state machine, team creation, CoD/PUBG registration, and v0.6's role-based authorization, grant/revoke semantics, the last-Administrator safeguard, and audit-trail recording.
 
 Run the suite:
 
@@ -112,3 +122,10 @@ register-pubg <tournamentId> <teamName> <captainName> [member1 member2 ...]
 dashboard
 history <userId> <tournamentId>
 ```
+
+grant-role <actorId> <userId> <role>
+revoke-role <actorId> <userId> <role>
+list-roles <userId>
+admin-dashboard <actorId>
+set-account-status <actorId> <userId> <status>
+audit-log <userId>
