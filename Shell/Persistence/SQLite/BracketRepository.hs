@@ -92,16 +92,29 @@ instance BracketRepository SQLiteM where
                     "UPDATE bracket_nodes SET slot_a_node_id = ?, slot_b_node_id = ? WHERE id = ?"
                     (aNid, bNid, sqliteId)
 
+                -- (unchanged: initial tournament_id UPDATE, DELETE, Pass 1, Pass 2)
+
+        let translateRef label mRef = case mRef of
+              Nothing -> pure Nothing
+              Just (BracketNodeId domainId) -> case Map.lookup (fromIntegral domainId) idMap of
+                  Just sid -> pure (Just sid)
+                  Nothing  -> throwIO (StorageFailure (label ++ " references unknown BracketNodeId " ++ show domainId))
+        gf1Sid   <- liftIO $ translateRef "gf1_node_id" (bracketGF1NodeId bracket)
+        resetSid <- liftIO $ translateRef "reset_node_id" (bracketResetNodeId bracket)
+        liftIO $ execute conn
+            "UPDATE brackets SET gf1_node_id = ?, reset_node_id = ? WHERE id = ?"
+            (gf1Sid, resetSid, bid)
+
         pure (Map.mapKeys (BracketNodeId . fromIntegral) (Map.map (BracketNodeId . fromIntegral) idMap))
 
     getBracket :: BracketId -> SQLiteM (Bracket, [BracketNode])
     getBracket bid@(BracketId bracketIdNum) = do
         conn <- asks envConnection
         header <- liftIO ( query conn
-            "SELECT tournament_id FROM brackets WHERE id = ?"
-            (Only bracketIdNum) :: IO [Only Int64])
+            "SELECT tournament_id, gf1_node_id, reset_node_id FROM brackets WHERE id = ?"
+            (Only bracketIdNum) :: IO [(Int64, Maybe Int64, Maybe Int64)])
         case header of
-            [Only tid] -> do
+            [(tid, gf1Sid, resetSid)] -> do
                 rows <- liftIO (query conn
                     "SELECT id, round, stage, \
                     \  slot_a_type, slot_a_participant_id, slot_a_node_id, \
@@ -110,7 +123,13 @@ instance BracketRepository SQLiteM where
                     \ORDER BY round, CASE stage WHEN 'Winners' THEN 0 ELSE 1 END, id"
                     (Only bracketIdNum) :: IO [(Int64, Int, Text, Text, Maybe Int64, Maybe Int64, Text, Maybe Int64, Maybe Int64)])
                 nodes <- mapM hydrateNode rows
-                pure (Bracket { bracketId = bid, bracketTournament = TournamentId (fromIntegral tid) }, nodes)
+                pure ( Bracket
+                         { bracketId = bid
+                         , bracketTournament = TournamentId (fromIntegral tid)
+                         , bracketGF1NodeId   = BracketNodeId . fromIntegral <$> gf1Sid
+                         , bracketResetNodeId = BracketNodeId . fromIntegral <$> resetSid
+                         }
+                     , nodes )
             [] -> liftIO $ throwIO (NotFound ("Bracket not found in storage: " ++ show bracketIdNum))
             _  -> liftIO $ throwIO (StorageFailure "brackets.id is PRIMARY KEY but multiple rows in storage")
 

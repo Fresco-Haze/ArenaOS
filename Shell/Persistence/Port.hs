@@ -35,6 +35,7 @@ module Shell.Persistence.Port
   ,TournamentHistoryRepository(..)
   ,RoleRepository(..)
   ,AuditLogRepository(..)
+  ,EFootballScoreRepository(..)
   
   ) where
 
@@ -48,6 +49,7 @@ import Domain.Ids ( UserId(..))
 import Domain.TournamentHistory (TournamentHistoryEvent, TournamentHistoryEntry)
 import Domain.Role (Role(..))
 import Domain.Audit (AuditEvent(..))
+import Domain.Scoreable (EFootballScore)
 import Data.Map.Strict (Map)
 import Data.Text (Text)
 -- Owns Participant identity (ADR-006) and its constituents (Player, Team).
@@ -193,4 +195,8 @@ class Monad m => RoleRepository m where
 class Monad m => AuditLogRepository m where
     recordAuditEvent         :: AuditEvent -> m ()
     listAuditEventsForEntity :: UserId -> m [AuditEvent]
+
+class Monad m => EFootballScoreRepository m where
+  saveEFootballScore :: MatchId -> EFootballScore -> EFootballScore -> m ()
+  getEFootballScore   :: MatchId -> m (Maybe (EFootballScore, EFootballScore))
 

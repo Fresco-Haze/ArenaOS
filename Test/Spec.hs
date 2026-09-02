@@ -35,8 +35,11 @@ import Domain.Tournament
   ( TournamentName(..), OrganizerName(..), TournamentFormat(..)
   , Visibility(..), TournamentState(..), Tournament(..), TournamentId(..)
   )
-import Domain.Match (Match(..), MatchStatus(Scheduled), MatchOutcome(..))
+import Domain.Match (Match(..),MatchId(..), MatchStatus(Scheduled), MatchOutcome(..))
 import Domain.User (User(..),Email(..), PasswordHash(..), Username(..), AccountStatus(..))
+import Domain.MatchError (MatchError(..))
+import qualified Domain.Match as Match
+import Domain.TournamentError (TournamentError(..))
 
 import Application.UseCases.CreateTournament (createTournament)
 import Application.UseCases.RegisterParticipant (registerParticipant, RegisterParticipantError(..))
@@ -90,6 +93,18 @@ import qualified Application.UseCases.GetAdministratorDashboard as GAD
 import qualified Application.UseCases.GrantRole as GR
 import qualified Application.UseCases.RevokeRole as RR
 import Domain.Audit (AuditEvent(..), AuditOperation(..))
+import Application.UseCases.RecordEFootballResult
+  (recordEFootballResult, RecordEFootballResultError(..))
+import Domain.Scoreable (mkEFootballScore)
+import Shell.Persistence.SQLite.EFootballScoreRepository ()
+import qualified Engine.BracketGeneration as BracketGeneration
+import qualified Engine.Seeding           as Seeding
+import Domain.Bracket (BracketNode(..), BracketNodeId(..), BracketSide(..), MatchSlot(..),BracketId(..))
+import Application.UseCases.GetRoundRobinStandings (getRoundRobinStandings, GetRoundRobinStandingsError(..))
+import Engine.Standings (Standing(..))
+import qualified Engine.Standings as Standings
+import qualified Application.UseCases.GetRoundRobinStandings as GRRS
+import qualified Application.UseCases.GetRoundRobinStandings as GetRoundRobinStandings
 
 
 testDbPath :: FilePath
@@ -372,6 +387,82 @@ spec = before_ resetTestDb $ do
       case result of
         Left err     -> expectationFailure ("runSQLiteM failed: " ++ show err)
         Right inner  -> inner `shouldSatisfy` isLeft
+
+    it "rejects a Draw outcome for a bracket match" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "owner"
+        let alice = Individual (Player (PlayerName "Alice"))
+            bob   = Individual (Player (PlayerName "Bob"))
+            participants = [alice, bob]
+
+        tid <- createTournament NewTournament
+          { newTournamentName            = TournamentName "Draw Reject Cup"
+          , newTournamentOrganizer       = OrganizerName "Test Organizer"
+          , newTournamentOwner           = ownerId
+          , newTournamentFormat          = SingleElimination
+          , newTournamentVisibility      = Public
+          , newTournamentMaxParticipants = 2
+          }
+        forM_ participants $ \p -> case p of
+          Individual player -> Repo.savePlayer player
+          Squad team         -> Repo.saveTeam team
+        advanceToRegistrationOpen ownerId tid
+        forM_ participants (\p -> unwrap =<< registerParticipant tid p)
+        _ <- unwrap =<< closeRegistration ownerId tid
+        bracketId <- unwrap =<< generateBracket ownerId tid
+        matches <- Repo.listMatchesForBracket bracketId
+        let m = head matches
+        _ <- unwrap =<< startMatch ownerId (matchId m)
+
+        outcome    <- recordMatchResult ownerId (matchId m) Draw
+        afterMatch <- Repo.getMatch (matchId m)
+        pure (outcome, afterMatch)
+
+      case result of
+        Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right (outcome, afterMatch) -> do
+          outcome `shouldBe` Left (RMR.InvalidMatch (OutcomeNotAdvanceable Draw))
+          matchStatus  afterMatch `shouldBe` Match.InProgress
+          matchOutcome afterMatch `shouldBe` Nothing
+
+    it "rejects a NoContest outcome for a bracket match" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "owner"
+        let alice = Individual (Player (PlayerName "Alice"))
+            bob   = Individual (Player (PlayerName "Bob"))
+            participants = [alice, bob]
+
+        tid <- createTournament NewTournament
+          { newTournamentName            = TournamentName "NoContest Reject Cup"
+          , newTournamentOrganizer       = OrganizerName "Test Organizer"
+          , newTournamentOwner           = ownerId
+          , newTournamentFormat          = SingleElimination
+          , newTournamentVisibility      = Public
+          , newTournamentMaxParticipants = 2
+          }
+        forM_ participants $ \p -> case p of
+          Individual player -> Repo.savePlayer player
+          Squad team         -> Repo.saveTeam team
+        advanceToRegistrationOpen ownerId tid
+        forM_ participants (\p -> unwrap =<< registerParticipant tid p)
+        _ <- unwrap =<< closeRegistration ownerId tid
+        bracketId <- unwrap =<< generateBracket ownerId tid
+        matches <- Repo.listMatchesForBracket bracketId
+        let m = head matches
+        _ <- unwrap =<< startMatch ownerId (matchId m)
+
+        outcome    <- recordMatchResult ownerId (matchId m) NoContest
+        afterMatch <- Repo.getMatch (matchId m)
+        pure (outcome, afterMatch)
+
+      case result of
+        Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right (outcome, afterMatch) -> do
+          outcome `shouldBe` Left (RMR.InvalidMatch (OutcomeNotAdvanceable NoContest))
+          matchStatus  afterMatch `shouldBe` Match.InProgress
+          matchOutcome afterMatch `shouldBe` Nothing
 
     it "rejects completing a tournament with a match still pending" $ do
       result <- runSQLiteM testDbPath $ do
@@ -785,6 +876,11 @@ spec = before_ resetTestDb $ do
       case result of
         Left err     -> expectationFailure ("runSQLiteM failed: " ++ show err)
         Right inner  -> inner `shouldBe` Left CancelT.EmptyCancellationReason
+
+   
+    
+    
+
 
   describe "Tournament Editing (FR-EDIT)" $ do
 
@@ -1754,3 +1850,723 @@ spec = before_ resetTestDb $ do
         Right (events1, events2) -> do
           length events1 `shouldBe` 1
           events2        `shouldBe` []
+
+  describe "RecordEFootballResult (Thread 1, score-derived outcomes)" $ do
+
+    it "derives a Winner outcome and persists the score" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "efootball-owner"
+        let alice = Individual (Player (PlayerName "Alice"))
+            bob   = Individual (Player (PlayerName "Bob"))
+            participants = [alice, bob]
+        tid <- createTournament NewTournament
+          { newTournamentName            = TournamentName "EFootball Win Cup"
+          , newTournamentOrganizer       = OrganizerName "Test Organizer"
+          , newTournamentOwner           = ownerId
+          , newTournamentFormat          = SingleElimination
+          , newTournamentVisibility      = Public
+          , newTournamentMaxParticipants = 2
+          }
+        forM_ participants $ \p -> case p of
+          Individual player -> Repo.savePlayer player
+          Squad team         -> Repo.saveTeam team
+        advanceToRegistrationOpen ownerId tid
+        forM_ participants (\p -> unwrap =<< registerParticipant tid p)
+        _ <- unwrap =<< closeRegistration ownerId tid
+        bracketId <- unwrap =<< generateBracket ownerId tid
+        matches <- Repo.listMatchesForBracket bracketId
+        let m = head matches
+        _ <- unwrap =<< startMatch ownerId (matchId m)
+
+        let Right scoreA = mkEFootballScore 3
+            Right scoreB = mkEFootballScore 1
+        updated <- unwrap =<< recordEFootballResult ownerId (matchId m) scoreA scoreB
+        stored  <- Repo.getEFootballScore (matchId m)
+        pure (matchOutcome updated, stored)
+
+      case result of
+        Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right (outcome, stored) -> do
+          outcome `shouldBe` Just (Winner (Individual (Player (PlayerName "Alice"))))
+          stored  `shouldSatisfy` (/= Nothing)
+
+    it "rejects a Draw outcome derived from tied eFootball scores" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "efootball-draw-owner"
+        let alice = Individual (Player (PlayerName "Alice"))
+            bob   = Individual (Player (PlayerName "Bob"))
+            participants = [alice, bob]
+        tid <- createTournament NewTournament
+          { newTournamentName            = TournamentName "EFootball Draw Cup"
+          , newTournamentOrganizer       = OrganizerName "Test Organizer"
+          , newTournamentOwner           = ownerId
+          , newTournamentFormat          = SingleElimination
+          , newTournamentVisibility      = Public
+          , newTournamentMaxParticipants = 2
+          }
+        forM_ participants $ \p -> case p of
+          Individual player -> Repo.savePlayer player
+          Squad team         -> Repo.saveTeam team
+        advanceToRegistrationOpen ownerId tid
+        forM_ participants (\p -> unwrap =<< registerParticipant tid p)
+        _ <- unwrap =<< closeRegistration ownerId tid
+        bracketId <- unwrap =<< generateBracket ownerId tid
+        matches <- Repo.listMatchesForBracket bracketId
+        let m = head matches
+        _ <- unwrap =<< startMatch ownerId (matchId m)
+
+        let Right scoreA = mkEFootballScore 2
+            Right scoreB = mkEFootballScore 2
+        outcome <- recordEFootballResult ownerId (matchId m) scoreA scoreB
+        stored  <- Repo.getEFootballScore (matchId m)
+        pure (outcome, stored)
+
+      case result of
+        Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right (outcome, stored) -> do
+          outcome `shouldSatisfy` isLeft
+          stored  `shouldBe` Nothing
+
+    it "rejects an eFootball result for a match that hasn't started" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "efootball-notstarted-owner"
+        let alice = Individual (Player (PlayerName "Alice"))
+            bob   = Individual (Player (PlayerName "Bob"))
+            participants = [alice, bob]
+        tid <- createTournament NewTournament
+          { newTournamentName            = TournamentName "EFootball Not Started Cup"
+          , newTournamentOrganizer       = OrganizerName "Test Organizer"
+          , newTournamentOwner           = ownerId
+          , newTournamentFormat          = SingleElimination
+          , newTournamentVisibility      = Public
+          , newTournamentMaxParticipants = 2
+          }
+        forM_ participants $ \p -> case p of
+          Individual player -> Repo.savePlayer player
+          Squad team         -> Repo.saveTeam team
+        advanceToRegistrationOpen ownerId tid
+        forM_ participants (\p -> unwrap =<< registerParticipant tid p)
+        _ <- unwrap =<< closeRegistration ownerId tid
+        bracketId <- unwrap =<< generateBracket ownerId tid
+        matches <- Repo.listMatchesForBracket bracketId
+        let m = head matches
+        -- Deliberately not started.
+
+        let Right scoreA = mkEFootballScore 1
+            Right scoreB = mkEFootballScore 0
+        recordEFootballResult ownerId (matchId m) scoreA scoreB
+
+      case result of
+        Left err    -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right inner -> inner `shouldSatisfy` isLeft
+
+    it "does not persist a score when the underlying result recording is unauthorized" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId    <- createTestUser "efootball-owner-2"
+        impostorId <- createTestUser "efootball-impostor"
+        let alice = Individual (Player (PlayerName "Alice"))
+            bob   = Individual (Player (PlayerName "Bob"))
+            participants = [alice, bob]
+        tid <- createTournament NewTournament
+          { newTournamentName            = TournamentName "EFootball Rollback Cup"
+          , newTournamentOrganizer       = OrganizerName "Test Organizer"
+          , newTournamentOwner           = ownerId
+          , newTournamentFormat          = SingleElimination
+          , newTournamentVisibility      = Public
+          , newTournamentMaxParticipants = 2
+          }
+        forM_ participants $ \p -> case p of
+          Individual player -> Repo.savePlayer player
+          Squad team         -> Repo.saveTeam team
+        advanceToRegistrationOpen ownerId tid
+        forM_ participants (\p -> unwrap =<< registerParticipant tid p)
+        _ <- unwrap =<< closeRegistration ownerId tid
+        bracketId <- unwrap =<< generateBracket ownerId tid
+        matches <- Repo.listMatchesForBracket bracketId
+        let m = head matches
+        _ <- unwrap =<< startMatch ownerId (matchId m)
+
+        let Right scoreA = mkEFootballScore 2
+            Right scoreB = mkEFootballScore 0
+        outcome <- recordEFootballResult impostorId (matchId m) scoreA scoreB
+        stored  <- Repo.getEFootballScore (matchId m)
+        pure (outcome, stored)
+
+      case result of
+        Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right (outcome, stored) -> do
+          outcome `shouldSatisfy` isLeft
+          stored  `shouldBe` Nothing
+
+  describe "DoubleElimination (v0.7 DoubleElim sub-thread)" $ do
+
+    it "completes via GF1 when the WB champion wins outright (no reset)" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "de-owner-noreset"
+        let alice = Individual (Player (PlayerName "Alice"))
+            bob   = Individual (Player (PlayerName "Bob"))
+            carol = Individual (Player (PlayerName "Carol"))
+            dave  = Individual (Player (PlayerName "Dave"))
+            participants = [alice, bob, carol, dave]
+
+        tid <- createTournament NewTournament
+          { newTournamentName            = TournamentName "DoubleElim No-Reset Cup"
+          , newTournamentOrganizer       = OrganizerName "Test Organizer"
+          , newTournamentOwner           = ownerId
+          , newTournamentFormat          = DoubleElimination
+          , newTournamentVisibility      = Public
+          , newTournamentMaxParticipants = 4
+          }
+        forM_ participants $ \p -> case p of
+          Individual player -> Repo.savePlayer player
+          Squad team         -> Repo.saveTeam team
+        advanceToRegistrationOpen ownerId tid
+        forM_ participants (\p -> unwrap =<< registerParticipant tid p)
+        _ <- unwrap =<< closeRegistration ownerId tid
+        bracketId <- unwrap =<< generateBracket ownerId tid
+
+        let playWinner p ms = do
+              let m = head (filter (\x -> matchCompetitorA x == p || matchCompetitorB x == p) ms)
+              _ <- unwrap =<< startMatch ownerId (matchId m)
+              _ <- unwrap =<< recordMatchResult ownerId (matchId m) (Winner p)
+              pure ()
+
+        wb1 <- Repo.listMatchesForBracket bracketId
+        liftIO $ length wb1 `shouldBe` 2
+        -- Alice and Carol advance from WB round 1; Bob and Dave drop to LB1.
+        playWinner alice wb1
+        playWinner carol wb1
+
+        afterWB1 <- Repo.listMatchesForBracket bracketId
+        let scheduled1 = filter (\m -> matchStatus m == Scheduled) afterWB1
+        liftIO $ length scheduled1 `shouldBe` 2   -- WB final (Alice v Carol) + LB1 (Bob v Dave)
+        playWinner alice scheduled1   -- Alice wins the WB final
+        playWinner bob scheduled1     -- Bob wins LB1, eliminating Dave
+
+        afterRound2 <- Repo.listMatchesForBracket bracketId
+        let scheduled2 = filter (\m -> matchStatus m == Scheduled) afterRound2
+        liftIO $ length scheduled2 `shouldBe` 1   -- LB final: Carol (WB final's loser) v Bob
+        playWinner bob scheduled2     -- Bob becomes LB champion
+
+        afterLBFinal <- Repo.listMatchesForBracket bracketId
+        let scheduled3 = filter (\m -> matchStatus m == Scheduled) afterLBFinal
+        liftIO $ length scheduled3 `shouldBe` 1   -- GF1: Alice (WB champ) v Bob (LB champ)
+        playWinner alice scheduled3   -- WB champion wins outright -- no reset needed
+
+        allMatches <- Repo.listMatchesForBracket bracketId
+        let stillScheduled = filter (\m -> matchStatus m == Scheduled) allMatches
+        liftIO $ length stillScheduled `shouldBe` 0   -- reset node must NOT materialize
+
+        _ <- unwrap =<< startTournament ownerId tid
+        unwrap =<< completeTournament ownerId tid
+
+      case result of
+        Left err         -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right tournament -> tournamentState tournament `shouldBe` Completed
+
+    it "forces a bracket reset when the LB champion wins GF1, then completes via the reset match" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "de-owner-reset"
+        let alice = Individual (Player (PlayerName "Alice"))
+            bob   = Individual (Player (PlayerName "Bob"))
+            carol = Individual (Player (PlayerName "Carol"))
+            dave  = Individual (Player (PlayerName "Dave"))
+            participants = [alice, bob, carol, dave]
+
+        tid <- createTournament NewTournament
+          { newTournamentName            = TournamentName "DoubleElim Reset Cup"
+          , newTournamentOrganizer       = OrganizerName "Test Organizer"
+          , newTournamentOwner           = ownerId
+          , newTournamentFormat          = DoubleElimination
+          , newTournamentVisibility      = Public
+          , newTournamentMaxParticipants = 4
+          }
+        forM_ participants $ \p -> case p of
+          Individual player -> Repo.savePlayer player
+          Squad team         -> Repo.saveTeam team
+        advanceToRegistrationOpen ownerId tid
+        forM_ participants (\p -> unwrap =<< registerParticipant tid p)
+        _ <- unwrap =<< closeRegistration ownerId tid
+        bracketId <- unwrap =<< generateBracket ownerId tid
+
+        let playWinner p ms = do
+              let m = head (filter (\x -> matchCompetitorA x == p || matchCompetitorB x == p) ms)
+              _ <- unwrap =<< startMatch ownerId (matchId m)
+              _ <- unwrap =<< recordMatchResult ownerId (matchId m) (Winner p)
+              pure ()
+
+        wb1 <- Repo.listMatchesForBracket bracketId
+        playWinner alice wb1
+        playWinner carol wb1
+
+        afterWB1 <- Repo.listMatchesForBracket bracketId
+        let scheduled1 = filter (\m -> matchStatus m == Scheduled) afterWB1
+        playWinner alice scheduled1
+        playWinner bob scheduled1
+
+        afterRound2 <- Repo.listMatchesForBracket bracketId
+        let scheduled2 = filter (\m -> matchStatus m == Scheduled) afterRound2
+        playWinner bob scheduled2
+
+        afterLBFinal <- Repo.listMatchesForBracket bracketId
+        let scheduled3 = filter (\m -> matchStatus m == Scheduled) afterLBFinal
+        liftIO $ length scheduled3 `shouldBe` 1   -- GF1: Alice v Bob
+        -- Bob, the LB champion, upsets the WB champion -- must force a reset.
+        playWinner bob scheduled3
+
+        beforeCompletion <- completeTournament ownerId tid
+        liftIO $ beforeCompletion `shouldSatisfy` isLeft   -- reset game still pending
+
+        afterGF1 <- Repo.listMatchesForBracket bracketId
+        let resetScheduled = filter (\m -> matchStatus m == Scheduled) afterGF1
+        liftIO $ length resetScheduled `shouldBe` 1
+        liftIO $ [matchCompetitorA (head resetScheduled), matchCompetitorB (head resetScheduled)]
+          `shouldMatchList` [alice, bob]
+
+        playWinner bob resetScheduled   -- Bob confirms himself champion
+
+        _ <- unwrap =<< startTournament ownerId tid
+        unwrap =<< completeTournament ownerId tid
+
+      case result of
+        Left err         -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right tournament -> tournamentState tournament `shouldBe` Completed
+
+    it "handles a 3-participant DoubleElim bracket (WB bye auto-skips LB1, into the LB final and GF1)" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "de-owner-n3"
+        let alice = Individual (Player (PlayerName "Alice"))
+            bob   = Individual (Player (PlayerName "Bob"))
+            carol = Individual (Player (PlayerName "Carol"))
+            participants = [alice, bob, carol]
+
+        tid <- createTournament NewTournament
+          { newTournamentName            = TournamentName "DoubleElim Bye Cup"
+          , newTournamentOrganizer       = OrganizerName "Test Organizer"
+          , newTournamentOwner           = ownerId
+          , newTournamentFormat          = DoubleElimination
+          , newTournamentVisibility      = Public
+          , newTournamentMaxParticipants = 3
+          }
+        forM_ participants $ \p -> case p of
+          Individual player -> Repo.savePlayer player
+          Squad team         -> Repo.saveTeam team
+        advanceToRegistrationOpen ownerId tid
+        forM_ participants (\p -> unwrap =<< registerParticipant tid p)
+        _ <- unwrap =<< closeRegistration ownerId tid
+        bracketId <- unwrap =<< generateBracket ownerId tid
+
+        let playWinner p ms = do
+              let m = head (filter (\x -> matchCompetitorA x == p || matchCompetitorB x == p) ms)
+              _ <- unwrap =<< startMatch ownerId (matchId m)
+              _ <- unwrap =<< recordMatchResult ownerId (matchId m) (Winner p)
+              pure ()
+
+        wb1 <- Repo.listMatchesForBracket bracketId
+        liftIO $ length wb1 `shouldBe` 1   -- Alice's bye means only Bob v Carol is a real WB1 match
+        liftIO $ [matchCompetitorA (head wb1), matchCompetitorB (head wb1)]
+          `shouldMatchList` [bob, carol]
+        playWinner bob wb1
+
+        afterWB1 <- Repo.listMatchesForBracket bracketId
+        let scheduled1 = filter (\m -> matchStatus m == Scheduled) afterWB1
+        liftIO $ length scheduled1 `shouldBe` 1   -- WB final: Alice v Bob (Carol's loss auto-skips LB1)
+        liftIO $ [matchCompetitorA (head scheduled1), matchCompetitorB (head scheduled1)]
+          `shouldMatchList` [alice, bob]
+        playWinner alice scheduled1
+
+        afterWBFinal <- Repo.listMatchesForBracket bracketId
+        let scheduled2 = filter (\m -> matchStatus m == Scheduled) afterWBFinal
+        liftIO $ length scheduled2 `shouldBe` 1   -- LB final: Bob (WB final's loser) v Carol
+        liftIO $ [matchCompetitorA (head scheduled2), matchCompetitorB (head scheduled2)]
+          `shouldMatchList` [bob, carol]
+        playWinner carol scheduled2
+
+        afterLBFinal <- Repo.listMatchesForBracket bracketId
+        let scheduled3 = filter (\m -> matchStatus m == Scheduled) afterLBFinal
+        liftIO $ length scheduled3 `shouldBe` 1   -- GF1: Alice (WB champ) v Carol (LB champ)
+        liftIO $ [matchCompetitorA (head scheduled3), matchCompetitorB (head scheduled3)]
+          `shouldMatchList` [alice, carol]
+        playWinner alice scheduled3   -- WB champion wins outright
+
+        _ <- unwrap =<< startTournament ownerId tid
+        unwrap =<< completeTournament ownerId tid
+
+      case result of
+        Left err         -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right tournament -> tournamentState tournament `shouldBe` Completed
+
+  describe "buildLosersTopology bye-awareness (Engine.BracketGeneration, pure)" $ do
+
+    it "gives LB1 an explicit bye slot when one WB1 sibling is a bye (n=3 into size 4)" $ do
+      let participants =
+            [ Individual (Player (PlayerName "P1"))
+            , Individual (Player (PlayerName "P2"))
+            , Individual (Player (PlayerName "P3"))
+            ]
+          wbNodes  = BracketGeneration.buildTopology 4
+          seededWB = Seeding.seedParticipants participants wbNodes
+          lbNodes  = BracketGeneration.buildLosersTopology seededWB 4
+
+      map nodeId lbNodes `shouldBe` [BracketNodeId 4, BracketNodeId 5]
+
+      let lb1 = lbNodes !! 0
+      nodeSlotA lb1 `shouldBe` AwaitingLoserOf (BracketNodeId 2)
+      nodeSlotB lb1 `shouldBe` ByeSlot
+      nodeRound lb1 `shouldBe` 1
+      nodeStage lb1 `shouldBe` Losers
+
+      let lbFinal = lbNodes !! 1
+      nodeSlotA lbFinal `shouldBe` AwaitingLoserOf (BracketNodeId 3)
+      nodeSlotB lbFinal `shouldBe` AwaitingWinnerOf (BracketNodeId 4)
+      nodeRound lbFinal `shouldBe` 2
+
+    it "gives an orphaned WB round-2 drop-in an explicit bye when its sibling family was fully byed (n=5 into size 8)" $ do
+      let participants =
+            [ Individual (Player (PlayerName "P1"))
+            , Individual (Player (PlayerName "P2"))
+            , Individual (Player (PlayerName "P3"))
+            , Individual (Player (PlayerName "P4"))
+            , Individual (Player (PlayerName "P5"))
+            ]
+          wbNodes  = BracketGeneration.buildTopology 8
+          seededWB = Seeding.seedParticipants participants wbNodes
+          lbNodes  = BracketGeneration.buildLosersTopology seededWB 8
+
+      map nodeId lbNodes `shouldBe` map BracketNodeId [8, 9, 10, 11, 12]
+
+      let [lb1, lb2a, lb2b, lb3, lbFinal] = lbNodes
+
+      -- LB1: pair (1,2) both byes -> no node for it. pair (3,4) one bye -> single node.
+      nodeSlotA lb1 `shouldBe` AwaitingLoserOf (BracketNodeId 4)
+      nodeSlotB lb1 `shouldBe` ByeSlot
+
+      -- LB2: node 5's loser has a real cross-seed partner (LB1's survivor).
+      nodeSlotA lb2a `shouldBe` AwaitingLoserOf (BracketNodeId 5)
+      nodeSlotB lb2a `shouldBe` AwaitingWinnerOf (BracketNodeId 8)
+
+      -- LB2: node 6's loser is the orphan -- its tagged sibling (node 5's family)
+      -- produced no LB1 survivor, so it gets an explicit bye instead of vanishing.
+      nodeSlotA lb2b `shouldBe` AwaitingLoserOf (BracketNodeId 6)
+      nodeSlotB lb2b `shouldBe` ByeSlot
+
+      -- LB3 (pure merge): both LB2 survivors share a tag, so they meet.
+      nodeSlotA lb3 `shouldBe` AwaitingWinnerOf (BracketNodeId 9)
+      nodeSlotB lb3 `shouldBe` AwaitingWinnerOf (BracketNodeId 10)
+
+      -- LB4 (LB final): WB final's loser drops in against the LB3 survivor.
+      nodeSlotA lbFinal `shouldBe` AwaitingLoserOf (BracketNodeId 7)
+      nodeSlotB lbFinal `shouldBe` AwaitingWinnerOf (BracketNodeId 11)
+
+  describe "buildRoundRobinTopology (Engine.BracketGeneration, pure)" $ do
+
+    it "generates n(n-1)/2 unique pairs for n=3, every node born ready" $ do
+      let p1 = Individual (Player (PlayerName "P1"))
+          p2 = Individual (Player (PlayerName "P2"))
+          p3 = Individual (Player (PlayerName "P3"))
+          nodes = BracketGeneration.buildRoundRobinTopology [p1, p2, p3]
+
+      map nodeId nodes `shouldBe` map BracketNodeId [1, 2, 3]
+      map (\n -> (nodeSlotA n, nodeSlotB n)) nodes `shouldBe`
+        [ (Filled p1, Filled p2)
+        , (Filled p1, Filled p3)
+        , (Filled p2, Filled p3)
+        ]
+      all (\n -> nodeRound n == 1 && nodeStage n == Winners) nodes `shouldBe` True
+
+    it "generates n(n-1)/2 unique pairs for n=4" $ do
+      let p1 = Individual (Player (PlayerName "P1"))
+          p2 = Individual (Player (PlayerName "P2"))
+          p3 = Individual (Player (PlayerName "P3"))
+          p4 = Individual (Player (PlayerName "P4"))
+          nodes = BracketGeneration.buildRoundRobinTopology [p1, p2, p3, p4]
+
+      map nodeId nodes `shouldBe` map BracketNodeId [1 .. 6]
+      map (\n -> (nodeSlotA n, nodeSlotB n)) nodes `shouldBe`
+        [ (Filled p1, Filled p2)
+        , (Filled p1, Filled p3)
+        , (Filled p1, Filled p4)
+        , (Filled p2, Filled p3)
+        , (Filled p2, Filled p4)
+        , (Filled p3, Filled p4)
+        ]
+
+  describe "RoundRobin (v0.8 RoundRobin sub-thread)" $ do
+
+    it "generates every pair as an immediately-playable match, and accepts a Draw as a terminal outcome" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "rr-owner"
+        let alice = Individual (Player (PlayerName "Alice"))
+            bob   = Individual (Player (PlayerName "Bob"))
+            carol = Individual (Player (PlayerName "Carol"))
+            participants = [alice, bob, carol]
+
+        tid <- createTournament NewTournament
+          { newTournamentName            = TournamentName "RoundRobin Draw Cup"
+          , newTournamentOrganizer       = OrganizerName "Test Organizer"
+          , newTournamentOwner           = ownerId
+          , newTournamentFormat          = RoundRobin
+          , newTournamentVisibility      = Public
+          , newTournamentMaxParticipants = 3
+          }
+        forM_ participants $ \p -> case p of
+          Individual player -> Repo.savePlayer player
+          Squad team         -> Repo.saveTeam team
+        advanceToRegistrationOpen ownerId tid
+        forM_ participants (\p -> unwrap =<< registerParticipant tid p)
+        _ <- unwrap =<< closeRegistration ownerId tid
+        bracketId <- unwrap =<< generateBracket ownerId tid
+
+        allMatches <- Repo.listMatchesForBracket bracketId
+        liftIO $ length allMatches `shouldBe` 3   -- n(n-1)/2 for n=3
+        liftIO $ all (\m -> matchStatus m == Scheduled) allMatches `shouldBe` True
+
+        let findMatch p q = head (filter (\m -> [matchCompetitorA m, matchCompetitorB m] `elem` [[p,q],[q,p]]) allMatches)
+            aliceBob   = findMatch alice bob
+            aliceCarol = findMatch alice carol
+            bobCarol   = findMatch bob carol
+
+        -- Exercises the new format-aware gate directly: Draw is rejected
+        -- for Single/DoubleElimination but must be accepted for RoundRobin.
+        _ <- unwrap =<< startMatch ownerId (matchId aliceBob)
+        drawResult <- recordMatchResult ownerId (matchId aliceBob) Draw
+
+        _ <- unwrap =<< startMatch ownerId (matchId aliceCarol)
+        _ <- unwrap =<< recordMatchResult ownerId (matchId aliceCarol) (Winner alice)
+
+        _ <- unwrap =<< startMatch ownerId (matchId bobCarol)
+        _ <- unwrap =<< recordMatchResult ownerId (matchId bobCarol) (Winner bob)
+
+        finalMatches <- Repo.listMatchesForBracket bracketId
+        pure (drawResult, finalMatches)
+
+      case result of
+        Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right (drawResult, finalMatches) -> do
+          case drawResult of
+            Left e  -> expectationFailure ("expected Draw to be accepted for RoundRobin, got: " ++ show e)
+            Right m -> do
+              matchStatus m `shouldBe` Match.Completed
+              matchOutcome m `shouldBe` Just Draw
+          length finalMatches `shouldBe` 3
+          all (\m -> matchStatus m == Match.Completed) finalMatches `shouldBe` True
+
+    it "completes once every match is terminal, even when the arbitrary last-generated match is the Draw" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "rr-owner-complete"
+        let alice = Individual (Player (PlayerName "Alice"))
+            bob   = Individual (Player (PlayerName "Bob"))
+            carol = Individual (Player (PlayerName "Carol"))
+            participants = [alice, bob, carol]
+
+        tid <- createTournament NewTournament
+          { newTournamentName            = TournamentName "RoundRobin Completion Cup"
+          , newTournamentOrganizer       = OrganizerName "Test Organizer"
+          , newTournamentOwner           = ownerId
+          , newTournamentFormat          = RoundRobin
+          , newTournamentVisibility      = Public
+          , newTournamentMaxParticipants = 3
+          }
+        forM_ participants $ \p -> case p of
+          Individual player -> Repo.savePlayer player
+          Squad team         -> Repo.saveTeam team
+        advanceToRegistrationOpen ownerId tid
+        forM_ participants (\p -> unwrap =<< registerParticipant tid p)
+        _ <- unwrap =<< closeRegistration ownerId tid
+        bracketId <- unwrap =<< generateBracket ownerId tid
+
+        allMatches <- Repo.listMatchesForBracket bracketId
+        let findMatch p q = head (filter (\m -> [matchCompetitorA m, matchCompetitorB m] `elem` [[p,q],[q,p]]) allMatches)
+            aliceBob   = findMatch alice bob
+            aliceCarol = findMatch alice carol
+            bobCarol   = findMatch bob carol
+
+        -- Before anything is played: must not be completable.
+        tooEarly <- completeTournament ownerId tid
+
+        _ <- unwrap =<< startMatch ownerId (matchId aliceBob)
+        _ <- unwrap =<< recordMatchResult ownerId (matchId aliceBob) (Winner alice)
+        _ <- unwrap =<< startMatch ownerId (matchId aliceCarol)
+        _ <- unwrap =<< recordMatchResult ownerId (matchId aliceCarol) (Winner alice)
+
+        -- Two of three done: still not completable.
+        stillEarly <- completeTournament ownerId tid
+
+        -- The last-generated match (Bob v Carol) is the Draw -- this is the
+        -- exact case the old GF1/reset-presence dispatch got wrong, since it
+        -- silently checked only this one arbitrary match via maximumBy.
+        _ <- unwrap =<< startMatch ownerId (matchId bobCarol)
+        _ <- unwrap =<< recordMatchResult ownerId (matchId bobCarol) Draw
+
+        _ <- unwrap =<< startTournament ownerId tid
+        afterAll <- completeTournament ownerId tid
+
+        pure (tooEarly, stillEarly, afterAll)
+
+      case result of
+        Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right (tooEarly, stillEarly, afterAll) -> do
+          tooEarly   `shouldBe` Left (CT.InvalidCompletion TournamentNotComplete)
+          stillEarly `shouldBe` Left (CT.InvalidCompletion TournamentNotComplete)
+          case afterAll of
+            Left e  -> expectationFailure ("expected completion to succeed once all 3 matches (incl. the Draw) are terminal, got: " ++ show e)
+            Right t -> tournamentState t `shouldBe` Completed
+
+  describe "Engine.Standings.computeStandings (pure)" $ do
+
+    it "breaks two separate 2-way ties via mini-league head-to-head (n=4)" $ do
+      let a = Individual (Player (PlayerName "A"))
+          b = Individual (Player (PlayerName "B"))
+          c = Individual (Player (PlayerName "C"))
+          d = Individual (Player (PlayerName "D"))
+          mkMatch i cA cB outcome = Match
+            { matchId = MatchId i, matchTournament = TournamentId 0
+            , matchBracket = BracketId 0, matchBracketNode = BracketNodeId (fromIntegral i)
+            , matchCompetitorA = cA, matchCompetitorB = cB
+            , matchStatus = Match.Completed, matchOutcome = Just outcome
+            }
+          matches =
+            [ mkMatch 1 a b (Winner a), mkMatch 2 a c (Winner a), mkMatch 3 a d (Winner d)
+            , mkMatch 4 b c (Winner b), mkMatch 5 b d (Winner b), mkMatch 6 c d (Winner c)
+            ]
+          standings = Standings.computeStandings matches
+      map standingParticipant standings `shouldBe` [a, b, c, d]
+      map standingPoints standings `shouldBe` [6, 6, 3, 3]
+
+    it "leaves a perfect 3-way cycle unresolved, stable arbitrary order" $ do
+      let a = Individual (Player (PlayerName "A"))
+          b = Individual (Player (PlayerName "B"))
+          c = Individual (Player (PlayerName "C"))
+          mkMatch i cA cB outcome = Match
+            { matchId = MatchId i, matchTournament = TournamentId 0
+            , matchBracket = BracketId 0, matchBracketNode = BracketNodeId (fromIntegral i)
+            , matchCompetitorA = cA, matchCompetitorB = cB
+            , matchStatus = Match.Completed, matchOutcome = Just outcome
+            }
+          matches = [ mkMatch 1 a b (Winner a), mkMatch 2 b c (Winner b), mkMatch 3 c a (Winner c) ]
+          standings = Standings.computeStandings matches
+      map standingParticipant standings `shouldBe` [a, b, c]
+      map standingPoints standings `shouldBe` [3, 3, 3]
+
+  describe "GetRoundRobinStandings" $ do
+
+    it "rejects a non-RoundRobin tournament" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "grs-owner-notrr"
+        tid <- createTournament NewTournament
+          { newTournamentName = TournamentName "Not RoundRobin Cup", newTournamentOrganizer = OrganizerName "Test Organizer"
+          , newTournamentOwner = ownerId, newTournamentFormat = SingleElimination
+          , newTournamentVisibility = Public, newTournamentMaxParticipants = 2 }
+        getRoundRobinStandings ownerId tid
+      case result of
+        Left err    -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right inner -> inner `shouldBe` Left (NotRoundRobin SingleElimination)
+
+    it "rejects when the bracket hasn't been generated yet" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "grs-owner-nobracket"
+        tid <- createTournament NewTournament
+          { newTournamentName = TournamentName "No Bracket RR Cup", newTournamentOrganizer = OrganizerName "Test Organizer"
+          , newTournamentOwner = ownerId, newTournamentFormat = RoundRobin
+          , newTournamentVisibility = Public, newTournamentMaxParticipants = 3 }
+        getRoundRobinStandings ownerId tid
+      case result of
+        Left err    -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right inner -> inner `shouldBe` Left GetRoundRobinStandings.BracketNotGenerated
+
+    it "rejects a non-owner viewing a Private tournament's standings" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId    <- createTestUser "grs-owner-private"
+        strangerId <- createTestUser "grs-stranger"
+        let participants@[alice,bob,carol] =
+              [ Individual (Player (PlayerName "Alice")), Individual (Player (PlayerName "Bob")), Individual (Player (PlayerName "Carol")) ]
+        tid <- createTournament NewTournament
+          { newTournamentName = TournamentName "Private RR Cup", newTournamentOrganizer = OrganizerName "Test Organizer"
+          , newTournamentOwner = ownerId, newTournamentFormat = RoundRobin
+          , newTournamentVisibility = Private, newTournamentMaxParticipants = 3 }
+        forM_ participants $ \p -> case p of Individual player -> Repo.savePlayer player; Squad team -> Repo.saveTeam team
+        advanceToRegistrationOpen ownerId tid
+        forM_ participants (\p -> unwrap =<< registerParticipant tid p)
+        _ <- unwrap =<< closeRegistration ownerId tid
+        _ <- unwrap =<< generateBracket ownerId tid
+        getRoundRobinStandings strangerId tid
+      case result of
+        Left err    -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right inner -> inner `shouldBe` Left (GRRS.Unauthorized NotAuthorizedToView)
+
+    it "allows the owner to view a Private tournament's standings" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "grs-owner-private2"
+        let participants@[alice,bob,carol] =
+              [ Individual (Player (PlayerName "Alice")), Individual (Player (PlayerName "Bob")), Individual (Player (PlayerName "Carol")) ]
+        tid <- createTournament NewTournament
+          { newTournamentName = TournamentName "Private RR Owner Cup", newTournamentOrganizer = OrganizerName "Test Organizer"
+          , newTournamentOwner = ownerId, newTournamentFormat = RoundRobin
+          , newTournamentVisibility = Private, newTournamentMaxParticipants = 3 }
+        forM_ participants $ \p -> case p of Individual player -> Repo.savePlayer player; Squad team -> Repo.saveTeam team
+        advanceToRegistrationOpen ownerId tid
+        forM_ participants (\p -> unwrap =<< registerParticipant tid p)
+        _ <- unwrap =<< closeRegistration ownerId tid
+        _ <- unwrap =<< generateBracket ownerId tid
+        getRoundRobinStandings ownerId tid
+      case result of
+        Left err    -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right inner -> case inner of
+          Left e  -> expectationFailure ("expected owner to view standings, got: " ++ show e)
+          Right _ -> pure ()
+
+    it "allows any authenticated caller to view a Public tournament's standings, with correct points" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId    <- createTestUser "grs-owner-public"
+        strangerId <- createTestUser "grs-stranger2"
+        let participants@[alice,bob,carol] =
+              [ Individual (Player (PlayerName "Alice")), Individual (Player (PlayerName "Bob")), Individual (Player (PlayerName "Carol")) ]
+        tid <- createTournament NewTournament
+          { newTournamentName = TournamentName "Public RR Cup", newTournamentOrganizer = OrganizerName "Test Organizer"
+          , newTournamentOwner = ownerId, newTournamentFormat = RoundRobin
+          , newTournamentVisibility = Public, newTournamentMaxParticipants = 3 }
+        forM_ participants $ \p -> case p of Individual player -> Repo.savePlayer player; Squad team -> Repo.saveTeam team
+        advanceToRegistrationOpen ownerId tid
+        forM_ participants (\p -> unwrap =<< registerParticipant tid p)
+        _ <- unwrap =<< closeRegistration ownerId tid
+        bracketId <- unwrap =<< generateBracket ownerId tid
+        allMatches <- Repo.listMatchesForBracket bracketId
+        let findMatch p q = head (filter (\m -> [matchCompetitorA m, matchCompetitorB m] `elem` [[p,q],[q,p]]) allMatches)
+            aliceBob = findMatch alice bob; aliceCarol = findMatch alice carol; bobCarol = findMatch bob carol
+        _ <- unwrap =<< startMatch ownerId (matchId aliceBob)
+        _ <- unwrap =<< recordMatchResult ownerId (matchId aliceBob) (Winner alice)
+        _ <- unwrap =<< startMatch ownerId (matchId aliceCarol)
+        _ <- unwrap =<< recordMatchResult ownerId (matchId aliceCarol) (Winner alice)
+        _ <- unwrap =<< startMatch ownerId (matchId bobCarol)
+        _ <- unwrap =<< recordMatchResult ownerId (matchId bobCarol) Draw
+        getRoundRobinStandings strangerId tid
+      case result of
+        Left err    -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right inner -> case inner of
+          Left e -> expectationFailure ("expected stranger to view Public standings, got: " ++ show e)
+          Right standings -> do
+            -- Alice beat both (3+3=6). Bob/Carol drew each other, both lost to
+            -- Alice (0+1=1 each) -- tied at 1, mini-league is just their own
+            -- drawn match (1-1 again), stays unresolved -- stable order asserted.
+            let alice = Individual (Player (PlayerName "Alice"))
+                bob   = Individual (Player (PlayerName "Bob"))
+                carol = Individual (Player (PlayerName "Carol"))
+                dave  = Individual (Player (PlayerName "Dave"))
+                participants = [alice, bob, carol, dave]
+
+            map standingPoints standings `shouldBe` [6, 1, 1]
+            head standings `shouldBe` Standing alice 6

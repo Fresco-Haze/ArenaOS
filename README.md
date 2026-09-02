@@ -6,9 +6,9 @@ A game-agnostic tournament management platform, built in pure Haskell.
 
 ArenaOS handles the backend logic for running tournament brackets — creating a tournament, registering participants, generating the bracket, and automatically advancing winners through each round as match results come in — with full accounts, ownership, lifecycle management, and an audit trail of everything that happens to a tournament.
 
-**Status: v0.5**
+**Status: v0.7**
 
-Five milestones in, driven entirely through a CLI:
+Seven milestones in, driven entirely through a CLI:
 
 ## v0.1 — Core Engine
 
@@ -55,23 +55,35 @@ v0.5 intentionally shipped one small, well-earned abstraction rather than a gene
 - **An audit trail for security-sensitive administrative actions** — every role grant, role revocation, and account status change is recorded with actor, affected user, operation, and a real UTC timestamp. Account status changes record both the previous and new value, not just the new one. Audit records are append-only, and a failed audit write rolls back the administrative action it would have recorded — an action that can't be logged doesn't happen.
 - Deliberately **not** built: audit coverage for administrative dashboard reads (read access wasn't judged clearly "security-sensitive" under the frozen requirements, and the frozen text doesn't say either way); tournament ownership transfer and other administrative intervention workflows (explicitly out of scope per the underlying requirement itself, not an oversight); any general-purpose role-assignment framework beyond what `Administrator` alone currently needs.
 
-Every decision above that wasn't directly specified by ArenaOS's frozen requirements — non-idempotent grants, who may manage Administrator, the last-Administrator safeguard, what counts as audit-worthy — is recorded as an explicit judgment call in the project's architecture decisions, not presented as something the requirements dictated.
+## v0.7 — Match & Competition Semantics: Score-Derived Outcomes, Double Elimination, Round Robin
+
+- **Score-derived match outcomes.** A new `Scoreable` typeclass and a concrete `EFootballScore` type (goal count for one competitor, validated non-negative via a smart constructor) let a game-specific result derive the generic `MatchOutcome` rather than requiring it to be entered directly. `recordEFootballResult` compares both competitors' scores and delegates into the existing match-result pipeline for authorization, lifecycle validation, and advancement — the generic `MatchOutcome`/`Match` types themselves stay completely untouched by any game-specific concept. A real atomicity bug was found by the test suite (a score could persist even when the underlying result recording failed, since a returned `Left` doesn't roll back a transaction the way a thrown exception does) and fixed by reordering writes so nothing persists until success is already confirmed, not by forcing an exception. Penalty shootouts, extra time, and aggregate/two-leg scoring are all deliberately out of scope — no frozen requirement calls for them yet.
+- **Draw and NoContest**, previously silent no-ops that advanced nobody, now explicitly rejected for elimination formats (`Single`/`DoubleElimination`) at the same validation tier as an invalid competitor, since a knockout bracket has no way to progress without a winner. This rule was later made format-aware (see below) once Round Robin needed the opposite behavior.
+- **`UnsupportedFormat` guard.** `TournamentFormat` was previously stored but never actually checked by bracket generation — generating a bracket for an unimplemented format now fails loudly and explicitly instead of silently producing the wrong topology.
+- **Double Elimination**, a full grand-final-with-bracket-reset implementation covering both power-of-2 and non-power-of-2 participant counts. A dedicated Losers Bracket topology with round-alternating pure/drop-in structure and cross-seeding, a Grand Final node with a fixed slot convention (Winners-origin vs. Losers-origin), and a reset match that only materializes if the Losers Bracket champion actually upsets the Winners Bracket champion in the Grand Final. Byes are handled correctly at every stage, including a genuine bye that only forms mid-tournament as results come in (a Losers Bracket node that starts out awaiting a real match's loser and only becomes bye-shaped once that match concludes) — automatic bye advancement now re-runs on every match completion, not only at bracket-generation time.
+- **Round Robin**, generating every participant pairing exactly once (`n(n-1)/2` matches, single round-robin only — double round-robin and round-by-round scheduling are both deliberately deferred as separate, unimplemented problems). Draw and NoContest are legitimate terminal outcomes here, since nothing in a round-robin format needs to advance. Tournament completion is redefined per format: elimination formats determine a champion from the final bracket node, Round Robin instead completes once every generated match has a terminal outcome — these had silently shared one code path keyed on the presence of a Grand-Final node, which happened to also match Round Robin's shape and would have produced an incorrect completion check; this is now dispatched explicitly on format.
+- **Round Robin standings**, computed by a pure, fully generic points policy (Win 3 / Draw 1 each / Loss 0, Forfeit and Disqualification treated the same as a normal win-or-loss with no cross-match consequences, NoContest scoring 0 for both sides — deliberately not treated as a draw, preserving the distinction between a contested even result and no legitimate result at all) with ties broken by a single head-to-head pass restricted to matches played only among the currently tied group. A perfect three-way (or larger) cycle is explicitly left unresolved after that pass, falling back to a stable but arbitrary order — deeper tiers (score/goal differential, iterative re-narrowing of a partial sub-tie) are deferred, not silently assumed away. Standings are readable mid-tournament, not just after completion. A new visibility-based read authorization rule was introduced specifically for this — public tournaments' standings are viewable by any authenticated user, private tournaments' only by their owner — distinct from every other authorization check in ArenaOS, which had so far been ownership- or role-based only, never visibility-based.
+- Deliberately **not** built: N-way match support and per-team ranked scoring (the PUBG-shaped gap first documented in v0.5, still not forced by concrete demand); any game beyond eFootball wired to score-derived outcomes; a CLI command exposing Round Robin standings (the use case exists and is tested, but isn't yet reachable from the command dispatcher).
+
+Every decision above that wasn't directly specified by ArenaOS's frozen requirements is recorded as an explicit judgment call in the project's architecture decisions, not presented as something the requirements dictated.
 
 ## Architecture
 
 A layered design, separating pure domain logic from persistence and orchestration:
 
-- **Domain** — core types (Tournament, Match, Bracket, Participant, Team, User, TournamentHistory) with no dependency on storage or IO
-- **Engine** — pure bracket logic: validation, bracket generation, seeding, bye resolution, advancement, materialization
-- **Application** — use cases that orchestrate the engine and domain rules against persistence (tournament lifecycle transitions, editing, dashboard, history, accounts, matches, team creation, game-specific registration)
+- **Domain** — core types (Tournament, Match, Bracket, Participant, Team, User, TournamentHistory, Scoreable) with no dependency on storage or IO
+- **Engine** — pure bracket logic: validation, bracket generation (single elimination, double elimination, round robin), seeding, bye resolution, advancement, materialization, standings
+- **Application** — use cases that orchestrate the engine and domain rules against persistence (tournament lifecycle transitions, editing, dashboard, history, accounts, matches, team creation, game-specific registration, score-derived results, standings)
 - **Shell** — SQLite persistence layer, plus file-based CLI sessions
 - **CLI** — a thin command dispatcher over the use cases; all business logic lives below this layer, not in it
 
-Two cross-cutting rules hold throughout: every mutating use case checks authorization before doing anything else — either ownership or, for administrative actions, Administrator role membership, both via `Application.Internal.Authorization` — and every lifecycle-sensitive use case validates tournament state before mutating (`Application.Internal.LifecycleTransition`).
+Two cross-cutting rules hold throughout: every mutating use case checks authorization before doing anything else — ownership, Administrator role membership, or (new in v0.7) tournament visibility, all via `Application.Internal.Authorization` — and every lifecycle-sensitive use case validates tournament state before mutating (`Application.Internal.LifecycleTransition`).
 
 ## Testing
 
-An hspec integration suite (71 examples) covers the full stack — golden-path lifecycles, bye-path bracket generation, error paths (wrong state, non-owner, invalid transitions), the full v0.3 lifecycle/editing/history state machine, team creation, CoD/PUBG registration, and v0.6's role-based authorization, grant/revoke semantics, the last-Administrator safeguard, and audit-trail recording.
+An hspec integration suite (93 examples) covers the full stack — golden-path lifecycles, bye-path bracket generation, error paths (wrong state, non-owner, invalid transitions), the full v0.3 lifecycle/editing/history state machine, team creation, CoD/PUBG registration, v0.6's role-based authorization/grant-revoke/audit-trail behavior, and v0.7's score-derived outcomes (including the atomicity fix), Double Elimination across both power-of-2 and non-power-of-2 participant counts, and Round Robin's generation, format-aware result recording, completion, and standings (including its tie-breaking behavior).
+
+
 
 Run the suite:
 

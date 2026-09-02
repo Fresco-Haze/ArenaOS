@@ -2,9 +2,10 @@ module Application.Internal.Authorization
   ( AuthorizationError(..)
   , requireTournamentOwner
   , requireAdministrator
+  , requireTournamentVisible
   ) where
 
-import Domain.Tournament (Tournament(..))
+import Domain.Tournament (Tournament(..),Visibility(..))
 import Domain.Ids (UserId)
 import Domain.Role (Role(..))
 
@@ -31,6 +32,7 @@ import Domain.Role (Role(..))
 data AuthorizationError
   = NotTournamentOwner
   | NotAdministrator
+  | NotAuthorizedToView
   deriving (Eq, Show)
 
 requireTournamentOwner :: UserId -> Tournament -> Either AuthorizationError ()
@@ -42,3 +44,16 @@ requireAdministrator :: [Role] -> Either AuthorizationError ()
 requireAdministrator roles
   | Administrator `elem` roles = Right ()
   | otherwise                  = Left NotAdministrator
+
+-- requireTournamentVisible: read-access authorization ("can this
+-- caller view this tournament's data at all"), distinct from
+-- requireTournamentOwner's write-gating ownership check. New as of
+-- the RoundRobin standings use case -- not an established pattern
+-- reused from elsewhere, ArenaOS had no visibility-gated read path
+-- before this. Public tournaments are visible to any authenticated
+-- caller; Private tournaments still require ownership.
+requireTournamentVisible :: UserId -> Tournament -> Either AuthorizationError ()
+requireTournamentVisible uid tournament
+  | tournamentVisibility tournament == Public = Right ()
+  | uid == tournamentOwner tournament         = Right ()
+  | otherwise                                 = Left NotAuthorizedToView

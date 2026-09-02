@@ -77,6 +77,9 @@ import Domain.TournamentHistory
 import Application.UseCases.GetAdministratorDashboard
   (getAdministratorDashboard, GetAdministratorDashboardError(..))
 import Application.Internal.TournamentOverview (TournamentOverview(..), StateCounts(..))
+import Domain.Scoreable (EFootballScore, mkEFootballScore, unEFootballScore)
+import Application.UseCases.RecordEFootballResult( recordEFootballResult )
+import Shell.Persistence.SQLite.EFootballScoreRepository ()
 
 
 
@@ -544,6 +547,22 @@ dispatch args = case args of
           [] -> putStrLn "No audit events."
           _  -> mapM_ print events
 
+  ["record-efootball-result", uidStr, midStr, scoreAStr, scoreBStr] ->
+   case (readMaybe uidStr :: Maybe Int, readMaybe midStr :: Maybe Int64) of
+    (Nothing, _) -> liftIO $ putStrLn "userId must be an integer"
+    (_, Nothing) -> liftIO $ putStrLn "matchId must be an integer"
+    (Just uidInt, Just midInt) ->
+      case (readMaybe scoreAStr :: Maybe Int, readMaybe scoreBStr :: Maybe Int) of
+        (Nothing, _) -> liftIO $ putStrLn "competitor A score must be an integer"
+        (_, Nothing) -> liftIO $ putStrLn "competitor B score must be an integer"
+        (Just rawA, Just rawB) ->
+         case (mkEFootballScore rawA, mkEFootballScore rawB) of
+            (Left err, _) -> liftIO $ putStrLn ("Invalid score for A: " ++ show err)
+            (_, Left err) -> liftIO $ putStrLn ("Invalid score for B: " ++ show err)
+            (Right scoreA, Right scoreB) -> do
+              outcome <- recordEFootballResult (UserId uidInt) (MatchId midInt) scoreA scoreB
+              liftIO $ either (putStrLn . ("Record eFootball result failed: " ++) . show) print outcome
+
   
 
   _ -> liftIO $ putStrLn usage
@@ -587,6 +606,7 @@ usage = unlines
   , "  admin-dashboard <actorId>"
   , "  list-roles <userId>"
   , "  audit-log <userId>"
+  , "  record-efootball-result <userId> <matchId> <scoreA> <scoreB>"
   ]
 
 parseStatus :: String -> Maybe AccountStatus

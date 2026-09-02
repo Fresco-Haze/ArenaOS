@@ -88,9 +88,12 @@ statements =
     -- DI-10.
 
   , "CREATE TABLE IF NOT EXISTS brackets ( \
-    \  id            INTEGER PRIMARY KEY, \
-    \  tournament_id INTEGER NOT NULL REFERENCES tournaments(id) \
-    \)"
+  \  id            INTEGER PRIMARY KEY, \
+  \  tournament_id INTEGER NOT NULL REFERENCES tournaments(id), \
+  \  gf1_node_id   INTEGER REFERENCES bracket_nodes(id), \
+  \  reset_node_id INTEGER REFERENCES bracket_nodes(id), \
+  \  CHECK ((gf1_node_id IS NULL) = (reset_node_id IS NULL)) \
+  \)"
 
   , "CREATE TABLE IF NOT EXISTS bracket_nodes ( \
     \  id         INTEGER PRIMARY KEY, \
@@ -171,7 +174,11 @@ statements =
     \  CHECK (operation != 'AccountStatusChanged' \
     \         OR (previous_status IS NOT NULL AND new_status IS NOT NULL)) \
     \)"
-
+  , "CREATE TABLE IF NOT EXISTS efootball_scores ( \
+   \  match_id            INTEGER PRIMARY KEY REFERENCES matches(id), \
+   \  competitor_a_score  INTEGER NOT NULL CHECK (competitor_a_score >= 0), \
+   \  competitor_b_score  INTEGER NOT NULL CHECK (competitor_b_score >= 0) \
+   \)"
     
   
 

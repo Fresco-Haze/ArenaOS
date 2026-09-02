@@ -34,4 +34,6 @@ data BracketNode = BracketNode
 data Bracket = Bracket
     { bracketId         :: BracketId
     , bracketTournament :: TournamentId
+    , bracketGF1NodeId    :: Maybe BracketNodeId
+    , bracketResetNodeId  :: Maybe BracketNodeId
     } deriving (Show, Eq)
