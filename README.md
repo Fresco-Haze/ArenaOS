@@ -6,9 +6,15 @@ A game-agnostic tournament management platform, built in pure Haskell.
 
 ArenaOS handles the backend logic for running tournament brackets — creating a tournament, registering participants, generating the bracket, and automatically advancing winners through each round as match results come in — with full accounts, ownership, lifecycle management, and an audit trail of everything that happens to a tournament.
 
+<<<<<<< HEAD
 **Status: v0.7**
 
 Seven milestones in, driven entirely through a CLI:
+=======
+**Status: v0.6**
+
+Six milestones in, driven entirely through a CLI:
+>>>>>>> origin/main
 
 ## v0.1 — Core Engine
 
@@ -133,7 +139,7 @@ register-pubg <tournamentId> <teamName> <captainName> [member1 member2 ...]
 
 dashboard
 history <userId> <tournamentId>
-```
+
 
 grant-role <actorId> <userId> <role>
 revoke-role <actorId> <userId> <role>
@@ -141,3 +147,4 @@ list-roles <userId>
 admin-dashboard <actorId>
 set-account-status <actorId> <userId> <status>
 audit-log <userId>
+'''
