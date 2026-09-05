@@ -44,7 +44,7 @@ recordEFootballResult
   -> EFootballScore
   -> m (Either RecordEFootballResultError Match)
 recordEFootballResult currentUser mid scoreA scoreB =
-  withTxN $ do
+  withTxEither $ do
     match <- Repo.getMatch mid
     let outcome = deriveOutcome match scoreA scoreB
     outcomeResult <- recordMatchResultInTx currentUser mid outcome

@@ -81,8 +81,8 @@ generateBracket currentUser tid = do
               case first InvalidBracket (Validation.validateParticipants tournament participants) of
                 Left err -> pure (Left err)
                 Right validParticipants -> do
-
                   case tournamentFormat tournament of
+
                     DoubleElimination -> do
                       let size          = BracketGeneration.bracketSize (length validParticipants)
                           wbNodes       = BracketGeneration.buildTopology size
@@ -91,64 +91,12 @@ generateBracket currentUser tid = do
                              BracketGeneration.buildDoubleEliminationTopology seededWB size
                           resolvedNodes = ByeResolution.resolveAutomaticAdvancements (seededWB ++ otherNodes)
 
-                      withTxN $ do
-                          bracketId <- Repo.createBracket tid
-                          nodeIdMap <- Repo.saveBracket
-                              Bracket { bracketId = bracketId, bracketTournament = tid
-                                      , bracketGF1NodeId = Just gf1Id, bracketResetNodeId = Just resetId }
-                              resolvedNodes
-
-                          let readyIds = Materialization.readyNodes resolvedNodes
-                              ready     = mapMaybe (\nid -> find (\n -> nodeId n == nid) resolvedNodes) readyIds
-
-                          let storageNodeId n = case Map.lookup (nodeId n) nodeIdMap of
-                                  Just sid -> sid
-                                  Nothing  -> error ("generateBracket: BracketNodeId " ++ show (nodeId n) ++ " not found in idMap")
-
-                          matchIds <- mapM (\n -> createMatchForReadyNode tid bracketId (storageNodeId n) n) ready
-
-                          let newMatches =
-                                  Materialization.materializeReadyMatches
-                                      matchIds tid bracketId nodeIdMap ready
-
-                          mapM_ Repo.saveMatch newMatches
-
-                          Repo.saveTournament tournament { tournamentBracket = Just bracketId }
-
-                          Repo.recordHistoryEvent tid BracketGenerated
-
-                          pure (Right bracketId)
+                      finalizeBracketGeneration tid tournament resolvedNodes (Just gf1Id) (Just resetId)
 
                     RoundRobin -> do
                       let resolvedNodes = BracketGeneration.buildRoundRobinTopology validParticipants
 
-                      withTxN $ do
-                          bracketId <- Repo.createBracket tid
-                          nodeIdMap <- Repo.saveBracket
-                              Bracket { bracketId = bracketId, bracketTournament = tid
-                                      , bracketGF1NodeId = Nothing, bracketResetNodeId = Nothing }
-                              resolvedNodes
-
-                          let readyIds = Materialization.readyNodes resolvedNodes
-                              ready     = mapMaybe (\nid -> find (\n -> nodeId n == nid) resolvedNodes) readyIds
-
-                          let storageNodeId n = case Map.lookup (nodeId n) nodeIdMap of
-                                  Just sid -> sid
-                                  Nothing  -> error ("generateBracket: BracketNodeId " ++ show (nodeId n) ++ " not found in idMap")
-
-                          matchIds <- mapM (\n -> createMatchForReadyNode tid bracketId (storageNodeId n) n) ready
-
-                          let newMatches =
-                                  Materialization.materializeReadyMatches
-                                      matchIds tid bracketId nodeIdMap ready
-
-                          mapM_ Repo.saveMatch newMatches
-
-                          Repo.saveTournament tournament { tournamentBracket = Just bracketId }
-
-                          Repo.recordHistoryEvent tid BracketGenerated
-
-                          pure (Right bracketId)
+                      finalizeBracketGeneration tid tournament resolvedNodes Nothing Nothing
 
                     SingleElimination -> do
                       let size          = BracketGeneration.bracketSize (length validParticipants)
@@ -156,33 +104,7 @@ generateBracket currentUser tid = do
                           seeded        = Seeding.seedParticipants validParticipants topology
                           resolvedNodes = ByeResolution.resolveAutomaticAdvancements seeded
 
-                      withTxN $ do
-                          bracketId <- Repo.createBracket tid
-                          nodeIdMap <- Repo.saveBracket
-                              Bracket { bracketId = bracketId, bracketTournament = tid
-                                      , bracketGF1NodeId = Nothing, bracketResetNodeId = Nothing }
-                              resolvedNodes
-
-                          let readyIds = Materialization.readyNodes resolvedNodes
-                              ready     = mapMaybe (\nid -> find (\n -> nodeId n == nid) resolvedNodes) readyIds
-
-                          let storageNodeId n = case Map.lookup (nodeId n) nodeIdMap of
-                                  Just sid -> sid
-                                  Nothing  -> error ("generateBracket: BracketNodeId " ++ show (nodeId n) ++ " not found in idMap")
-
-                          matchIds <- mapM (\n -> createMatchForReadyNode tid bracketId (storageNodeId n) n) ready
-
-                          let newMatches =
-                                  Materialization.materializeReadyMatches
-                                      matchIds tid bracketId nodeIdMap ready
-
-                          mapM_ Repo.saveMatch newMatches
-
-                          Repo.saveTournament tournament { tournamentBracket = Just bracketId }
-
-                          Repo.recordHistoryEvent tid BracketGenerated
-
-                          pure (Right bracketId)
+                      finalizeBracketGeneration tid tournament resolvedNodes Nothing Nothing
 
 -- | All three TournamentFormat constructors are matched explicitly
 -- (no catch-all) so GHC's exhaustiveness checking itself guards
@@ -193,3 +115,45 @@ requireSupportedFormat tournament =
     SingleElimination -> Right ()
     DoubleElimination -> Right ()
     RoundRobin        -> Right ()
+
+
+-- | Shared tail of bracket generation: persists the bracket/nodes,
+-- materializes whatever's immediately ready, attaches the bracket to
+-- the tournament, and records the BracketGenerated history event --
+-- identical across all three formats (Pattern 3 per v0.8.1's
+-- classification: vacuous Either, every branch above already resolved
+-- to Right before reaching here, so withTxN not withTxEither is correct).
+finalizeBracketGeneration
+  :: ( BracketRepository m, MatchRepository m, TournamentRepository m,ParticipantRepository m
+     , TournamentHistoryRepository m, Transactional m )
+  => TournamentId -> Tournament -> [BracketNode]
+  -> Maybe BracketNodeId -> Maybe BracketNodeId
+  -> m (Either GenerateBracketError BracketId)
+finalizeBracketGeneration tid tournament resolvedNodes mGf1Id mResetId =
+  withTxN $ do
+      bracketId <- Repo.createBracket tid
+      nodeIdMap <- Repo.saveBracket
+          Bracket { bracketId = bracketId, bracketTournament = tid
+                  , bracketGF1NodeId = mGf1Id, bracketResetNodeId = mResetId }
+          resolvedNodes
+
+      let readyIds = Materialization.readyNodes resolvedNodes
+          ready     = mapMaybe (\nid -> find (\n -> nodeId n == nid) resolvedNodes) readyIds
+
+      let storageNodeId n = case Map.lookup (nodeId n) nodeIdMap of
+              Just sid -> sid
+              Nothing  -> error ("generateBracket: BracketNodeId " ++ show (nodeId n) ++ " not found in idMap")
+
+      matchIds <- mapM (\n -> createMatchForReadyNode tid bracketId (storageNodeId n) n) ready
+
+      let newMatches =
+              Materialization.materializeReadyMatches
+                  matchIds tid bracketId nodeIdMap ready
+
+      mapM_ Repo.saveMatch newMatches
+
+      Repo.saveTournament tournament { tournamentBracket = Just bracketId }
+
+      Repo.recordHistoryEvent tid BracketGenerated
+
+      pure (Right bracketId)

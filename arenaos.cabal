@@ -79,6 +79,7 @@ library
                       Application.UseCases.RecordEFootballResult
                       Engine.Standings
                       Application.UseCases.GetRoundRobinStandings
+                      Application.UseCases.CorrectMatchResult
 
 
     hs-source-dirs:   .

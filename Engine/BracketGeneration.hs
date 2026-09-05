@@ -1,4 +1,4 @@
-module Engine.BracketGeneration (bracketSize, buildTopology, buildLosersTopology,buildDoubleEliminationTopology,buildRoundRobinTopology) where
+module Engine.BracketGeneration (bracketSize, buildTopology, buildLosersTopology,buildDoubleEliminationTopology,buildRoundRobinTopology,findParent,findSibling) where
 
 import Domain.Bracket (BracketNode(..), BracketNodeId(..), BracketSide(..), MatchSlot(..))
 import Data.List (find, partition,nub,tails)

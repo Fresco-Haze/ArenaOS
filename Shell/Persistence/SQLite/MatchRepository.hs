@@ -52,6 +52,8 @@ instance MatchRepository SQLiteM where
             \ status, outcome_type, outcome_participant_id) \
             \VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) \
             \ON CONFLICT(id) DO UPDATE SET \
+            \  competitor_a_participant_id = excluded.competitor_a_participant_id,\
+            \  competitor_b_participant_id = excluded.competitor_b_participant_id,\
             \  status = excluded.status, \
             \  outcome_type = excluded.outcome_type, \
             \  outcome_participant_id = excluded.outcome_participant_id"

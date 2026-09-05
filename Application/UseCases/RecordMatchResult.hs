@@ -48,8 +48,9 @@ recordMatchResult
      , TournamentRepository m, Transactional m )
   => UserId -> MatchId -> MatchOutcome
   -> m (Either RecordMatchResultError Match)
+
 recordMatchResult currentUser matchId outcome =
-  withTxN $ recordMatchResultInTx currentUser matchId outcome
+  withTxEither $ recordMatchResultInTx currentUser matchId outcome
 
 -- | Same logic as before, unchanged -- now assumes it is already running
 -- inside a transaction opened by its caller.

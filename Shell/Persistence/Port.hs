@@ -52,6 +52,7 @@ import Domain.Audit (AuditEvent(..))
 import Domain.Scoreable (EFootballScore)
 import Data.Map.Strict (Map)
 import Data.Text (Text)
+import Data.Typeable (Typeable)
 -- Owns Participant identity (ADR-006) and its constituents (Player, Team).
 -- resolveParticipant is the one operation every other repository depends
 -- on indirectly -- it belongs here, per DP-002, not duplicated at each
@@ -160,6 +161,9 @@ class Monad m => MatchRepository m where
 
 class Monad m => Transactional m where
     withTxN :: m a -> m a
+    withTxEither
+      :: (Typeable e, Typeable a)
+      => m (Either e a) -> m (Either e a)
 
 data NewUser = NewUser
     { newUserUsername     :: Username

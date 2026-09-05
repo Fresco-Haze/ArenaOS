@@ -1,3 +1,4 @@
+{-# LANGUAGE ScopedTypeVariables #-}
 -- Shell.Persistence.SQLite.Connection
 -- Stage 1: Infrastructure.
 --
@@ -18,7 +19,7 @@ module Shell.Persistence.SQLite.Connection
   , Transactional(..)
   ) where
 
-import Control.Exception (bracket)
+import Control.Exception (Exception, catch, throwIO, try,bracket)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Reader (ReaderT, runReaderT, MonadReader, ask)
 import Database.SQLite.Simple (Connection, open, close, execute_)
@@ -26,6 +27,7 @@ import qualified Database.SQLite.Simple as SQLite
 
 import Shell.Persistence.SQLite.Error (PersistenceError, runSQLite)
 import Shell.Persistence.Port (Transactional(..))
+import Data.Typeable (Typeable)
 
 -- | Open a connection, run an action, always close -- even on
 -- exception. Also enables foreign key enforcement, which SQLite
@@ -42,6 +44,13 @@ withConnection dbPath action =
 -- automatically if the action throws.
 withTx :: Connection -> IO a -> IO a
 withTx = SQLite.withTransaction
+
+newtype TxRollback e a = TxRollback (Either e a)
+
+instance (Typeable e, Typeable a) => Show (TxRollback e a) where
+  show _ = "TxRollback <internal transaction control, not a real exception>"
+
+instance (Typeable e, Typeable a) => Exception (TxRollback e a)
 
 
 -- | Environment available to every SQLiteM computation.
@@ -73,3 +82,21 @@ withTxM (SQLiteM action) = SQLiteM $ do
 
 instance Transactional SQLiteM where
   withTxN = withTxM
+  withTxEither = withTxEitherM
+
+withTxEitherM
+  :: forall e a. (Typeable e, Typeable a)
+  => SQLiteM (Either e a) -> SQLiteM (Either e a)
+withTxEitherM (SQLiteM action) = SQLiteM $ do
+    env <- ask
+    liftIO $ do
+        outcome <- try $ withTx (envConnection env) $ do
+            r <- runReaderT action env
+            case r of
+                Left _  -> throwIO (TxRollback r)
+                Right _ -> pure r
+        case outcome of
+            Left (TxRollback r) -> pure r
+            Right r              -> pure r
+
+
