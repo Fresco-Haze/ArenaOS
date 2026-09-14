@@ -13,10 +13,12 @@ import Shell.Persistence.Port (MatchRepository, TournamentRepository)
 import qualified Shell.Persistence.Port as Repo
 
 import Application.Internal.Authorization (AuthorizationError, requireTournamentOwner)
+import Application.Internal.LifecycleTransition (LifecycleError, requireOperationallyActive)
 
 data StartMatchError
   = Unauthorized AuthorizationError
   | InvalidMatch MatchError
+  | InvalidLifecycle LifecycleError 
   deriving (Eq, Show)
 
 startMatch
@@ -27,13 +29,15 @@ startMatch
 startMatch currentUser matchId = do
   match      <- Repo.getMatch matchId
   tournament <- Repo.getTournament (matchTournament match)
-
   case first Unauthorized (requireTournamentOwner currentUser tournament) of
     Left err -> pure (Left err)
     Right () ->
-      fmap (first InvalidMatch) $ case matchStatus match of
-        Scheduled -> do
-          let updated = match { matchStatus = InProgress }
-          Repo.saveMatch updated
-          pure (Right updated)
-        status -> pure (Left (MatchNotScheduled status))
+      case first InvalidLifecycle (requireOperationallyActive tournament) of
+        Left err -> pure (Left err)
+        Right () ->
+          fmap (first InvalidMatch) $ case matchStatus match of
+            Scheduled -> do
+              let updated = match { matchStatus = InProgress }
+              Repo.saveMatch updated
+              pure (Right updated)
+            status -> pure (Left (MatchNotScheduled status))

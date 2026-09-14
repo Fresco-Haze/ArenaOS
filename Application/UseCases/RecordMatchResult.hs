@@ -34,10 +34,12 @@ import Shell.Persistence.SQLite.BracketRepository ()
 import Application.Internal.MatchCreation (createMatchForReadyNode)
 import Application.Internal.Authorization (AuthorizationError, requireTournamentOwner)
 import qualified Engine.ByeResolution as ByeResolution
+import Application.Internal.LifecycleTransition (LifecycleError, requireOperationallyActive)
 
 data RecordMatchResultError
   = Unauthorized AuthorizationError
   | InvalidMatch MatchError
+  | InvalidLifecycle LifecycleError 
   deriving (Eq, Show)
 
 -- | Public entry point. Owns the transaction boundary so that callers
@@ -65,28 +67,26 @@ recordMatchResultInTx currentUser matchId outcome = do
   case first Unauthorized (requireTournamentOwner currentUser tournament) of
     Left err -> pure (Left err)
     Right () ->
-      fmap (first InvalidMatch) $ case outcomeParticipant outcome of
-        Just p | p /= matchCompetitorA match && p /= matchCompetitorB match ->
-          pure (Left (ParticipantNotInMatch p))
-        Nothing | tournamentFormat tournament /= RoundRobin ->
-          -- Draw/NoContest have nowhere to advance in an elimination bracket
-          -- (Single/DoubleElimination) -- reject here, same validation tier
-          -- as ParticipantNotInMatch, rather than writing a "completed"
-          -- match that silently can't advance. RoundRobin has no such
-          -- constraint (nothing ever propagates), so it falls through below.
-          pure (Left (OutcomeNotAdvanceable outcome))
-        _ -> case matchStatus match of
-          InProgress -> do
-            let completed = Advancement.completeMatch outcome match
-            Repo.saveMatch completed
-            case outcome of
-              Winner p           -> advanceAndMaterialize completed p
-              Forfeit p          -> advanceAndMaterialize completed p
-              Disqualification p -> advanceAndMaterialize completed p
-              Draw                -> pure ()  -- RoundRobin only, now reachable
-              NoContest           -> pure ()  -- RoundRobin only, now reachable
-            pure (Right completed)
-          status -> pure (Left (MatchNotInProgress status))
+      case first InvalidLifecycle (requireOperationallyActive tournament) of
+        Left err -> pure (Left err)
+        Right () ->
+          fmap (first InvalidMatch) $ case outcomeParticipant outcome of
+            Just p | p /= matchCompetitorA match && p /= matchCompetitorB match ->
+              pure (Left (ParticipantNotInMatch p))
+            Nothing | tournamentFormat tournament /= RoundRobin ->
+              pure (Left (OutcomeNotAdvanceable outcome))
+            _ -> case matchStatus match of
+              InProgress -> do
+                let completed = Advancement.completeMatch outcome match
+                Repo.saveMatch completed
+                case outcome of
+                  Winner p           -> advanceAndMaterialize completed p
+                  Forfeit p          -> advanceAndMaterialize completed p
+                  Disqualification p -> advanceAndMaterialize completed p
+                  Draw                -> pure ()
+                  NoContest           -> pure ()
+                pure (Right completed)
+              status -> pure (Left (MatchNotInProgress status))
 
 -- | Draw and NoContest carry no advancing participant, so there's
 -- nothing to validate against the match's competitors.

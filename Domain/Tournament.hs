@@ -27,7 +27,7 @@ newtype OrganizerName = OrganizerName {unOrganizerName :: String} deriving (Show
 
 data TournamentState
     = Draft | Published | RegistrationOpen | RegistrationClosed
-    | InProgress | Completed | Cancelled
+    | InProgress | Paused | Completed | Cancelled
     deriving (Show, Eq)
 
 data TournamentFormat = SingleElimination | DoubleElimination | RoundRobin

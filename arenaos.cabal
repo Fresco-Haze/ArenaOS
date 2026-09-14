@@ -80,6 +80,10 @@ library
                       Engine.Standings
                       Application.UseCases.GetRoundRobinStandings
                       Application.UseCases.CorrectMatchResult
+                      Engine.Correction.DoubleEliminationLineage
+                      Application.UseCases.ReopenTournament
+                      Application.UseCases.PauseTournament
+                      Application.UseCases.ResumeTournament 
 
 
     hs-source-dirs:   .

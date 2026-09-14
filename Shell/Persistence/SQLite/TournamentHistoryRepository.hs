@@ -45,6 +45,9 @@ eventToRow TournamentStarted            = ("TournamentStarted", Nothing, Nothing
 eventToRow TournamentCompleted          = ("TournamentCompleted", Nothing, Nothing)
 eventToRow (TournamentCancelled reason) = ("TournamentCancelled", Just reason, Nothing)
 eventToRow (ConfigurationChanged field) = ("ConfigurationChanged", Nothing, Just (changedFieldToText field))
+eventToRow (TournamentReopened reason) = ("TournamentReopened", Just reason, Nothing)
+eventToRow TournamentPaused  = ("TournamentPaused", Nothing, Nothing)
+eventToRow TournamentResumed = ("TournamentResumed", Nothing, Nothing)
 
 rowToEvent :: String -> Maybe String -> Maybe String -> IO TournamentHistoryEvent
 rowToEvent "TournamentCreated"   _ _ = pure TournamentCreated
@@ -62,6 +65,11 @@ rowToEvent "ConfigurationChanged" _ (Just fieldText) = do
     pure (ConfigurationChanged field)
 rowToEvent "ConfigurationChanged" _ Nothing =
     throwIO (StorageFailure "ConfigurationChanged row missing changed_field")
+rowToEvent "TournamentReopened" (Just reason) _ = pure (TournamentReopened reason)
+rowToEvent "TournamentReopened" Nothing _ =
+    throwIO (StorageFailure "TournamentReopened row missing reopening_reason")
+rowToEvent "TournamentPaused"  _ _ = pure TournamentPaused
+rowToEvent "TournamentResumed" _ _ = pure TournamentResumed
 rowToEvent other _ _ =
     throwIO (StorageFailure ("Unknown tournament history event type in storage: " ++ other))
 

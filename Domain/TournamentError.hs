@@ -6,4 +6,5 @@ data TournamentError
   = TournamentNotComplete
   | TournamentAlreadyCompleted
   | TournamentAlreadyCancelled
+  | TournamentPaused
   deriving (Eq, Show)

@@ -26,8 +26,13 @@ data TournamentHistoryEvent
     | TournamentCancelled
         { cancellationReason :: String
         }
+    | TournamentPaused
+    | TournamentResumed
     | ConfigurationChanged
         { changedField :: ChangedField
+        }
+    | TournamentReopened
+        { reopeningReason :: String
         }
     deriving (Show, Eq)
 

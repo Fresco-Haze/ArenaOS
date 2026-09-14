@@ -68,7 +68,7 @@ statements =
     \                        ('SingleElimination', 'DoubleElimination', 'RoundRobin')), \
     \  state              TEXT NOT NULL CHECK (state IN \
     \                        ('Draft', 'Published', 'RegistrationOpen', 'RegistrationClosed', \
-    \                         'InProgress', 'Completed', 'Cancelled')), \
+    \                         'InProgress', 'Paused', 'Completed', 'Cancelled')), \
     \  visibility         TEXT NOT NULL CHECK (visibility IN ('Public', 'Private')), \
     \  max_participants   INTEGER NOT NULL CHECK (max_participants >= 2), \
     \  bracket_id         INTEGER REFERENCES brackets(id) \

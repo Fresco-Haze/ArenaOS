@@ -7,9 +7,10 @@ module Application.Internal.LifecycleTransition
     ( LifecycleError(..)
     , requireTournamentState
     , requireTournamentStateNotIn
+    , requireOperationallyActive
     ) where
 
-import Domain.Tournament (Tournament(..), TournamentState)
+import Domain.Tournament (Tournament(..), TournamentState(..))
 
 -- Two constructors, not one: InvalidTransition has a single well-defined
 -- "expected" state to report (used by the five equality-check call
@@ -42,3 +43,12 @@ requireTournamentStateNotIn :: [TournamentState] -> Tournament -> Either Lifecyc
 requireTournamentStateNotIn forbidden tournament
     | tournamentState tournament `elem` forbidden = Left (ForbiddenState (tournamentState tournament))
     | otherwise = Right ()
+-- | Competitive/progression operations require the tournament to be
+-- actively playable -- which, per the existing established workflow,
+-- means RegistrationClosed (matches are played before StartTournament
+-- is formally called) OR InProgress. Blocks every pre-play state, plus
+-- the two new operational-freeze states this guard exists to protect
+-- against.
+requireOperationallyActive :: Tournament -> Either LifecycleError ()
+requireOperationallyActive = requireTournamentStateNotIn
+  [Draft, Published, RegistrationOpen, Paused, Completed, Cancelled]

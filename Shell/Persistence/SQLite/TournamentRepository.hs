@@ -51,6 +51,7 @@ stateToText Published         = "Published"
 stateToText RegistrationOpen  = "RegistrationOpen"
 stateToText RegistrationClosed = "RegistrationClosed"
 stateToText InProgress        = "InProgress"
+stateToText Paused            = "Paused"
 stateToText Completed         = "Completed"
 stateToText Cancelled         = "Cancelled"
 
@@ -60,6 +61,7 @@ textToState "Published"          = pure Published
 textToState "RegistrationOpen"   = pure RegistrationOpen
 textToState "RegistrationClosed" = pure RegistrationClosed
 textToState "InProgress"         = pure InProgress
+textToState "Paused"             = pure Paused
 textToState "Completed"          = pure Completed
 textToState "Cancelled"          = pure Cancelled
 textToState other                =

@@ -33,6 +33,7 @@ import Data.Maybe (isJust)
 data CompleteTournamentError
   = Unauthorized AuthorizationError
   | InvalidCompletion TournamentError
+  | TournamentPausedCannotComplete
   deriving (Eq, Show)
 
 completeTournament currentUser tid = do
@@ -43,6 +44,7 @@ completeTournament currentUser tid = do
       fmap (first InvalidCompletion) $ case tournamentState tournament of
         Domain.Tournament.Completed -> pure (Left TournamentAlreadyCompleted)
         Domain.Tournament.Cancelled -> pure (Left TournamentAlreadyCancelled)
+        Domain.Tournament.Paused    -> pure (Left TournamentPaused)
         _         -> case tournamentBracket tournament of
           Nothing -> pure (Left TournamentNotComplete)
           Just bracketId -> do
