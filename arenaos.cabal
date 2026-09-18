@@ -84,6 +84,8 @@ library
                       Application.UseCases.ReopenTournament
                       Application.UseCases.PauseTournament
                       Application.UseCases.ResumeTournament 
+                      Application.UseCases.SetMatchSchedule
+                      Application.UseCases.GetTournamentSchedule
 
 
     hs-source-dirs:   .

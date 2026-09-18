@@ -112,26 +112,7 @@ statements =
     \  CHECK ((slot_b_type = 'Filled') = (slot_b_participant_id IS NOT NULL)) \
     \)"
 
-  , "CREATE TABLE IF NOT EXISTS matches ( \
-    \  id                            INTEGER PRIMARY KEY, \
-    \  tournament_id                 INTEGER NOT NULL REFERENCES tournaments(id), \
-    \  bracket_id                    INTEGER NOT NULL REFERENCES brackets(id), \
-    \  bracket_node_id               INTEGER NOT NULL REFERENCES bracket_nodes(id), \
-    \  competitor_a_participant_id   INTEGER NOT NULL REFERENCES participants(id), \
-    \  competitor_b_participant_id   INTEGER NOT NULL REFERENCES participants(id), \
-    \  status                        TEXT NOT NULL CHECK (status IN \
-    \                                   ('Scheduled', 'InProgress', 'Completed', 'Cancelled')), \
-    \  outcome_type                  TEXT CHECK (outcome_type IN \
-    \                                   ('Winner', 'Draw', 'Forfeit', 'Disqualification', 'NoContest')), \
-    \  outcome_participant_id        INTEGER REFERENCES participants(id), \
-    \  CHECK ((status = 'Completed') = (outcome_type IS NOT NULL)), \
-    \  CHECK (outcome_type NOT IN ('Winner', 'Forfeit', 'Disqualification') \
-    \         OR outcome_participant_id IS NOT NULL), \
-    \  CHECK (outcome_type NOT IN ('Draw', 'NoContest') \
-    \         OR outcome_participant_id IS NULL), \
-    \  CHECK (competitor_a_participant_id <> competitor_b_participant_id) \
-    \)"
-    -- DI-06, DI-11.
+  
 
   , " CREATE TABLE IF NOT EXISTS users (\
      \ id            INTEGER PRIMARY KEY AUTOINCREMENT,\
@@ -179,6 +160,33 @@ statements =
    \  competitor_a_score  INTEGER NOT NULL CHECK (competitor_a_score >= 0), \
    \  competitor_b_score  INTEGER NOT NULL CHECK (competitor_b_score >= 0) \
    \)"
+
+  , "CREATE TABLE IF NOT EXISTS matches ( \
+    \  id                            INTEGER PRIMARY KEY, \
+    \  tournament_id                 INTEGER NOT NULL REFERENCES tournaments(id), \
+    \  bracket_id                    INTEGER NOT NULL REFERENCES brackets(id), \
+    \  bracket_node_id               INTEGER NOT NULL REFERENCES bracket_nodes(id), \
+    \  competitor_a_participant_id   INTEGER NOT NULL REFERENCES participants(id), \
+    \  competitor_b_participant_id   INTEGER NOT NULL REFERENCES participants(id), \
+    \  status                        TEXT NOT NULL CHECK (status IN \
+    \                                   ('Scheduled', 'InProgress', 'Completed', 'Cancelled')), \
+    \  outcome_type                  TEXT CHECK (outcome_type IN \
+    \                                   ('Winner', 'Draw', 'Forfeit', 'Disqualification', 'NoContest')), \
+    \  outcome_participant_id        INTEGER REFERENCES participants(id), \
+    \  scheduled_start                TEXT, \
+    \  CHECK ((status = 'Completed') = (outcome_type IS NOT NULL)), \
+    \  CHECK (outcome_type NOT IN ('Winner', 'Forfeit', 'Disqualification') \
+    \         OR outcome_participant_id IS NOT NULL), \
+    \  CHECK (outcome_type NOT IN ('Draw', 'NoContest') \
+    \         OR outcome_participant_id IS NULL), \
+    \  CHECK (competitor_a_participant_id <> competitor_b_participant_id) \
+    \)"
+    -- DI-06, DI-11.
+    -- v0.10: scheduled_start is nullable TEXT, canonical UTC ISO 8601
+    -- (YYYY-MM-DDTHH:MM:SSZ). No DB-level format CHECK -- canonicality
+    -- is enforced entirely by MatchRepository's explicit encode/decode
+    -- codec (isolated divergence from sqlite-simple's default UTCTime
+    -- instance, which audit_log.occurred_at still uses unchanged).
     
   
 

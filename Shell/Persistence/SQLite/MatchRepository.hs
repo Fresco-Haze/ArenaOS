@@ -19,6 +19,8 @@ import Shell.Persistence.SQLite.Common (lookupParticipantId)
 import Shell.Persistence.SQLite.Connection (SQLiteEnv(envConnection), SQLiteM)
 import Shell.Persistence.SQLite.Error (PersistenceError(..))
 import Shell.Persistence.SQLite.ParticipantRepository ()
+import Data.Text (Text, pack, unpack)
+import Data.Time (UTCTime, defaultTimeLocale, formatTime, parseTimeM)
 
 
 instance MatchRepository SQLiteM where
@@ -49,14 +51,15 @@ instance MatchRepository SQLiteM where
             "INSERT INTO matches \
             \(id, tournament_id, bracket_id, bracket_node_id, \
             \ competitor_a_participant_id, competitor_b_participant_id, \
-            \ status, outcome_type, outcome_participant_id) \
-            \VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) \
+            \ status, outcome_type, outcome_participant_id, scheduled_start) \
+            \VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
             \ON CONFLICT(id) DO UPDATE SET \
             \  competitor_a_participant_id = excluded.competitor_a_participant_id,\
             \  competitor_b_participant_id = excluded.competitor_b_participant_id,\
             \  status = excluded.status, \
             \  outcome_type = excluded.outcome_type, \
-            \  outcome_participant_id = excluded.outcome_participant_id"
+            \  outcome_participant_id = excluded.outcome_participant_id, \
+            \  scheduled_start = excluded.scheduled_start"
             ( unMatchId       (matchId m)
             , unTournamentId  (matchTournament m)
             , unBracketId     (matchBracket m)
@@ -66,6 +69,7 @@ instance MatchRepository SQLiteM where
             , statusToText (matchStatus m)
             , outcomeType
             , outcomeParticipant
+            , encodeScheduledStart (matchScheduledStart m)
             )
 
     getMatch :: MatchId -> SQLiteM Match
@@ -75,7 +79,7 @@ instance MatchRepository SQLiteM where
             (query conn
                 "SELECT tournament_id, bracket_id, bracket_node_id, \
                 \competitor_a_participant_id, competitor_b_participant_id, status, \
-                \outcome_type, outcome_participant_id \
+                \outcome_type, outcome_participant_id, scheduled_start \
                 \FROM matches WHERE id = ?"
                 (Only (unMatchId mid))
                 :: IO [MatchRow])
@@ -90,10 +94,10 @@ instance MatchRepository SQLiteM where
             (query conn
                 "SELECT id, tournament_id, bracket_id, bracket_node_id, \
                 \competitor_a_participant_id, competitor_b_participant_id, status, \
-                \outcome_type, outcome_participant_id \
+                \outcome_type, outcome_participant_id, scheduled_start \
                 \FROM matches WHERE bracket_id = ? ORDER BY id"
                 (Only bid)
-                :: IO [(Int64, Int64, Int64, Int64, Int64, Int64, Text, Maybe Text, Maybe Int64)])
+                :: IO [(Int64, Int64, Int64, Int64, Int64, Int64, Text, Maybe Text, Maybe Int64, Maybe Text)])
         mapM hydrateListedMatch rows
 
     deleteMatch :: MatchId -> SQLiteM ()
@@ -167,13 +171,14 @@ validateStatusOutcome (MatchId mid) status outcome =
 
 -- (tournament_id, bracket_id, bracket_node_id, competitor_a_id, competitor_b_id,
 --  status, outcome_type, outcome_participant_id)
-type MatchRow = (Int64, Int64, Int64, Int64, Int64, Text, Maybe Text, Maybe Int64)
+type MatchRow = (Int64, Int64, Int64, Int64, Int64, Text, Maybe Text, Maybe Int64, Maybe Text)
 
 hydrateMatch :: MatchId -> MatchRow -> SQLiteM Match
-hydrateMatch mid (tid, bid, bnid, aPid, bPid, statusText, outcomeType, outcomePid) = do
+hydrateMatch mid (tid, bid, bnid, aPid, bPid, statusText, outcomeType, outcomePid, scheduledStartText) = do
     status  <- textToStatus statusText
     outcome <- columnsToMatchOutcome outcomeType outcomePid
     validateStatusOutcome mid status outcome
+    scheduledStart <- decodeScheduledStart scheduledStartText
     compA <- getParticipant (ParticipantId (fromIntegral aPid))
     compB <- getParticipant (ParticipantId (fromIntegral bPid))
     let nodeId' = BracketNodeId (fromIntegral bnid)
@@ -186,10 +191,24 @@ hydrateMatch mid (tid, bid, bnid, aPid, bPid, statusText, outcomeType, outcomePi
         , matchCompetitorB       = compB
         , matchStatus       = status
         , matchOutcome      = outcome
+        , matchScheduledStart = scheduledStart
         }
 
 hydrateListedMatch
-    :: (Int64, Int64, Int64, Int64, Int64, Int64, Text, Maybe Text, Maybe Int64)
+    :: (Int64, Int64, Int64, Int64, Int64, Int64, Text, Maybe Text, Maybe Int64, Maybe Text)
     -> SQLiteM Match
-hydrateListedMatch (mid, tid, bid, bnid, aPid, bPid, statusText, outcomeType, outcomePid) =
-    hydrateMatch (MatchId mid) (tid, bid, bnid, aPid, bPid, statusText, outcomeType, outcomePid)
+hydrateListedMatch (mid, tid, bid, bnid, aPid, bPid, statusText, outcomeType, outcomePid, scheduledStartText) =
+    hydrateMatch (MatchId mid) (tid, bid, bnid, aPid, bPid, statusText, outcomeType, outcomePid, scheduledStartText)
+
+encodeScheduledStart :: Maybe UTCTime -> Maybe Text
+encodeScheduledStart Nothing  = Nothing
+encodeScheduledStart (Just t) =
+    Just (pack (formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%SZ" t))
+
+decodeScheduledStart :: Maybe Text -> SQLiteM (Maybe UTCTime)
+decodeScheduledStart Nothing = pure Nothing
+decodeScheduledStart (Just t) =
+    case parseTimeM False defaultTimeLocale "%Y-%m-%dT%H:%M:%SZ" (unpack t) of
+        Just utc -> pure (Just utc)
+        Nothing  -> liftIO $ throwIO $ StorageFailure
+            ("Non-canonical or malformed scheduled_start in storage: " ++ unpack t)

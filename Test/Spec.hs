@@ -6,10 +6,11 @@ import Control.Monad (forM_)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Reader (ask)
 import System.Directory (doesFileExist, removeFile)
-import Data.Time (getCurrentTime)
+import Data.Time (getCurrentTime, UTCTime(..), fromGregorian)
 import Data.Maybe(isJust)
 import Data.List(find)
 import Data.Either (isLeft, isRight)
+import Database.SQLite.Simple (execute, Only(..))
 
 import Shell.Persistence.SQLite.Connection (SQLiteM, SQLiteEnv(envConnection), runSQLiteM)
 import Shell.Persistence.SQLite.Schema (initializeSchema)
@@ -32,6 +33,7 @@ import Shell.Persistence.SQLite.UserRepository ()
 import Shell.Persistence.SQLite.TournamentHistoryRepository ()
 import Shell.Persistence.SQLite.RoleRepository ()
 import Shell.Persistence.SQLite.AuditLogRepository ()
+import Shell.Persistence.SQLite.Error (PersistenceError(..))
 
 import Domain.Participant (Participant(..), Player(..), PlayerName(..), Team(..), TeamName(..), TeamCaptain(..))
 import Domain.Tournament
@@ -128,6 +130,10 @@ import Domain.TournamentHistory
       )
   )
 import qualified Domain.TournamentHistory as TournamentHistory
+import Application.UseCases.SetMatchSchedule (setMatchSchedule, SetMatchScheduleError(..))
+import qualified Application.UseCases.SetMatchSchedule as SMS
+import Application.UseCases.GetTournamentSchedule (getTournamentSchedule, GetTournamentScheduleError(..))
+import qualified Application.UseCases.GetTournamentSchedule as GTS
 
 
 data TestTxError = TestTxError deriving (Eq, Show)
@@ -2847,6 +2853,7 @@ spec = before_ resetTestDb $ do
             , matchBracket = BracketId 0, matchBracketNode = BracketNodeId (fromIntegral i)
             , matchCompetitorA = cA, matchCompetitorB = cB
             , matchStatus = Match.Completed, matchOutcome = Just outcome
+            , matchScheduledStart = Nothing
             }
           matches =
             [ mkMatch 1 a b (Winner a), mkMatch 2 a c (Winner a), mkMatch 3 a d (Winner d)
@@ -2865,6 +2872,7 @@ spec = before_ resetTestDb $ do
             , matchBracket = BracketId 0, matchBracketNode = BracketNodeId (fromIntegral i)
             , matchCompetitorA = cA, matchCompetitorB = cB
             , matchStatus = Match.Completed, matchOutcome = Just outcome
+            , matchScheduledStart = Nothing
             }
           matches = [ mkMatch 1 a b (Winner a), mkMatch 2 b c (Winner b), mkMatch 3 c a (Winner c) ]
           standings = Standings.computeStandings matches
@@ -4580,3 +4588,461 @@ spec = before_ resetTestDb $ do
           let pausedIdx  = length (takeWhile (/= TournamentHistory.TournamentPaused) events)
               resumedIdx = length (takeWhile (/= TournamentResumed) events)
           pausedIdx `shouldSatisfy` (< resumedIdx)
+
+  describe "Match Scheduling persistence (v0.10)" $ do
+
+    it "round-trips Nothing (a freshly materialized match has no scheduled start)" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "sched-nothing-owner"
+        let alice = Individual (Player (PlayerName "Alice"))
+            bob   = Individual (Player (PlayerName "Bob"))
+            participants = [alice, bob]
+        tid <- createTournament NewTournament
+          { newTournamentName            = TournamentName "Schedule Nothing Cup"
+          , newTournamentOrganizer       = OrganizerName "Test Organizer"
+          , newTournamentOwner           = ownerId
+          , newTournamentFormat          = SingleElimination
+          , newTournamentVisibility      = Public
+          , newTournamentMaxParticipants = 2
+          }
+        forM_ participants $ \p -> case p of
+          Individual player -> Repo.savePlayer player
+          Squad team         -> Repo.saveTeam team
+        advanceToRegistrationOpen ownerId tid
+        forM_ participants (\p -> unwrap =<< registerParticipant tid p)
+        _ <- unwrap =<< closeRegistration ownerId tid
+        bracketId <- unwrap =<< generateBracket ownerId tid
+        matches <- Repo.listMatchesForBracket bracketId
+        Repo.getMatch (matchId (head matches))
+
+      case result of
+        Left err        -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right fetched    -> matchScheduledStart fetched `shouldBe` Nothing
+
+    it "round-trips a canonical UTCTime exactly through saveMatch/getMatch" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "sched-roundtrip-owner"
+        let alice = Individual (Player (PlayerName "Alice"))
+            bob   = Individual (Player (PlayerName "Bob"))
+            participants = [alice, bob]
+        tid <- createTournament NewTournament
+          { newTournamentName            = TournamentName "Schedule Roundtrip Cup"
+          , newTournamentOrganizer       = OrganizerName "Test Organizer"
+          , newTournamentOwner           = ownerId
+          , newTournamentFormat          = SingleElimination
+          , newTournamentVisibility      = Public
+          , newTournamentMaxParticipants = 2
+          }
+        forM_ participants $ \p -> case p of
+          Individual player -> Repo.savePlayer player
+          Squad team         -> Repo.saveTeam team
+        advanceToRegistrationOpen ownerId tid
+        forM_ participants (\p -> unwrap =<< registerParticipant tid p)
+        _ <- unwrap =<< closeRegistration ownerId tid
+        bracketId <- unwrap =<< generateBracket ownerId tid
+        matches <- Repo.listMatchesForBracket bracketId
+        let m = head matches
+            scheduled = UTCTime (fromGregorian 2026 9 15) (14 * 3600)  -- 2026-09-15T14:00:00Z
+
+        Repo.saveMatch m { matchScheduledStart = Just scheduled }
+        refetched <- Repo.getMatch (matchId m)
+        pure (scheduled, refetched)
+
+      case result of
+        Left err                     -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right (scheduled, refetched) -> matchScheduledStart refetched `shouldBe` Just scheduled
+
+    it "rejects a non-canonical scheduled_start value on read, rather than silently coercing" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "sched-corrupt-owner"
+        let alice = Individual (Player (PlayerName "Alice"))
+            bob   = Individual (Player (PlayerName "Bob"))
+            participants = [alice, bob]
+        tid <- createTournament NewTournament
+          { newTournamentName            = TournamentName "Schedule Corrupt Cup"
+          , newTournamentOrganizer       = OrganizerName "Test Organizer"
+          , newTournamentOwner           = ownerId
+          , newTournamentFormat          = SingleElimination
+          , newTournamentVisibility      = Public
+          , newTournamentMaxParticipants = 2
+          }
+        forM_ participants $ \p -> case p of
+          Individual player -> Repo.savePlayer player
+          Squad team         -> Repo.saveTeam team
+        advanceToRegistrationOpen ownerId tid
+        forM_ participants (\p -> unwrap =<< registerParticipant tid p)
+        _ <- unwrap =<< closeRegistration ownerId tid
+        bracketId <- unwrap =<< generateBracket ownerId tid
+        matches <- Repo.listMatchesForBracket bracketId
+        let m = head matches
+
+        -- Deliberately bypass encodeScheduledStart entirely -- write a
+        -- non-canonical (space-separated, sqlite-simple-default-shaped)
+        -- string directly, the same shape audit_log.occurred_at actually
+        -- persists. This state is only reachable by going around the
+        -- codec, same rationale as the existing "defensive" tests.
+        conn <- ask >>= \env -> pure (envConnection env)
+        liftIO $ execute conn
+          "UPDATE matches SET scheduled_start = ? WHERE id = ?"
+          ("2026-09-15 14:00:00.000000" :: Text, unMatchId (matchId m))
+
+        Repo.getMatch (matchId m)
+
+      case result of
+        Left (StorageFailure _) -> pure ()  -- expected: decode rejects, doesn't coerce
+        Left other  -> expectationFailure ("expected StorageFailure, got: " ++ show other)
+        Right m     -> expectationFailure
+          ("expected getMatch to fail on non-canonical scheduled_start, got: " ++ show m)
+
+  describe "SetMatchSchedule (v0.10)" $ do
+
+    it "rejects a non-owner" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId    <- createTestUser "sms-owner"
+        impostorId <- createTestUser "sms-impostor"
+        let alice = Individual (Player (PlayerName "Alice"))
+            bob   = Individual (Player (PlayerName "Bob"))
+            participants = [alice, bob]
+        tid <- createTournament NewTournament
+          { newTournamentName = TournamentName "SMS Ownership Cup"
+          , newTournamentOrganizer = OrganizerName "Test Organizer"
+          , newTournamentOwner = ownerId, newTournamentFormat = SingleElimination
+          , newTournamentVisibility = Public, newTournamentMaxParticipants = 2 }
+        forM_ participants $ \p -> case p of
+          Individual player -> Repo.savePlayer player
+          Squad team         -> Repo.saveTeam team
+        advanceToRegistrationOpen ownerId tid
+        forM_ participants (\p -> unwrap =<< registerParticipant tid p)
+        _ <- unwrap =<< closeRegistration ownerId tid
+        bracketId <- unwrap =<< generateBracket ownerId tid
+        matches <- Repo.listMatchesForBracket bracketId
+        let m = head matches
+            scheduled = UTCTime (fromGregorian 2026 9 15) (14 * 3600)
+
+        setMatchSchedule impostorId (matchId m) (Just scheduled)
+
+      case result of
+        Left err     -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right inner  -> inner `shouldBe` Left (SMS.Unauthorized NotTournamentOwner)
+
+    it "rejects a match that isn't Scheduled" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "sms-notscheduled-owner"
+        let alice = Individual (Player (PlayerName "Alice"))
+            bob   = Individual (Player (PlayerName "Bob"))
+            participants = [alice, bob]
+        tid <- createTournament NewTournament
+          { newTournamentName = TournamentName "SMS NotScheduled Cup"
+          , newTournamentOrganizer = OrganizerName "Test Organizer"
+          , newTournamentOwner = ownerId, newTournamentFormat = SingleElimination
+          , newTournamentVisibility = Public, newTournamentMaxParticipants = 2 }
+        forM_ participants $ \p -> case p of
+          Individual player -> Repo.savePlayer player
+          Squad team         -> Repo.saveTeam team
+        advanceToRegistrationOpen ownerId tid
+        forM_ participants (\p -> unwrap =<< registerParticipant tid p)
+        _ <- unwrap =<< closeRegistration ownerId tid
+        bracketId <- unwrap =<< generateBracket ownerId tid
+        matches <- Repo.listMatchesForBracket bracketId
+        let m = head matches
+            scheduled = UTCTime (fromGregorian 2026 9 15) (14 * 3600)
+        _ <- unwrap =<< startMatch ownerId (matchId m)   -- now InProgress
+
+        setMatchSchedule ownerId (matchId m) (Just scheduled)
+
+      case result of
+        Left err     -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right inner  -> inner `shouldBe` Left (SMS.InvalidMatch (MatchNotScheduled Match.InProgress))
+
+    it "rejects a Completed tournament" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "sms-completed-owner"
+        let alice = Individual (Player (PlayerName "Alice"))
+            bob   = Individual (Player (PlayerName "Bob"))
+            participants = [alice, bob]
+        tid <- createTournament NewTournament
+          { newTournamentName = TournamentName "SMS Completed Cup"
+          , newTournamentOrganizer = OrganizerName "Test Organizer"
+          , newTournamentOwner = ownerId, newTournamentFormat = SingleElimination
+          , newTournamentVisibility = Public, newTournamentMaxParticipants = 2 }
+        forM_ participants $ \p -> case p of
+          Individual player -> Repo.savePlayer player
+          Squad team         -> Repo.saveTeam team
+        advanceToRegistrationOpen ownerId tid
+        forM_ participants (\p -> unwrap =<< registerParticipant tid p)
+        _ <- unwrap =<< closeRegistration ownerId tid
+        bracketId <- unwrap =<< generateBracket ownerId tid
+        matches <- Repo.listMatchesForBracket bracketId
+        let m = head matches
+            scheduled = UTCTime (fromGregorian 2026 9 15) (14 * 3600)
+        _ <- unwrap =<< startTournament ownerId tid
+        _ <- unwrap =<< startMatch ownerId (matchId m)
+        _ <- unwrap =<< recordMatchResult ownerId (matchId m) (Winner (matchCompetitorA m))
+        _ <- unwrap =<< completeTournament ownerId tid
+
+        setMatchSchedule ownerId (matchId m) (Just scheduled)
+
+      case result of
+        Left err     -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right inner  -> inner `shouldBe` Left (SMS.InvalidLifecycle (ForbiddenState Completed))
+
+    it "rejects a Cancelled tournament even when the match is still Scheduled" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "sms-cancelled-owner"
+        let alice = Individual (Player (PlayerName "Alice"))
+            bob   = Individual (Player (PlayerName "Bob"))
+            participants = [alice, bob]
+        tid <- createTournament NewTournament
+          { newTournamentName = TournamentName "SMS Cancelled Cup"
+          , newTournamentOrganizer = OrganizerName "Test Organizer"
+          , newTournamentOwner = ownerId, newTournamentFormat = SingleElimination
+          , newTournamentVisibility = Public, newTournamentMaxParticipants = 2 }
+        forM_ participants $ \p -> case p of
+          Individual player -> Repo.savePlayer player
+          Squad team         -> Repo.saveTeam team
+        advanceToRegistrationOpen ownerId tid
+        forM_ participants (\p -> unwrap =<< registerParticipant tid p)
+        _ <- unwrap =<< closeRegistration ownerId tid
+        bracketId <- unwrap =<< generateBracket ownerId tid
+        matches <- Repo.listMatchesForBracket bracketId
+        let m = head matches
+            scheduled = UTCTime (fromGregorian 2026 9 15) (14 * 3600)
+        _ <- unwrap =<< startTournament ownerId tid
+        _ <- unwrap =<< cancelTournament ownerId tid "SetMatchSchedule guard test"
+        -- Match m is still Scheduled -- CancelTournament never touches
+        -- match rows -- so this exercises the tournament-lifecycle
+        -- branch specifically, not the match-status branch.
+
+        setMatchSchedule ownerId (matchId m) (Just scheduled)
+
+      case result of
+        Left err     -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right inner  -> inner `shouldBe` Left (SMS.InvalidLifecycle (ForbiddenState Cancelled))
+
+    it "succeeds while the tournament is Paused -- the guard's actual motivating case" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "sms-paused-owner"
+        let alice = Individual (Player (PlayerName "Alice"))
+            bob   = Individual (Player (PlayerName "Bob"))
+            carol = Individual (Player (PlayerName "Carol"))
+            dave  = Individual (Player (PlayerName "Dave"))
+            participants = [alice, bob, carol, dave]
+        tid <- createTournament NewTournament
+          { newTournamentName = TournamentName "SMS Paused Cup"
+          , newTournamentOrganizer = OrganizerName "Test Organizer"
+          , newTournamentOwner = ownerId, newTournamentFormat = SingleElimination
+          , newTournamentVisibility = Public, newTournamentMaxParticipants = 4 }
+        forM_ participants $ \p -> case p of
+          Individual player -> Repo.savePlayer player
+          Squad team         -> Repo.saveTeam team
+        advanceToRegistrationOpen ownerId tid
+        forM_ participants (\p -> unwrap =<< registerParticipant tid p)
+        _ <- unwrap =<< closeRegistration ownerId tid
+        bracketId <- unwrap =<< generateBracket ownerId tid
+        matches <- Repo.listMatchesForBracket bracketId
+        let m = head matches   -- a semi -- still Scheduled, untouched
+            scheduled = UTCTime (fromGregorian 2026 9 15) (14 * 3600)
+        _ <- unwrap =<< startTournament ownerId tid
+        _ <- unwrap =<< pauseTournament ownerId tid
+
+        outcome <- setMatchSchedule ownerId (matchId m) (Just scheduled)
+        pure (outcome, scheduled)
+
+      case result of
+        Left err                    -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right (outcome, scheduled)  -> case outcome of
+          Left e         -> expectationFailure ("expected scheduling to succeed while Paused, got: " ++ show e)
+          Right updated  -> matchScheduledStart updated `shouldBe` Just scheduled
+
+    it "sets then clears a schedule through the use case itself, round-tripping via getMatch" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "sms-roundtrip-owner"
+        let alice = Individual (Player (PlayerName "Alice"))
+            bob   = Individual (Player (PlayerName "Bob"))
+            participants = [alice, bob]
+        tid <- createTournament NewTournament
+          { newTournamentName = TournamentName "SMS Roundtrip Cup"
+          , newTournamentOrganizer = OrganizerName "Test Organizer"
+          , newTournamentOwner = ownerId, newTournamentFormat = SingleElimination
+          , newTournamentVisibility = Public, newTournamentMaxParticipants = 2 }
+        forM_ participants $ \p -> case p of
+          Individual player -> Repo.savePlayer player
+          Squad team         -> Repo.saveTeam team
+        advanceToRegistrationOpen ownerId tid
+        forM_ participants (\p -> unwrap =<< registerParticipant tid p)
+        _ <- unwrap =<< closeRegistration ownerId tid
+        bracketId <- unwrap =<< generateBracket ownerId tid
+        matches <- Repo.listMatchesForBracket bracketId
+        let m = head matches
+            scheduled = UTCTime (fromGregorian 2026 9 15) (14 * 3600)
+
+        _        <- unwrap =<< setMatchSchedule ownerId (matchId m) (Just scheduled)
+        afterSet <- Repo.getMatch (matchId m)
+
+        _          <- unwrap =<< setMatchSchedule ownerId (matchId m) Nothing
+        afterClear <- Repo.getMatch (matchId m)
+
+        pure (afterSet, afterClear)
+
+      case result of
+        Left err                        -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right (afterSet, afterClear)    -> do
+          matchScheduledStart afterSet   `shouldBe` Just (UTCTime (fromGregorian 2026 9 15) (14 * 3600))
+          matchScheduledStart afterClear `shouldBe` Nothing
+
+  describe "GetTournamentSchedule (v0.10)" $ do
+
+    it "rejects when the bracket hasn't been generated yet" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "gts-owner-nobracket"
+        tid <- createTournament NewTournament
+          { newTournamentName = TournamentName "GTS No Bracket Cup", newTournamentOrganizer = OrganizerName "Test Organizer"
+          , newTournamentOwner = ownerId, newTournamentFormat = SingleElimination
+          , newTournamentVisibility = Public, newTournamentMaxParticipants = 2 }
+        getTournamentSchedule ownerId tid
+      case result of
+        Left err    -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right inner -> inner `shouldBe` Left GTS.BracketNotGenerated
+
+    it "rejects a non-owner viewing a Private tournament's schedule" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId    <- createTestUser "gts-owner-private"
+        strangerId <- createTestUser "gts-stranger"
+        let alice = Individual (Player (PlayerName "Alice"))
+            bob   = Individual (Player (PlayerName "Bob"))
+            participants = [alice, bob]
+        tid <- createTournament NewTournament
+          { newTournamentName = TournamentName "GTS Private Cup", newTournamentOrganizer = OrganizerName "Test Organizer"
+          , newTournamentOwner = ownerId, newTournamentFormat = SingleElimination
+          , newTournamentVisibility = Private, newTournamentMaxParticipants = 2 }
+        forM_ participants $ \p -> case p of Individual player -> Repo.savePlayer player; Squad team -> Repo.saveTeam team
+        advanceToRegistrationOpen ownerId tid
+        forM_ participants (\p -> unwrap =<< registerParticipant tid p)
+        _ <- unwrap =<< closeRegistration ownerId tid
+        _ <- unwrap =<< generateBracket ownerId tid
+        getTournamentSchedule strangerId tid
+      case result of
+        Left err    -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right inner -> inner `shouldBe` Left (GTS.Unauthorized NotAuthorizedToView)
+
+    it "allows the owner to view a Private tournament's schedule" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "gts-owner-private2"
+        let alice = Individual (Player (PlayerName "Alice"))
+            bob   = Individual (Player (PlayerName "Bob"))
+            participants = [alice, bob]
+        tid <- createTournament NewTournament
+          { newTournamentName = TournamentName "GTS Private Owner Cup", newTournamentOrganizer = OrganizerName "Test Organizer"
+          , newTournamentOwner = ownerId, newTournamentFormat = SingleElimination
+          , newTournamentVisibility = Private, newTournamentMaxParticipants = 2 }
+        forM_ participants $ \p -> case p of Individual player -> Repo.savePlayer player; Squad team -> Repo.saveTeam team
+        advanceToRegistrationOpen ownerId tid
+        forM_ participants (\p -> unwrap =<< registerParticipant tid p)
+        _ <- unwrap =<< closeRegistration ownerId tid
+        _ <- unwrap =<< generateBracket ownerId tid
+        getTournamentSchedule ownerId tid
+      case result of
+        Left err    -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right inner -> case inner of
+          Left e  -> expectationFailure ("expected owner to view schedule, got: " ++ show e)
+          Right _ -> pure ()
+
+    it "allows any authenticated caller to view a Public tournament's schedule" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId    <- createTestUser "gts-owner-public"
+        strangerId <- createTestUser "gts-stranger2"
+        let alice = Individual (Player (PlayerName "Alice"))
+            bob   = Individual (Player (PlayerName "Bob"))
+            participants = [alice, bob]
+        tid <- createTournament NewTournament
+          { newTournamentName = TournamentName "GTS Public Cup", newTournamentOrganizer = OrganizerName "Test Organizer"
+          , newTournamentOwner = ownerId, newTournamentFormat = SingleElimination
+          , newTournamentVisibility = Public, newTournamentMaxParticipants = 2 }
+        forM_ participants $ \p -> case p of Individual player -> Repo.savePlayer player; Squad team -> Repo.saveTeam team
+        advanceToRegistrationOpen ownerId tid
+        forM_ participants (\p -> unwrap =<< registerParticipant tid p)
+        _ <- unwrap =<< closeRegistration ownerId tid
+        _ <- unwrap =<< generateBracket ownerId tid
+        getTournamentSchedule strangerId tid
+      case result of
+        Left err    -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right inner -> inner `shouldSatisfy` isRight
+
+    it "includes a Completed tournament's schedule (viewing isn't lifecycle-gated)" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "gts-completed-owner"
+        let alice = Individual (Player (PlayerName "Alice"))
+            bob   = Individual (Player (PlayerName "Bob"))
+            participants = [alice, bob]
+        tid <- createTournament NewTournament
+          { newTournamentName = TournamentName "GTS Completed Cup", newTournamentOrganizer = OrganizerName "Test Organizer"
+          , newTournamentOwner = ownerId, newTournamentFormat = SingleElimination
+          , newTournamentVisibility = Public, newTournamentMaxParticipants = 2 }
+        forM_ participants $ \p -> case p of Individual player -> Repo.savePlayer player; Squad team -> Repo.saveTeam team
+        advanceToRegistrationOpen ownerId tid
+        forM_ participants (\p -> unwrap =<< registerParticipant tid p)
+        _ <- unwrap =<< closeRegistration ownerId tid
+        bracketId <- unwrap =<< generateBracket ownerId tid
+        matches <- Repo.listMatchesForBracket bracketId
+        let m = head matches
+        _ <- unwrap =<< startTournament ownerId tid
+        _ <- unwrap =<< startMatch ownerId (matchId m)
+        _ <- unwrap =<< recordMatchResult ownerId (matchId m) (Winner (matchCompetitorA m))
+        _ <- unwrap =<< completeTournament ownerId tid
+        getTournamentSchedule ownerId tid
+      case result of
+        Left err    -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right inner -> case inner of
+          Left e            -> expectationFailure ("expected Completed tournament's schedule to be viewable, got: " ++ show e)
+          Right [scheduled] -> matchStatus scheduled `shouldBe` Match.Completed
+          Right other       -> expectationFailure ("expected exactly one match, got: " ++ show other)
+
+    it "orders scheduled matches ascending, with unscheduled matches last preserving original order" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "gts-order-owner"
+        let participants = [ Individual (Player (PlayerName ("P" ++ show i))) | i <- [1 .. 8 :: Int] ]
+        tid <- createTournament NewTournament
+          { newTournamentName = TournamentName "GTS Order Cup", newTournamentOrganizer = OrganizerName "Test Organizer"
+          , newTournamentOwner = ownerId, newTournamentFormat = SingleElimination
+          , newTournamentVisibility = Public, newTournamentMaxParticipants = 8 }
+        forM_ participants $ \p -> case p of Individual player -> Repo.savePlayer player; Squad team -> Repo.saveTeam team
+        advanceToRegistrationOpen ownerId tid
+        forM_ participants (\p -> unwrap =<< registerParticipant tid p)
+        _ <- unwrap =<< closeRegistration ownerId tid
+        bracketId <- unwrap =<< generateBracket ownerId tid
+
+        r1 <- Repo.listMatchesForBracket bracketId   -- [m1, m2, m3, m4], ORDER BY id
+        liftIO $ length r1 `shouldBe` 4
+        let [m1, m2, m3, m4] = r1
+            early = UTCTime (fromGregorian 2026 9 15) (10 * 3600)
+            late  = UTCTime (fromGregorian 2026 9 15) (16 * 3600)
+
+        -- m3 scheduled earliest, m1 scheduled later, m2 and m4 left
+        -- unscheduled -- expected order: m3, m1, then m2, m4 (their
+        -- original relative order preserved among the Nothing group).
+        _ <- unwrap =<< setMatchSchedule ownerId (matchId m3) (Just early)
+        _ <- unwrap =<< setMatchSchedule ownerId (matchId m1) (Just late)
+
+        outcome <- getTournamentSchedule ownerId tid
+        pure (outcome, matchId m1, matchId m2, matchId m3, matchId m4)
+
+      case result of
+        Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right (outcome, id1, id2, id3, id4) -> case outcome of
+          Left e         -> expectationFailure ("expected schedule query to succeed, got: " ++ show e)
+          Right schedule -> map matchId schedule `shouldBe` [id3, id1, id2, id4]

@@ -33,6 +33,7 @@ materializeMatch mid tid bid idMap n = case (nodeSlotA n, nodeSlotB n) of
         , matchCompetitorB = b
         , matchStatus = Scheduled
         , matchOutcome = Nothing
+        , matchScheduledStart = Nothing
         }
     _ -> Nothing
 

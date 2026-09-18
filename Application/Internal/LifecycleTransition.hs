@@ -8,6 +8,7 @@ module Application.Internal.LifecycleTransition
     , requireTournamentState
     , requireTournamentStateNotIn
     , requireOperationallyActive
+    , requireSchedulable
     ) where
 
 import Domain.Tournament (Tournament(..), TournamentState(..))
@@ -52,3 +53,10 @@ requireTournamentStateNotIn forbidden tournament
 requireOperationallyActive :: Tournament -> Either LifecycleError ()
 requireOperationallyActive = requireTournamentStateNotIn
   [Draft, Published, RegistrationOpen, Paused, Completed, Cancelled]
+
+-- | Scheduling operations are permitted whenever the tournament isn't
+-- terminally dead -- unlike requireOperationallyActive, Paused is
+-- deliberately still allowed here: an organizer needs to be able to
+-- reschedule future matches precisely while play is paused (v0.10).
+requireSchedulable :: Tournament -> Either LifecycleError ()
+requireSchedulable = requireTournamentStateNotIn [Completed, Cancelled]

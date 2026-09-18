@@ -6,6 +6,7 @@ module Domain.Match
   ) where
 
 import Data.Int (Int64)
+import Data.Time (UTCTime)
 
 import Domain.Participant (Participant)
 import Domain.Tournament (TournamentId)
@@ -38,5 +39,6 @@ data Match = Match
     , matchCompetitorB :: Participant
     , matchStatus      :: MatchStatus
     , matchOutcome     :: Maybe MatchOutcome
+    , matchScheduledStart :: Maybe UTCTime
     }
     deriving (Eq, Show)
