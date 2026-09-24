@@ -3,9 +3,10 @@ module Application.Internal.Authorization
   , requireTournamentOwner
   , requireAdministrator
   , requireTournamentVisible
+  , requireVisibleToViewer
   ) where
 
-import Domain.Tournament (Tournament(..),Visibility(..))
+import Domain.Tournament (Tournament(..), Visibility(..), TournamentState(..))
 import Domain.Ids (UserId)
 import Domain.Role (Role(..))
 
@@ -57,3 +58,13 @@ requireTournamentVisible uid tournament
   | tournamentVisibility tournament == Public = Right ()
   | uid == tournamentOwner tournament         = Right ()
   | otherwise                                 = Left NotAuthorizedToView
+
+-- Read visibility for viewers who may be anonymous (Nothing).
+-- The owner sees everything; nobody else sees a Draft; otherwise
+-- only Public tournaments are visible.
+requireVisibleToViewer :: Maybe UserId -> Tournament -> Either AuthorizationError ()
+requireVisibleToViewer viewer tournament
+  | viewer == Just (tournamentOwner tournament) = Right ()
+  | tournamentState tournament == Draft         = Left NotAuthorizedToView
+  | tournamentVisibility tournament == Public   = Right ()
+  | otherwise                                   = Left NotAuthorizedToView

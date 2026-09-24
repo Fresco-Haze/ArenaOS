@@ -36,6 +36,10 @@ data CompleteTournamentError
   | TournamentPausedCannotComplete
   deriving (Eq, Show)
 
+completeTournament
+  :: ( TournamentRepository m, BracketRepository m, MatchRepository m
+     , TournamentHistoryRepository m, Transactional m )
+  => UserId -> TournamentId -> m (Either CompleteTournamentError Tournament)
 completeTournament currentUser tid = do
   tournament <- Repo.getTournament tid
   case first Unauthorized (requireTournamentOwner currentUser tournament) of

@@ -36,7 +36,7 @@ import Domain.Role (Role(..))
 import Shell.Persistence.SQLite.RoleRepository ()
 import Application.UseCases.GrantRole (grantRole, GrantRoleError(..))
 import Application.UseCases.RevokeRole (revokeRole, RevokeRoleError(..))
-import Application.UseCases.CreateTournament (createTournament)
+import Application.UseCases.CreateTournament (createTournamentChecked)
 import Application.UseCases.RegisterParticipant (registerParticipant, RegisterParticipantError(..))
 import Application.UseCases.GenerateBracket (generateBracket)
 import Application.UseCases.StartMatch (startMatch)
@@ -114,7 +114,7 @@ dispatch args = case args of
     (Nothing, _) -> liftIO $ putStrLn "userId must be an integer"
     (_, Nothing) -> liftIO $ putStrLn "maxParticipants must be an integer"
     (Just uidInt, Just maxP) -> do
-      tid <- createTournament NewTournament
+      outcome <- createTournamentChecked NewTournament
         { newTournamentName            = TournamentName name
         , newTournamentOrganizer       = OrganizerName organizer
         , newTournamentOwner           = UserId uidInt
@@ -122,8 +122,10 @@ dispatch args = case args of
         , newTournamentVisibility      = Public
         , newTournamentMaxParticipants = maxP
         }
-      liftIO $ putStrLn ("Created tournament " ++ show (unTournamentId tid))
-
+      liftIO $ case outcome of
+        Left err  -> putStrLn ("Create failed: " ++ show err)
+        Right tid -> putStrLn ("Created tournament " ++ show (unTournamentId tid))
+        
   ["register-user", username, email, password] -> do
     outcome <- registerUser RegisterUserRequest
       { registerUsername = Username (pack username)

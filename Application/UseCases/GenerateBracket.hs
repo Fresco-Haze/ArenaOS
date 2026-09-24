@@ -46,6 +46,7 @@ import Shell.Persistence.Port (TournamentHistoryRepository)
 data GenerateBracketError
   = Unauthorized AuthorizationError
   | InvalidLifecycle LifecycleError
+  | BracketAlreadyExists BracketId
   | UnsupportedFormat TournamentFormat
   | InvalidBracket EngineError
   deriving (Eq, Show)
@@ -71,7 +72,7 @@ generateBracket currentUser tid = do
       case first InvalidLifecycle (requireTournamentState RegistrationClosed tournament) of
         Left err -> pure (Left err)
         Right () ->
-          case requireSupportedFormat tournament of
+          case requireNoBracket tournament >> requireSupportedFormat tournament of
             Left err -> pure (Left err)
             Right () -> do
 
@@ -116,6 +117,11 @@ requireSupportedFormat tournament =
     DoubleElimination -> Right ()
     RoundRobin        -> Right ()
 
+requireNoBracket :: Tournament -> Either GenerateBracketError ()
+requireNoBracket tournament =
+  case tournamentBracket tournament of
+    Just existing -> Left (BracketAlreadyExists existing)
+    Nothing       -> Right ()
 
 -- | Shared tail of bracket generation: persists the bracket/nodes,
 -- materializes whatever's immediately ready, attaches the bracket to

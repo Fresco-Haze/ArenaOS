@@ -134,6 +134,17 @@ import Application.UseCases.SetMatchSchedule (setMatchSchedule, SetMatchSchedule
 import qualified Application.UseCases.SetMatchSchedule as SMS
 import Application.UseCases.GetTournamentSchedule (getTournamentSchedule, GetTournamentScheduleError(..))
 import qualified Application.UseCases.GetTournamentSchedule as GTS
+import qualified Application.UseCases.CreateTournament as CTU
+import qualified Application.UseCases.RegisterParticipant as RPC
+import qualified Engine.TournamentValidation as TV
+import qualified Application.UseCases.LoginUser as LU
+import qualified Application.UseCases.RegisterUser as RU
+import Shell.Infrastructure.PasswordHasher ()
+import qualified Engine.User as EU
+import qualified Application.UseCases.GetTournament as GetT
+import qualified Application.UseCases.ListMyTournaments as ListMine
+import Application.Internal.Authorization (AuthorizationError(..), requireAdministrator, requireVisibleToViewer)
+import qualified Application.UseCases.ListPublicTournaments as LP
 
 
 data TestTxError = TestTxError deriving (Eq, Show)
@@ -202,6 +213,20 @@ advanceToRegistrationClosed ownerId tid = do
   advanceToRegistrationOpen ownerId tid
   _ <- unwrap =<< closeRegistration ownerId tid
   pure ()
+
+-- A fresh tournament already at RegistrationOpen, for registration tests.
+createOpenTournament :: UserId -> String -> Int -> SQLiteM TournamentId
+createOpenTournament ownerId name maxP = do
+  tid <- createTournament NewTournament
+    { newTournamentName            = TournamentName name
+    , newTournamentOrganizer       = OrganizerName "Test Organizer"
+    , newTournamentOwner           = ownerId
+    , newTournamentFormat          = SingleElimination
+    , newTournamentVisibility      = Public
+    , newTournamentMaxParticipants = maxP
+    }
+  advanceToRegistrationOpen ownerId tid
+  pure tid
 
 main :: IO ()
 main = do
@@ -5046,3 +5071,410 @@ spec = before_ resetTestDb $ do
         Right (outcome, id1, id2, id3, id4) -> case outcome of
           Left e         -> expectationFailure ("expected schedule query to succeed, got: " ++ show e)
           Right schedule -> map matchId schedule `shouldBe` [id3, id1, id2, id4]
+
+  describe "Engine.TournamentValidation (pure)" $ do
+
+    it "rejects a blank tournament name" $
+      TV.validateTournamentFields (TournamentName "   ") (OrganizerName "Jae") 4
+        `shouldBe` Left TV.EmptyName
+
+    it "rejects a blank organizer" $
+      TV.validateTournamentFields (TournamentName "Cup") (OrganizerName "") 4
+        `shouldBe` Left TV.EmptyOrganizer
+
+    it "rejects maxParticipants below 2" $
+      TV.validateTournamentFields (TournamentName "Cup") (OrganizerName "Jae") 1
+        `shouldBe` Left (TV.MaxParticipantsTooLow 1)
+
+    it "accepts the smallest valid input" $
+      TV.validateTournamentFields (TournamentName "Cup") (OrganizerName "Jae") 2
+        `shouldBe` Right ()
+
+    it "validateParticipant rejects a blank player name" $
+      TV.validateParticipant (Individual (Player (PlayerName "  ")))
+        `shouldBe` Left TV.BlankPlayerName
+
+    it "validateParticipant accepts a named player" $
+      TV.validateParticipant (Individual (Player (PlayerName "Alice")))
+        `shouldBe` Right ()
+
+  describe "CreateTournament (checked)" $ do
+
+    it "rejects invalid input and persists nothing" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "ctc-owner-invalid"
+        outcome <- CTU.createTournamentChecked NewTournament
+          { newTournamentName            = TournamentName "   "
+          , newTournamentOrganizer       = OrganizerName "Test Organizer"
+          , newTournamentOwner           = ownerId
+          , newTournamentFormat          = SingleElimination
+          , newTournamentVisibility      = Public
+          , newTournamentMaxParticipants = 4
+          }
+        stored <- Repo.listAllTournaments
+        pure (outcome, length stored)
+      case result of
+        Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right (outcome, count) -> do
+          outcome `shouldBe` Left (CTU.InvalidTournament TV.EmptyName)
+          count `shouldBe` 0
+
+    it "creates a tournament when the input is valid" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "ctc-owner-valid"
+        outcome <- CTU.createTournamentChecked NewTournament
+          { newTournamentName            = TournamentName "Valid Cup"
+          , newTournamentOrganizer       = OrganizerName "Test Organizer"
+          , newTournamentOwner           = ownerId
+          , newTournamentFormat          = SingleElimination
+          , newTournamentVisibility      = Public
+          , newTournamentMaxParticipants = 4
+          }
+        stored <- Repo.listAllTournaments
+        pure (outcome, length stored)
+      case result of
+        Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right (outcome, count) -> do
+          outcome `shouldSatisfy` isRight
+          count `shouldBe` 1
+
+  describe "GenerateBracket idempotence guard" $ do
+
+    it "rejects a second generateBracket and leaves the first bracket attached" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "gb-twice-owner"
+        let alice = Individual (Player (PlayerName "Alice"))
+            bob   = Individual (Player (PlayerName "Bob"))
+            participants = [alice, bob]
+        tid <- createTournament NewTournament
+          { newTournamentName            = TournamentName "Generate Twice Cup"
+          , newTournamentOrganizer       = OrganizerName "Test Organizer"
+          , newTournamentOwner           = ownerId
+          , newTournamentFormat          = SingleElimination
+          , newTournamentVisibility      = Public
+          , newTournamentMaxParticipants = 2
+          }
+        forM_ participants $ \p -> case p of
+          Individual player -> Repo.savePlayer player
+          Squad team         -> Repo.saveTeam team
+        advanceToRegistrationOpen ownerId tid
+        forM_ participants (\p -> unwrap =<< registerParticipant tid p)
+        _ <- unwrap =<< closeRegistration ownerId tid
+        firstBracket <- unwrap =<< generateBracket ownerId tid
+        second       <- generateBracket ownerId tid
+        tournament   <- Repo.getTournament tid
+        matches      <- Repo.listMatchesForBracket firstBracket
+        pure (firstBracket, second, tournamentBracket tournament, length matches)
+      case result of
+        Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right (firstB, second, attached, matchCount) -> do
+          second     `shouldBe` Left (GB.BracketAlreadyExists firstB)
+          attached   `shouldBe` Just firstB
+          matchCount `shouldBe` 1
+
+  describe "RegisterParticipant (checked)" $ do
+
+    it "registers a brand-new player without any pre-saving" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "rpc-owner-new"
+        tid <- createOpenTournament ownerId "RPC New Player Cup" 4
+        outcome <- RPC.registerParticipantChecked ownerId tid
+          (Individual (Player (PlayerName "Alice")))
+        regs <- Repo.listRegistrations tid
+        pure (outcome, length regs)
+      case result of
+        Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right (outcome, count) -> do
+          outcome `shouldSatisfy` isRight
+          count `shouldBe` 1
+
+    it "rejects the same participant twice and keeps exactly one registration" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "rpc-owner-dup"
+        tid <- createOpenTournament ownerId "RPC Duplicate Cup" 4
+        let alice = Individual (Player (PlayerName "Alice"))
+        firstTry  <- RPC.registerParticipantChecked ownerId tid alice
+        secondTry <- RPC.registerParticipantChecked ownerId tid alice
+        regs <- Repo.listRegistrations tid
+        pure (firstTry, secondTry, length regs)
+      case result of
+        Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right (firstTry, secondTry, count) -> do
+          firstTry  `shouldSatisfy` isRight
+          secondTry `shouldBe` Left RPC.AlreadyRegistered
+          count     `shouldBe` 1
+
+    it "rejects a non-owner and registers nothing" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId    <- createTestUser "rpc-owner-auth"
+        impostorId <- createTestUser "rpc-impostor"
+        tid <- createOpenTournament ownerId "RPC Ownership Cup" 4
+        outcome <- RPC.registerParticipantChecked impostorId tid
+          (Individual (Player (PlayerName "Alice")))
+        regs <- Repo.listRegistrations tid
+        pure (outcome, length regs)
+      case result of
+        Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right (outcome, count) -> do
+          outcome `shouldBe` Left (RPC.Unauthorized NotTournamentOwner)
+          count   `shouldBe` 0
+
+    it "rejects a blank player name and registers nothing" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "rpc-owner-blank"
+        tid <- createOpenTournament ownerId "RPC Blank Cup" 4
+        outcome <- RPC.registerParticipantChecked ownerId tid
+          (Individual (Player (PlayerName "   ")))
+        regs <- Repo.listRegistrations tid
+        pure (outcome, length regs)
+      case result of
+        Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right (outcome, count) -> do
+          outcome `shouldBe` Left (RPC.InvalidParticipant TV.BlankPlayerName)
+          count   `shouldBe` 0
+
+    it "rejects registration once MaxParticipants is reached" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "rpc-owner-cap"
+        tid <- createOpenTournament ownerId "RPC Capacity Cup" 2
+        _ <- unwrap =<< RPC.registerParticipantChecked ownerId tid
+               (Individual (Player (PlayerName "Alice")))
+        _ <- unwrap =<< RPC.registerParticipantChecked ownerId tid
+               (Individual (Player (PlayerName "Bob")))
+        outcome <- RPC.registerParticipantChecked ownerId tid
+          (Individual (Player (PlayerName "Carol")))
+        regs <- Repo.listRegistrations tid
+        pure (outcome, length regs)
+      case result of
+        Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right (outcome, count) -> do
+          outcome `shouldBe` Left RPC.CapacityReached
+          count   `shouldBe` 2
+
+    it "rejects registration when the tournament isn't RegistrationOpen" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "rpc-owner-draft"
+        tid <- createTournament NewTournament
+          { newTournamentName            = TournamentName "RPC Draft Cup"
+          , newTournamentOrganizer       = OrganizerName "Test Organizer"
+          , newTournamentOwner           = ownerId
+          , newTournamentFormat          = SingleElimination
+          , newTournamentVisibility      = Public
+          , newTournamentMaxParticipants = 4
+          }
+        RPC.registerParticipantChecked ownerId tid
+          (Individual (Player (PlayerName "Alice")))
+      case result of
+        Left err    -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right inner -> inner `shouldBe`
+          Left (RPC.InvalidLifecycle (InvalidTransition Draft RegistrationOpen))
+
+  describe "LoginUser account status" $ do
+
+    it "lets an Active user log in" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        _ <- unwrap =<< RU.registerUser
+               (RU.RegisterUserRequest (Username "loginactive") (Email "loginactive@test.com") "password123")
+        LU.loginUser (LU.LoginUserRequest (Username "loginactive") "password123")
+      case result of
+        Left err    -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right inner -> inner `shouldSatisfy` isRight
+
+    it "rejects a Suspended user who gives the correct password" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        u <- unwrap =<< RU.registerUser
+               (RU.RegisterUserRequest (Username "loginsusp") (Email "loginsusp@test.com") "password123")
+        Repo.updateAccountStatus (userId u) Suspended
+        LU.loginUser (LU.LoginUserRequest (Username "loginsusp") "password123")
+      case result of
+        Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right (Left e)  -> e `shouldBe` LU.AccountNotActive Suspended
+        Right (Right _) -> expectationFailure "expected suspended login to be rejected"
+
+    it "does not reveal a suspension when the password is wrong" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        u <- unwrap =<< RU.registerUser
+               (RU.RegisterUserRequest (Username "loginprobe") (Email "loginprobe@test.com") "password123")
+        Repo.updateAccountStatus (userId u) Suspended
+        LU.loginUser (LU.LoginUserRequest (Username "loginprobe") "wrongpass")
+      case result of
+        Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right (Left e)  -> e `shouldBe` LU.InvalidCredentials
+        Right (Right _) -> expectationFailure "expected wrong password to be rejected"
+
+  
+  describe "Engine.User.validateRawPassword (pure)" $ do
+
+    it "rejects a password shorter than 8 characters" $
+      EU.validateRawPassword "1234567" `shouldBe` Left EU.PasswordTooShort
+
+    it "accepts exactly 8 characters" $
+      EU.validateRawPassword "12345678" `shouldBe` Right "12345678"
+
+  describe "GetTournament (read)" $ do
+
+    it "shows the owner their tournament with its participants" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "gt-owner"
+        tid <- createOpenTournament ownerId "GT Owner Cup" 4
+        let alice = Individual (Player (PlayerName "Alice"))
+            bob   = Individual (Player (PlayerName "Bob"))
+        _ <- unwrap =<< RPC.registerParticipantChecked ownerId tid alice
+        _ <- unwrap =<< RPC.registerParticipantChecked ownerId tid bob
+        outcome <- GetT.getTournament (Just ownerId) tid
+        pure (outcome, alice, bob)
+      case result of
+        Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right (Left e, _, _) -> expectationFailure (show e)
+        Right (Right v, alice, bob) -> do
+          GetT.tvParticipants v `shouldMatchList` [alice, bob]
+          GetT.tvViewerIsOwner v `shouldBe` True
+          tournamentName (GetT.tvTournament v) `shouldBe` TournamentName "GT Owner Cup"
+
+    it "lets any authenticated caller view a Public tournament, without owner rights" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId    <- createTestUser "gt-owner-pub"
+        strangerId <- createTestUser "gt-stranger-pub"
+        tid <- createOpenTournament ownerId "GT Public Cup" 4
+        GetT.getTournament (Just strangerId) tid
+      case result of
+        Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right (Left e) -> expectationFailure (show e)
+        Right (Right v) -> GetT.tvViewerIsOwner v `shouldBe` False
+
+    it "rejects a non-owner viewing a Private tournament" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId    <- createTestUser "gt-owner-priv"
+        strangerId <- createTestUser "gt-stranger-priv"
+        tid <- createTournament NewTournament
+          { newTournamentName            = TournamentName "GT Private Cup"
+          , newTournamentOrganizer       = OrganizerName "Test Organizer"
+          , newTournamentOwner           = ownerId
+          , newTournamentFormat          = SingleElimination
+          , newTournamentVisibility      = Private
+          , newTournamentMaxParticipants = 4
+          }
+        GetT.getTournament (Just strangerId) tid
+      case result of
+        Left err    -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right inner -> inner `shouldBe` Left (GetT.Unauthorized NotAuthorizedToView)
+
+  describe "ListMyTournaments" $
+
+    it "returns only the caller's tournaments" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        a <- createTestUser "lm-a"
+        b <- createTestUser "lm-b"
+        _ <- createOpenTournament a "LM A1" 4
+        _ <- createOpenTournament a "LM A2" 4
+        _ <- createOpenTournament b "LM B1" 4
+        ListMine.listMyTournaments a
+      case result of
+        Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right ts -> map tournamentName ts `shouldMatchList`
+                      [TournamentName "LM A1", TournamentName "LM A2"]
+
+  describe "CancelTournament blank reason" $
+
+    it "rejects a whitespace-only cancellation reason and leaves the state alone" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "cancel-blank-owner"
+        tid <- createOpenTournament ownerId "Cancel Blank Cup" 4
+        outcome <- cancelTournament ownerId tid "   "
+        after   <- Repo.getTournament tid
+        pure (outcome, tournamentState after)
+      case result of
+        Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right (outcome, st) -> do
+          outcome `shouldBe` Left CancelT.EmptyCancellationReason
+          st      `shouldBe` RegistrationOpen
+
+  describe "requireVisibleToViewer (pure)" $ do
+    let mk st vis = Tournament
+          { tournamentId = TournamentId 1, tournamentName = TournamentName "x"
+          , tournamentOrganizer = OrganizerName "x", tournamentFormat = SingleElimination
+          , tournamentState = st, tournamentVisibility = vis
+          , tournamentMaxParticipants = 2, tournamentBracket = Nothing
+          , tournamentOwner = UserId 1 }
+        owner    = Just (UserId 1)
+        stranger = Just (UserId 2)
+
+    it "shows a Public non-Draft tournament to anyone, including anonymous" $ do
+      requireVisibleToViewer Nothing  (mk Published Public) `shouldBe` Right ()
+      requireVisibleToViewer stranger (mk Published Public) `shouldBe` Right ()
+
+    it "hides a Draft from everyone but the owner, even when Public" $ do
+      requireVisibleToViewer Nothing  (mk Draft Public) `shouldBe` Left NotAuthorizedToView
+      requireVisibleToViewer stranger (mk Draft Public) `shouldBe` Left NotAuthorizedToView
+      requireVisibleToViewer owner    (mk Draft Public) `shouldBe` Right ()
+
+    it "hides a Private tournament from everyone but the owner" $ do
+      requireVisibleToViewer Nothing  (mk Published Private) `shouldBe` Left NotAuthorizedToView
+      requireVisibleToViewer stranger (mk Published Private) `shouldBe` Left NotAuthorizedToView
+      requireVisibleToViewer owner    (mk Published Private) `shouldBe` Right ()
+
+  describe "GetTournament anonymous viewers" $ do
+
+    it "lets an anonymous viewer see a Public tournament once it is past Draft" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "gt-owner-anon"
+        tid <- createOpenTournament ownerId "GT Anonymous Cup" 4
+        GetT.getTournament Nothing tid
+      case result of
+        Left err       -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right (Left e) -> expectationFailure (show e)
+        Right (Right v) -> GetT.tvViewerIsOwner v `shouldBe` False
+
+    it "hides a Public Draft from an anonymous viewer" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "gt-owner-draft"
+        tid <- createTournament NewTournament
+          { newTournamentName            = TournamentName "GT Draft Cup"
+          , newTournamentOrganizer       = OrganizerName "Test Organizer"
+          , newTournamentOwner           = ownerId
+          , newTournamentFormat          = SingleElimination
+          , newTournamentVisibility      = Public
+          , newTournamentMaxParticipants = 4
+          }
+        GetT.getTournament Nothing tid
+      case result of
+        Left err    -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right inner -> inner `shouldBe` Left (GetT.Unauthorized NotAuthorizedToView)
+
+  describe "ListPublicTournaments (pure selection)" $ do
+    let mk i st vis = Tournament
+          { tournamentId = TournamentId i, tournamentName = TournamentName "x"
+          , tournamentOrganizer = OrganizerName "x", tournamentFormat = SingleElimination
+          , tournamentState = st, tournamentVisibility = vis
+          , tournamentMaxParticipants = 2, tournamentBracket = Nothing
+          , tournamentOwner = UserId 1 }
+        ids = map (unTournamentId . tournamentId)
+
+    it "keeps only Public tournaments past Draft, newest first" $
+      ids (LP.selectPublic 10
+            [ mk 1 Published Public, mk 2 Draft Public
+            , mk 3 Published Private, mk 4 Completed Public ])
+        `shouldBe` [4, 1]
+
+    it "caps the result at the limit" $
+      ids (LP.selectPublic 2 [ mk i Published Public | i <- [1 .. 5] ])
+        `shouldBe` [5, 4]

@@ -86,6 +86,11 @@ library
                       Application.UseCases.ResumeTournament 
                       Application.UseCases.SetMatchSchedule
                       Application.UseCases.GetTournamentSchedule
+                      Application.UseCases.GetBracket
+                      Engine.TournamentValidation
+                      Application.UseCases.GetTournament
+                      Application.UseCases.ListMyTournaments
+                      Application.UseCases.ListPublicTournaments
 
 
     hs-source-dirs:   .
@@ -125,4 +130,18 @@ test-suite arenaos-test
                     , mtl
                     , text
                     , time
+    default-language: Haskell2010
+
+executable arenaos-api
+    main-is:          Main.hs
+    hs-source-dirs:   api
+    build-depends:    base
+                    , arenaos
+                    , scotty
+                    , aeson
+                    , text
+                    , http-types
+                    , containers
+                    , bytestring
+                    , entropy
     default-language: Haskell2010

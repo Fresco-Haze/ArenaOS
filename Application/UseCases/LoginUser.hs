@@ -5,7 +5,7 @@ module Application.UseCases.LoginUser
   ) where
 
 import Data.Text (Text)
-import Domain.User (User(..), Username, passwordHash)
+import Domain.User (User(..), Username, passwordHash, AccountStatus(..))
 import Shell.Persistence.Port (UserRepository(..), PasswordHasher(..))
 
 data LoginUserRequest = LoginUserRequest
@@ -15,6 +15,7 @@ data LoginUserRequest = LoginUserRequest
 
 data LoginUserError
   = InvalidCredentials
+  | AccountNotActive AccountStatus
   deriving (Eq, Show)
 
 loginUser
@@ -36,4 +37,9 @@ loginUser req = do
       pure (Left InvalidCredentials)
     Just user -> do
       ok <- verifyPassword (loginPassword req) (passwordHash user)
-      pure $ if ok then Right user else Left InvalidCredentials
+      pure $
+        if not ok
+          then Left InvalidCredentials
+          else if accountStatus user /= Active
+            then Left (AccountNotActive (accountStatus user))
+            else Right user

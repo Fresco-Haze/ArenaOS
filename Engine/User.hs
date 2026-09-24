@@ -17,6 +17,7 @@ data UserError
   | InvalidEmail Email
   | EmptyPasswordHash
   | EmptyPassword
+  | PasswordTooShort
   deriving (Eq, Show)
 
 validateUsername :: Username -> Either UserError Username
@@ -52,5 +53,6 @@ validateUser u = do
 
 validateRawPassword :: Text -> Either UserError Text
 validateRawPassword t
-  | T.null t  = Left EmptyPassword
-  | otherwise = Right t
+  | T.null t          = Left EmptyPassword
+  | T.length t < 8    = Left PasswordTooShort
+  | otherwise         = Right t

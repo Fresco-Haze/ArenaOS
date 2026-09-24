@@ -12,6 +12,7 @@ import qualified Shell.Persistence.Port as Repo
 
 import Application.Internal.Authorization (AuthorizationError, requireTournamentOwner)
 import Application.Internal.LifecycleTransition (LifecycleError, requireTournamentStateNotIn)
+import Data.Char (isSpace)
 
 data CancelTournamentError
     = Unauthorized AuthorizationError
@@ -33,7 +34,7 @@ cancelTournament currentUser tid reason = do
             case requireTournamentStateNotIn [Completed, Cancelled] tournament of
                 Left err -> pure (Left (InvalidLifecycle err))
                 Right ()
-                    | null reason -> pure (Left EmptyCancellationReason)
+                    | all isSpace reason -> pure (Left EmptyCancellationReason)
                     | otherwise -> do
                         withTxN $ do
                             Repo.updateTournamentState tid Cancelled
