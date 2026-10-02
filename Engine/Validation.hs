@@ -15,9 +15,9 @@ validateParticipants _tournament participants
       Left (TooFewParticipants participantCount)
   | Just dup <- findDuplicate participants =
       Left (DuplicateParticipant dup)
-  -- DI-05 cannot yet be implemented because Tournament currently
-  -- carries no participant-mode information. See ADR-FUT tracking
-  -- the ParticipantMode design gap.
+  -- DI-05: Tournament now carries tournamentParticipantMode and
+  -- registerParticipantChecked enforces it. The bracket-time check is
+  -- deliberately not wired here yet; see Decisions.md, Known v1 Limitations.
   | otherwise =
       Right participants
   where
