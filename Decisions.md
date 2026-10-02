@@ -58,6 +58,8 @@ ArenaOS is built as four pieces sharing one Haskell core, only two of which are 
 - Team/game-specific platform features (Call of Duty, PUBG, or any other game-specific registration flow) in the frontend. **ArenaOS v1 is tournament-engine complete, not game-platform complete** — the engine can run a tournament end to end, but the product layer for specific games, teams, and their registration/eligibility rules is deliberately later.
 - Production-grade token persistence or expiry — see Known Limitations below
 - Production deployment infrastructure
+- **No frontend for participant mode.** The backend accepts `participantMode` on `POST /tournaments` (`IndividualOnly` or `SquadOnly`, defaulting to `IndividualOnly` when omitted) and returns it on every tournament, but v1's create form has no selector and the tournament page does not show it, so Squad-only tournaments can only be created through the API.
+- **No frontend for participant mode.** The backend accepts `participantMode` on `POST /tournaments` (`IndividualOnly` or `SquadOnly`, defaulting to `IndividualOnly` when omitted) and returns it on every tournament, but v1's create form has no selector and the tournament page does not show it, so Squad-only tournaments can only be created through the API.
 
 ## 7. Known v1 Limitations
 

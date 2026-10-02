@@ -21,3 +21,4 @@ test.log
 # OS/editor cruft
 .DS_Store
 *.diff
+build-errors.txt
