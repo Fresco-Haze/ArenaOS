@@ -80,6 +80,10 @@ statements =
     -- the forward reference at CREATE TABLE time; the insert-order
     -- constraint (tournament first, bracket_id NULL) is enforced by
     -- TournamentRepository/BracketRepository logic, not by the DDL.
+    -- participant_mode: fixed at creation (no update path). Existing databases
+    -- need a one-off: ALTER TABLE tournaments ADD COLUMN participant_mode TEXT
+    -- NOT NULL DEFAULT 'IndividualOnly' CHECK (participant_mode IN
+    -- ('IndividualOnly','SquadOnly')). CREATE TABLE IF NOT EXISTS will not add it.
 
   , "CREATE TABLE IF NOT EXISTS registrations ( \
     \  id             INTEGER PRIMARY KEY, \
