@@ -220,7 +220,12 @@ advanceToRegistrationClosed ownerId tid = do
 
 -- A fresh tournament already at RegistrationOpen, for registration tests.
 createOpenTournament :: UserId -> String -> Int -> SQLiteM TournamentId
-createOpenTournament ownerId name maxP = do
+createOpenTournament ownerId name maxP =
+  createOpenTournamentWithMode ownerId name maxP IndividualOnly
+
+createOpenTournamentWithMode
+  :: UserId -> String -> Int -> ParticipantMode -> SQLiteM TournamentId
+createOpenTournamentWithMode ownerId name maxP mode = do
   tid <- createTournament NewTournament
     { newTournamentName            = TournamentName name
     , newTournamentOrganizer       = OrganizerName "Test Organizer"
@@ -229,10 +234,18 @@ createOpenTournament ownerId name maxP = do
     , newTournamentVisibility      = Public
     , newTournamentMaxParticipants = maxP
     , newTournamentThirdPlaceMatch = False
-    , newTournamentParticipantMode = IndividualOnly
+    , newTournamentParticipantMode = mode
     }
   advanceToRegistrationOpen ownerId tid
   pure tid
+
+-- A small valid team for participant-mode tests.
+modeTestTeam :: Team
+modeTestTeam = Team
+  { teamName    = TeamName "Falcons"
+  , teamCaptain = Player (PlayerName "Cap")
+  , teamMembers = [Player (PlayerName "Cap"), Player (PlayerName "Mate")]
+  }
 
 main :: IO ()
 main = do
@@ -5415,6 +5428,90 @@ spec = before_ resetTestDb $ do
           secondTry `shouldBe` Left RPC.AlreadyRegistered
           count     `shouldBe` 1
 
+    it "stores and returns the participant mode a tournament was created with" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "rpc-owner-mode-rt"
+        tid <- createOpenTournamentWithMode ownerId "Mode Round Trip Cup" 4 SquadOnly
+        stored <- Repo.getTournament tid
+        pure (tournamentParticipantMode stored)
+      case result of
+        Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right mode -> mode `shouldBe` SquadOnly
+
+    it "rejects an Individual in a SquadOnly tournament and registers nothing" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "rpc-owner-mode-ind"
+        tid <- createOpenTournamentWithMode ownerId "Squad Only Cup" 4 SquadOnly
+        outcome <- RPC.registerParticipantChecked ownerId tid
+          (Individual (Player (PlayerName "Alice")))
+        regs <- Repo.listRegistrations tid
+        pure (outcome, length regs)
+      case result of
+        Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right (outcome, count) -> do
+          outcome `shouldBe` Left (RPC.ParticipantKindNotAllowed SquadOnly)
+          count   `shouldBe` 0
+
+    it "does not save the player row when the participant kind is rejected" $ do
+      setup <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "rpc-owner-mode-nosave"
+        rejectedTid <- createOpenTournamentWithMode ownerId "No Save Cup" 4 SquadOnly
+        controlTid  <- createOpenTournament ownerId "Control Cup" 4
+        rejected <- RPC.registerParticipantChecked ownerId rejectedTid
+          (Individual (Player (PlayerName "Zed")))
+        control  <- RPC.registerParticipantChecked ownerId controlTid
+          (Individual (Player (PlayerName "Alice")))
+        pure (rejected, control)
+      case setup of
+        Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right (rejected, control) -> do
+          rejected `shouldBe` Left (RPC.ParticipantKindNotAllowed SquadOnly)
+          control  `shouldSatisfy` isRight
+      -- control row must exist, proving the db persists across runs...
+      aliceLookup <- runSQLiteM testDbPath (Repo.getPlayer (PlayerName "Alice"))
+      case aliceLookup of
+        Left err -> expectationFailure ("control player missing: " ++ show err)
+        Right _  -> pure ()
+      -- ...so the rejected player's absence is meaningful.
+      zedLookup <- runSQLiteM testDbPath (Repo.getPlayer (PlayerName "Zed"))
+      case zedLookup of
+        Left _  -> pure ()
+        Right _ -> expectationFailure "player row was saved despite rejection"
+
+    it "rejects a Squad in an IndividualOnly tournament and registers nothing" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "rpc-owner-mode-squad"
+        tid <- createOpenTournament ownerId "Individual Only Cup" 4
+        mapM_ Repo.savePlayer (teamMembers modeTestTeam)
+        Repo.saveTeam modeTestTeam
+        outcome <- RPC.registerParticipantChecked ownerId tid (Squad modeTestTeam)
+        regs <- Repo.listRegistrations tid
+        pure (outcome, length regs)
+      case result of
+        Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right (outcome, count) -> do
+          outcome `shouldBe` Left (RPC.ParticipantKindNotAllowed IndividualOnly)
+          count   `shouldBe` 0
+
+    it "accepts a Squad in a SquadOnly tournament" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "rpc-owner-mode-ok"
+        tid <- createOpenTournamentWithMode ownerId "Squad Accept Cup" 4 SquadOnly
+        mapM_ Repo.savePlayer (teamMembers modeTestTeam)
+        Repo.saveTeam modeTestTeam
+        outcome <- RPC.registerParticipantChecked ownerId tid (Squad modeTestTeam)
+        regs <- Repo.listRegistrations tid
+        pure (outcome, length regs)
+      case result of
+        Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right (outcome, count) -> do
+          outcome `shouldSatisfy` isRight
+          count   `shouldBe` 1
     it "rejects a non-owner and registers nothing" $ do
       result <- runSQLiteM testDbPath $ do
         setupSchema
