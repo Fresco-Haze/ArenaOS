@@ -60,11 +60,6 @@ instance BracketRepository SQLiteM where
         idMap <- liftIO $ foldM (\acc (nid, rnd, stage, aType, aPid, _, bType, bPid, _) -> do
             when (Map.member nid acc) $
                 throwIO (StorageFailure ("Duplicate BracketNodeId in save: " ++ show nid))
-            liftIO $ do
-                putStrLn ("atype = " ++ show aType)
-                putStrLn ("btype = " ++ show bType)
-                putStrLn ("apid = " ++ show aPid)
-                putStrLn ("bpid = " ++ show bPid)
             execute conn
                 "INSERT INTO bracket_nodes \
                 \  (bracket_id, round, stage, \
@@ -101,20 +96,21 @@ instance BracketRepository SQLiteM where
                   Nothing  -> throwIO (StorageFailure (label ++ " references unknown BracketNodeId " ++ show domainId))
         gf1Sid   <- liftIO $ translateRef "gf1_node_id" (bracketGF1NodeId bracket)
         resetSid <- liftIO $ translateRef "reset_node_id" (bracketResetNodeId bracket)
+        thirdPlaceSid <- liftIO $ translateRef "third_place_node_id" (bracketThirdPlaceNodeId bracket)
         liftIO $ execute conn
-            "UPDATE brackets SET gf1_node_id = ?, reset_node_id = ? WHERE id = ?"
-            (gf1Sid, resetSid, bid)
+           "UPDATE brackets SET gf1_node_id = ?, reset_node_id = ?, third_place_node_id = ? WHERE id = ?"
+            (gf1Sid, resetSid, thirdPlaceSid, bid)
 
         pure (Map.mapKeys (BracketNodeId . fromIntegral) (Map.map (BracketNodeId . fromIntegral) idMap))
-
+        
     getBracket :: BracketId -> SQLiteM (Bracket, [BracketNode])
     getBracket bid@(BracketId bracketIdNum) = do
         conn <- asks envConnection
         header <- liftIO ( query conn
-            "SELECT tournament_id, gf1_node_id, reset_node_id FROM brackets WHERE id = ?"
-            (Only bracketIdNum) :: IO [(Int64, Maybe Int64, Maybe Int64)])
+            "SELECT tournament_id, gf1_node_id, reset_node_id, third_place_node_id FROM brackets WHERE id = ?"
+            (Only bracketIdNum) :: IO [(Int64, Maybe Int64, Maybe Int64, Maybe Int64)])
         case header of
-            [(tid, gf1Sid, resetSid)] -> do
+            [(tid, gf1Sid, resetSid, thirdPlaceSid)] -> do
                 rows <- liftIO (query conn
                     "SELECT id, round, stage, \
                     \  slot_a_type, slot_a_participant_id, slot_a_node_id, \
@@ -128,6 +124,7 @@ instance BracketRepository SQLiteM where
                          , bracketTournament = TournamentId (fromIntegral tid)
                          , bracketGF1NodeId   = BracketNodeId . fromIntegral <$> gf1Sid
                          , bracketResetNodeId = BracketNodeId . fromIntegral <$> resetSid
+                         , bracketThirdPlaceNodeId = BracketNodeId . fromIntegral <$> thirdPlaceSid
                          }
                      , nodes )
             [] -> liftIO $ throwIO (NotFound ("Bracket not found in storage: " ++ show bracketIdNum))

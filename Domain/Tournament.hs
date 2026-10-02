@@ -10,6 +10,7 @@ module Domain.Tournament
     , Visibility(..)
     , BracketId(..)
     , Tournament(..)
+    , ParticipantMode(..)
     ) where
 
 import Domain.Ids (TournamentId(..), BracketId(..),UserId(..))
@@ -35,6 +36,11 @@ data TournamentFormat = SingleElimination | DoubleElimination | RoundRobin
 
 data Visibility = Public | Private deriving (Show, Eq)
 
+data ParticipantMode = IndividualOnly | SquadOnly
+    deriving (Show, Eq)
+
+
+
 data Tournament = Tournament
     { tournamentId :: TournamentId
     , tournamentName :: TournamentName
@@ -43,6 +49,9 @@ data Tournament = Tournament
     , tournamentState :: TournamentState
     , tournamentVisibility :: Visibility
     , tournamentMaxParticipants :: Int
+    , tournamentThirdPlaceMatch :: Bool
     , tournamentBracket :: Maybe BracketId
     , tournamentOwner :: UserId
+    , tournamentParticipantMode :: ParticipantMode
     } deriving (Show, Eq)
+

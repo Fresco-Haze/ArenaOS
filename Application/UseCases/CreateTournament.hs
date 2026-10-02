@@ -14,7 +14,7 @@ import Shell.Persistence.Port
   )
 import qualified Shell.Persistence.Port as Repo
 import Engine.TournamentValidation
-  (TournamentValidationError, validateTournamentFields)
+  (TournamentValidationError, validateTournamentFields, validateThirdPlaceMatch)
 
 data CreateTournamentError
   = InvalidTournament TournamentValidationError
@@ -40,4 +40,6 @@ createTournamentChecked nt =
          (newTournamentOrganizer nt)
          (newTournamentMaxParticipants nt) of
     Left err -> pure (Left (InvalidTournament err))
-    Right () -> Right <$> createTournament nt
+    Right () -> case validateThirdPlaceMatch (newTournamentFormat nt) (newTournamentThirdPlaceMatch nt) of
+            Left err -> pure (Left (InvalidTournament err))
+            Right () -> Right <$> createTournament nt

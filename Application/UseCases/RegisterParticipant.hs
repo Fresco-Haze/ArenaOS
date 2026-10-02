@@ -11,10 +11,10 @@ import Domain.Ids (UserId)
 import Domain.Participant (Participant(..))
 import Domain.Registration (registrationParticipant)
 import Domain.Tournament
-  (TournamentId, TournamentState(RegistrationOpen), tournamentMaxParticipants)
+  (TournamentId, TournamentState(RegistrationOpen), tournamentMaxParticipants, tournamentParticipantMode, ParticipantMode(..))
 import Application.Internal.Authorization (AuthorizationError, requireTournamentOwner)
 import Application.Internal.LifecycleTransition (requireTournamentState, LifecycleError)
-import Engine.TournamentValidation (ParticipantValidationError, validateParticipant)
+import Engine.TournamentValidation (ParticipantValidationError, validateParticipant, participantMatchesMode)
 import Shell.Persistence.Port
   ( TournamentRepository
   , ParticipantRepository
@@ -24,6 +24,7 @@ import Shell.Persistence.Port
   , NewRegistration(..)
   )
 import qualified Shell.Persistence.Port as Repo
+import Control.Monad (unless)
 
 -- ===== Original, unchanged =====
 
@@ -61,6 +62,7 @@ data RegisterParticipantCheckedError
   | InvalidLifecycle LifecycleError
   | AlreadyRegistered
   | CapacityReached
+  | ParticipantKindNotAllowed ParticipantMode
   deriving (Eq, Show)
 
 registerParticipantChecked
@@ -95,3 +97,6 @@ registerParticipantChecked caller tid participant =
       first Unauthorized (requireTournamentOwner caller t)
       first InvalidParticipant (validateParticipant participant)
       first InvalidLifecycle (requireTournamentState RegistrationOpen t)
+
+      unless (participantMatchesMode (tournamentParticipantMode t) participant)
+        (Left (ParticipantKindNotAllowed (tournamentParticipantMode t)))

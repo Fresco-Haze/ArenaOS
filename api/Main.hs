@@ -2,8 +2,6 @@
 module Main where
 
 import Web.Scotty
-import Data.Aeson
-  (Value, object, (.=), FromJSON(..), withObject, withText, (.:), eitherDecode)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Lazy as TL
@@ -13,9 +11,10 @@ import Control.Concurrent.MVar (MVar, newMVar, withMVar)
 import Control.Exception (SomeException, try)
 import System.IO (hPutStrLn, stderr)
 import Network.HTTP.Types
-  (Status, status201, status204, status400, status403, status404, status409, status500)
+  (Status, status201, status204, status400, status401, status403, status404, status409, status500)
+import Data.Aeson
+  (Value, object, (.=), FromJSON(..), withObject, withText, (.:), (.:?), (.!=), eitherDecode)
 
-import Shell.Persistence.SQLite.Connection (SQLiteM, runSQLiteM)
 import Shell.Persistence.SQLite.Error (PersistenceError(..))
 import Shell.Persistence.SQLite.TournamentRepository ()
 import Shell.Persistence.SQLite.TournamentHistoryRepository ()
@@ -28,8 +27,8 @@ import qualified Shell.Persistence.Port as Repo
 import Domain.Ids (UserId(..), TournamentId(..), BracketId(..), BracketNodeId(..))
 import Domain.Match (Match(..), MatchId(..), MatchOutcome(..))
 import Domain.MatchError (MatchError(..))
-import Domain.Participant
-  (Participant(..), Player(..), PlayerName(..), Team(..), TeamName(..))
+import Domain.Scoreable (EFootballScore, mkEFootballScore, ScoreError(..))
+import Application.UseCases.RecordEFootballResult (recordEFootballResult, RecordEFootballResultError(..))
 import Engine.Error (EngineError(..))
 import Application.Internal.Authorization (AuthorizationError(..))
 import Application.Internal.LifecycleTransition (LifecycleError(..))
@@ -40,11 +39,10 @@ import qualified Application.UseCases.GenerateBracket as Generate
 import qualified Application.UseCases.StartMatch as Start
 import qualified Application.UseCases.RecordMatchResult as Record
 import Data.List (find, sortOn)
-import Domain.Bracket (BracketNode(..), MatchSlot(..))
 import qualified Application.UseCases.GetBracket as GetB
 import Domain.Tournament
   ( Tournament(..), TournamentName(..), OrganizerName(..)
-  , TournamentFormat(..), Visibility(..) )
+  , TournamentFormat(..), Visibility(..), ParticipantMode(..) )
 import Shell.Persistence.Port (NewTournament(..))
 import qualified Application.UseCases.CreateTournament as Create
 import Engine.TournamentValidation
@@ -59,8 +57,6 @@ import System.Entropy (getEntropy)
 import Shell.Persistence.SQLite.UserRepository ()
 import Shell.Infrastructure.PasswordHasher ()
 import qualified Application.UseCases.LoginUser as LU
-import Network.HTTP.Types
-  (Status, status201, status204, status400, status401, status403, status404, status409, status500)
 import Domain.User (User(..), Username(..), Email(..), AccountStatus(..))
 import qualified Application.UseCases.RegisterUser as RU
 import Engine.User (UserError(..))
@@ -71,6 +67,16 @@ import qualified Application.UseCases.CompleteTournament as Complete
 import qualified Application.UseCases.CancelTournament as Cancel
 import Domain.TournamentError (TournamentError(..))
 import qualified Application.UseCases.ListPublicTournaments as ListPublic
+import qualified Application.UseCases.UpdateTournamentThirdPlaceMatch as UTTP
+import Shell.Persistence.SQLite.Connection (SQLiteM, SQLiteEnv(envConnection), runSQLiteM)
+import Shell.Persistence.SQLite.Schema (initializeSchema)
+import Control.Monad.Reader (ask)
+import Domain.Bracket (Bracket(..), BracketNode(..), MatchSlot(..))
+import Shell.Persistence.SQLite.EFootballScoreRepository ()
+import Domain.Participant (Participant(..), Player(..), PlayerName(..), Team(..), TeamName(..))
+import qualified Application.UseCases.CreateTeam as CT
+import Application.UseCases.CreateTeam (createTeam, CreateTeamError(..))
+import Application.UseCases.CreateTeam (createTeam, CreateTeamError(..))
 
 
 dbPath :: FilePath
@@ -158,6 +164,10 @@ fromRecord :: Record.RecordMatchResultError -> ApiError
 fromRecord (Record.Unauthorized a)     = fromAuthorization a
 fromRecord (Record.InvalidLifecycle l) = fromLifecycle l
 fromRecord (Record.InvalidMatch e)     = fromMatchError e
+fromRecordEFootball :: RecordEFootballResultError -> ApiError
+fromRecordEFootball (MatchResultError e) = fromRecord e
+
+
 
 -- ===== JSON out =====
 
@@ -263,10 +273,11 @@ nodeJson matches n = object
 
 bracketViewJson :: GetB.BracketView -> Value
 bracketViewJson v = object
-  [ "tournamentId" .= unTournamentId (tournamentId t)
-  , "format"       .= T.pack (show (tournamentFormat t))
-  , "bracketId"    .= fmap unBracketId (tournamentBracket t)
-  , "nodes"        .= map (nodeJson (GetB.viewMatches v)) sortedNodes
+  [ "tournamentId"     .= unTournamentId (tournamentId t)
+  , "format"           .= T.pack (show (tournamentFormat t))
+  , "bracketId"        .= fmap unBracketId (tournamentBracket t)
+  , "thirdPlaceNodeId" .= fmap unBracketNodeId (bracketThirdPlaceNodeId (GetB.viewBracket v))
+  , "nodes"            .= map (nodeJson (GetB.viewMatches v)) sortedNodes
   ]
   where
     t = GetB.viewTournament v
@@ -279,12 +290,61 @@ fromGetBracket GetB.BracketNotGenerated =
   ApiError status404 "BRACKET_NOT_GENERATED"
     "No bracket has been generated for this tournament yet" (object [])
 
+data EFootballResultReq = EFootballResultReq EFootballScore EFootballScore
+
+instance FromJSON EFootballResultReq where
+  parseJSON = withObject "efootball-result" $ \o -> do
+    rawA <- o .: "scoreA"
+    rawB <- o .: "scoreB"
+    case (mkEFootballScore rawA, mkEFootballScore rawB) of
+      (Right a, Right b) -> pure (EFootballResultReq a b)
+      (Left (NegativeScore n), _) -> fail ("scoreA/scoreB must not be negative, got " ++ show n)
+      (_, Left (NegativeScore n)) -> fail ("scoreA/scoreB must not be negative, got " ++ show n)
+
+data CreateTeamReq = CreateTeamReq
+  { reqTeamName :: String
+  , reqCaptain  :: String
+  , reqMembers  :: [String]
+  }
+
+instance FromJSON CreateTeamReq where
+  parseJSON = withObject "team" $ \o -> do
+    n   <- o .: "name"
+    cap <- o .: "captain"
+    ms  <- o .: "members"
+    pure (CreateTeamReq n cap ms)
+
+toTeam :: CreateTeamReq -> Team
+toTeam r = Team
+  { teamName    = TeamName (reqTeamName r)
+  , teamCaptain = Player (PlayerName (reqCaptain r))
+  , teamMembers = map (Player . PlayerName) (reqMembers r)
+  }
+
+teamJson :: Team -> Value
+teamJson t = object
+  [ "name"    .= unTeamName (teamName t)
+  , "captain" .= playerStr (teamCaptain t)
+  , "members" .= map playerStr (teamMembers t)
+  ]
+
+fromCreateTeam :: CreateTeamError -> ApiError
+fromCreateTeam CaptainNotInMembers =
+  ApiError status400 "VALIDATION_FAILED"
+    "The captain must be one of the team's members" (object ["field" .= ("captain" :: Text)])
+fromCreateTeam (TeamNameAlreadyExists (TeamName n)) =
+  ApiError status409 "TEAM_NAME_TAKEN"
+    "A team with that name already exists" (object ["name" .= n])
+
+
 data CreateReq = CreateReq
-  { reqName         :: String
-  , reqOrganizer    :: String
-  , reqFormat       :: TournamentFormat
-  , reqVisibility   :: Visibility
-  , reqMaxPlayers   :: Int
+  { reqName            :: String
+  , reqOrganizer       :: String
+  , reqFormat          :: TournamentFormat
+  , reqVisibility      :: Visibility
+  , reqMaxPlayers      :: Int
+  , reqThirdPlaceMatch :: Bool
+  , reqParticipantMode :: ParticipantMode
   }
 
 instance FromJSON CreateReq where
@@ -294,6 +354,8 @@ instance FromJSON CreateReq where
     f   <- o .: "format"
     v   <- o .: "visibility"
     m   <- o .: "maxParticipants"
+    tp  <- o .:? "thirdPlaceMatch" .!= False
+    pm  <- o .:? "participantMode" .!= ("IndividualOnly" :: Text)
     fmt <- case (f :: Text) of
       "SingleElimination" -> pure SingleElimination
       "DoubleElimination" -> pure DoubleElimination
@@ -303,7 +365,12 @@ instance FromJSON CreateReq where
       "Public"  -> pure Public
       "Private" -> pure Private
       _ -> fail "visibility must be Public or Private"
-    pure (CreateReq n org fmt vis m)
+    mode <- case pm of
+      "IndividualOnly" -> pure IndividualOnly
+      "SquadOnly"      -> pure SquadOnly
+      _ -> fail "participantMode must be IndividualOnly or SquadOnly"
+    pure (CreateReq n org fmt vis m tp mode)
+  --  pure (CreateReq n org fmt vis m tp)
 
 toNewTournament :: UserId -> CreateReq -> NewTournament
 toNewTournament uid r = NewTournament
@@ -313,6 +380,8 @@ toNewTournament uid r = NewTournament
   , newTournamentVisibility      = reqVisibility r
   , newTournamentMaxParticipants = reqMaxPlayers r
   , newTournamentOwner           = uid
+  , newTournamentThirdPlaceMatch = reqThirdPlaceMatch r
+  , newTournamentParticipantMode = reqParticipantMode r
   }
 
 tournamentJson :: Tournament -> Value
@@ -324,8 +393,12 @@ tournamentJson t = object
   , "state"           .= T.pack (show (tournamentState t))
   , "visibility"      .= T.pack (show (tournamentVisibility t))
   , "maxParticipants" .= tournamentMaxParticipants t
+  , "thirdPlaceMatch" .= tournamentThirdPlaceMatch t
+  , "participantMode" .= T.pack (show (tournamentParticipantMode t))
   , "bracketId"       .= fmap unBracketId (tournamentBracket t)
   ]
+
+
 
 tournamentViewJson :: GetT.TournamentView -> Value
 tournamentViewJson v = object
@@ -386,18 +459,22 @@ fromValidation EmptyOrganizer =
 fromValidation (MaxParticipantsTooLow n) =
   ApiError status400 "VALIDATION_FAILED" "maxParticipants is too low"
     (object ["field" .= ("maxParticipants" :: Text), "minimum" .= (2 :: Int), "actual" .= n])
+fromValidation ThirdPlaceMatchRequiresSingleElimination =
+  ApiError status400 "VALIDATION_FAILED"
+    "Third-place match is only supported for Single Elimination"
+    (object ["field" .= ("thirdPlaceMatch" :: Text)])
 
-newtype ParticipantReq = ParticipantReq Participant
+data ParticipantReq
+  = IndividualReq String
+  | SquadReq String
 
 instance FromJSON ParticipantReq where
   parseJSON = withObject "participant" $ \o -> do
     t <- o .: "type"
     case (t :: Text) of
-      "Individual" -> do
-        n <- o .: "player"
-        pure (ParticipantReq (Individual (Player (PlayerName n))))
-      "Squad" -> fail "Squad registration is not supported yet"
-      _       -> fail "type must be Individual"
+      "Individual" -> IndividualReq <$> o .: "player"
+      "Squad"      -> SquadReq <$> o .: "teamName"
+      _            -> fail "type must be Individual or Squad"
 
 fromRegister :: Register.RegisterParticipantCheckedError -> ApiError
 fromRegister (Register.Unauthorized a)     = fromAuthorization a
@@ -414,6 +491,26 @@ fromRegister Register.AlreadyRegistered =
 fromRegister Register.CapacityReached =
   ApiError status409 "REGISTRATION_CAPACITY_REACHED"
     "The tournament is full" (object [])
+fromRegister (Register.ParticipantKindNotAllowed mode) =
+  ApiError status409 "PARTICIPANT_KIND_NOT_ALLOWED"
+    "This tournament does not accept that kind of participant"
+    (object ["allowed" .= T.pack (show mode)])
+
+newtype ThirdPlaceMatchReq = ThirdPlaceMatchReq Bool
+
+instance FromJSON ThirdPlaceMatchReq where
+  parseJSON = withObject "thirdPlaceMatch" $ \o ->
+    ThirdPlaceMatchReq <$> o .: "thirdPlaceMatch"
+
+fromUpdateThirdPlaceMatch :: UTTP.UpdateTournamentThirdPlaceMatchError -> ApiError
+fromUpdateThirdPlaceMatch (UTTP.Unauthorized a)     = fromAuthorization a
+fromUpdateThirdPlaceMatch (UTTP.InvalidLifecycle l) = fromLifecycle l
+fromUpdateThirdPlaceMatch (UTTP.InvalidTournament v) = fromValidation v
+fromUpdateThirdPlaceMatch UTTP.BracketAlreadyGenerated =
+  ApiError status409 "BRACKET_ALREADY_GENERATED"
+    "The third-place setting can't change once the bracket exists" (object [])
+
+
 data Env = Env
   { envLock   :: MVar ()
   , envTokens :: IORef (Map.Map Text UserId)
@@ -450,6 +547,12 @@ currentUser env = do
           pure $ case r of
             Right (Right (Just u)) | accountStatus u == Active -> Just uid
             _                                                   -> Nothing
+
+resolveParticipantReq :: ParticipantReq -> SQLiteM Participant
+resolveParticipantReq (IndividualReq n) =
+  pure (Individual (Player (PlayerName n)))
+resolveParticipantReq (SquadReq n) =
+  Squad <$> Repo.getTeam (TeamName n)
 
 data LoginReq = LoginReq Text Text
 
@@ -491,6 +594,10 @@ fromRegisterUser RU.UsernameTaken =
   ApiError status409 "USERNAME_TAKEN" "That username is already taken" (object [])
 fromRegisterUser RU.EmailTaken =
   ApiError status409 "EMAIL_TAKEN" "That email is already registered" (object [])
+
+
+
+
 
 
 
@@ -593,6 +700,12 @@ runViewAction lock useCase toApiError onSuccess = do
 
 main :: IO ()
 main = do
+  initResult <- runSQLiteM dbPath $ do
+    env <- ask
+    liftIO (initializeSchema (envConnection env))
+  case initResult of
+    Left err -> hPutStrLn stderr ("schema init failed: " ++ show err)
+    Right () -> pure ()
   lock <- Env <$> newMVar () <*> newIORef Map.empty
   scotty 3000 $ do
     get "/health" $ json (object ["status" .= ("ok" :: Text)])
@@ -629,6 +742,16 @@ main = do
           runMatchAction lock (\uid mid -> recordViaApi uid mid req) fromRecord $ \m ->
             json (matchJson m)
 
+    post "/matches/:id/efootball-result" $ do
+      raw <- body
+      case eitherDecode raw of
+        Left reason -> sendError (invalidBody reason)
+        Right (EFootballResultReq scoreA scoreB) ->
+          runMatchAction lock
+            (\uid mid -> recordEFootballResult uid mid scoreA scoreB)
+            fromRecordEFootball
+            $ \m -> json (matchJson m)
+
     
     post "/tournaments" $ do
       mUser <- currentUser lock
@@ -647,16 +770,21 @@ main = do
             Right (Right tid) -> do
               status status201
               json (object ["tournamentId" .= unTournamentId tid])
+              
     post "/tournaments/:id/registrations" $ do
       raw <- body
       case eitherDecode raw of
         Left reason -> sendError (invalidBody reason)
-        Right (ParticipantReq p) ->
-          runAction lock
-            (\uid tid -> Register.registerParticipantChecked uid tid p)
-            fromRegister $ \rid -> do
-              status status201
-              json (object ["registrationId" .= unRegistrationId rid])
+        Right req -> do
+          resolved <- runUseCase lock (resolveParticipantReq req)
+          case resolved of
+            Left apiErr -> sendError apiErr
+            Right p ->
+              runAction lock
+                (\uid tid -> Register.registerParticipantChecked uid tid p)
+                fromRegister $ \rid -> do
+                  status status201
+                  json (object ["registrationId" .= unRegistrationId rid])
 
     post "/login" $ do
       raw <- body
@@ -744,6 +872,30 @@ main = do
           case result of
             Left apiErr -> sendError apiErr
             Right ts    -> json (object ["tournaments" .= map tournamentJson ts])
+
+    post "/tournaments/:id/third-place-match" $ do
+      raw <- body
+      case eitherDecode raw of
+        Left reason -> sendError (invalidBody reason)
+        Right (ThirdPlaceMatchReq tp) ->
+          runTransition lock
+            (\uid tid -> UTTP.updateTournamentThirdPlaceMatch uid tid tp) fromUpdateThirdPlaceMatch
+
+    post "/teams" $ do
+      mUser <- currentUser lock
+      raw   <- body
+      case (mUser, eitherDecode raw) of
+        (Nothing, _) -> sendError unauthenticated
+        (_, Left reason) -> sendError (invalidBody reason)
+        (Just _, Right req) -> do
+          let team = toTeam req
+          result <- runUseCase lock (createTeam team)
+          case result of
+            Left apiErr -> sendError apiErr
+            Right (Left teamErr) -> sendError (fromCreateTeam teamErr)
+            Right (Right ()) -> do
+              status status201
+              json (teamJson team)
 
               
 

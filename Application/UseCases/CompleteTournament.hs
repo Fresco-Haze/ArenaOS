@@ -74,7 +74,12 @@ completeTournament currentUser tid = do
                       (Just gf1Id, Just resetId) ->
                         findChampionMatchDoubleElim gf1Id (Just resetId) nodes matches /= Nothing
                       _ ->
-                        findChampionMatch nodes matches /= Nothing   -- unchanged single-elim path
+                        let championDecided =
+                              findChampionMatch (bracketThirdPlaceNodeId bracket) nodes matches /= Nothing
+                            thirdPlaceDecided = case bracketThirdPlaceNodeId bracket of
+                              Nothing   -> True
+                              Just tpId -> isJust (lookupMatchForNode tpId matches >>= championOutcome)
+                        in championDecided && thirdPlaceDecided
 
             if not isComplete
               then pure (Left TournamentNotComplete)
@@ -114,12 +119,15 @@ matchOutcomeWinner m = case matchOutcome m of
 --
 -- Status and outcome are checked together in one case, since "champion
 -- determined" is a single business rule, not two independent predicates.
-findChampionMatch :: [BracketNode] -> [Match] -> Maybe Match
-findChampionMatch [] _ = Nothing
-findChampionMatch nodes matches = do
-  let finalNode = maximumBy (comparing nodeRound) nodes
-  m <- lookupMatchForNode (nodeId finalNode) matches
-  championOutcome m
+findChampionMatch :: Maybe BracketNodeId -> [BracketNode] -> [Match] -> Maybe Match
+findChampionMatch mThirdPlaceId nodes matches
+  | null candidates = Nothing
+  | otherwise = do
+      let finalNode = maximumBy (comparing nodeRound) candidates
+      m <- lookupMatchForNode (nodeId finalNode) matches
+      championOutcome m
+  where
+    candidates = filter (\n -> Just (nodeId n) /= mThirdPlaceId) nodes
 
 lookupMatchForNode :: BracketNodeId -> [Match] -> Maybe Match
 lookupMatchForNode nid = find (\m -> matchBracketNode m == nid)
@@ -130,3 +138,4 @@ championOutcome m = case (matchStatus m, matchOutcome m) of
   (Domain.Match.Completed, Just (Forfeit _))          -> Just m
   (Domain.Match.Completed, Just (Disqualification _)) -> Just m
   _                                      -> Nothing
+

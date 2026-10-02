@@ -20,6 +20,7 @@ export const Tournament = z.object({
   state: TournamentState,
   visibility: z.enum(['Public', 'Private']),
   maxParticipants: z.number(),
+  thirdPlaceMatch: z.boolean(),
   bracketId: z.number().nullable(),
 })
 export type Tournament = z.infer<typeof Tournament>
@@ -81,6 +82,7 @@ export const BracketView = z.object({
   tournamentId: z.number(),
   format: TournamentFormat,
   bracketId: z.number().nullable(),
+  thirdPlaceNodeId: z.number().nullable(),
   nodes: z.array(BracketNode),
 })
 export type BracketView = z.infer<typeof BracketView>
@@ -127,3 +129,11 @@ export type RegisterResponse = z.infer<typeof RegisterResponse>
 export const CreateTournamentResponse = z.object({ tournamentId: z.number() })
 
 
+
+export const Team = z.object({
+  name: z.string(),
+  captain: z.string(),
+  members: z.array(z.string()),
+})
+export type Team = z.infer<typeof Team>
+export const CreateTeamResponse = Team

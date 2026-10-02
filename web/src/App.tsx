@@ -7,6 +7,7 @@ import RegisterPage from './pages/RegisterPage'
 import ProtectedRoute from './components/ProtectedRoute'
 import MyTournamentsPage from './pages/MyTournamentsPage'
 import CreateTournamentPage from './pages/CreateTournamentPage'
+import CreateTeamPage from './pages/CreateTeamPage'
 
 function Header() {
   const { user, logout } = useAuth()
@@ -86,6 +87,14 @@ export default function App() {
           />
           <Route path="/tournaments/:id" element={<TournamentRoute />} />
           <Route path="*" element={<NotFound />} />
+          <Route
+            path="/teams/new"
+            element={
+              <ProtectedRoute>
+                <CreateTeamPage />
+              </ProtectedRoute>
+           }
+         />
         </Routes>
       </main>
     </div>

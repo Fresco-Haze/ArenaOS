@@ -40,7 +40,8 @@ module Shell.Persistence.Port
   ) where
 
 import Domain.Participant (Player, PlayerName, Team, TeamName, Participant, ParticipantId)
-import Domain.Tournament (Tournament, TournamentId, TournamentName, OrganizerName, TournamentFormat, Visibility, TournamentState)
+import Domain.Tournament (Tournament, TournamentId, TournamentName, OrganizerName, TournamentFormat, Visibility, TournamentState
+ , ParticipantMode)
 import Domain.Registration (Registration, RegistrationId)
 import Domain.Bracket (Bracket, BracketId, BracketNode, BracketNodeId)
 import Domain.Match (Match, MatchId)
@@ -88,6 +89,8 @@ data NewTournament = NewTournament
     , newTournamentFormat          :: TournamentFormat
     , newTournamentVisibility      :: Visibility
     , newTournamentMaxParticipants :: Int
+    , newTournamentThirdPlaceMatch :: Bool
+    , newTournamentParticipantMode :: ParticipantMode
     , newTournamentOwner :: UserId
     }
 
@@ -109,6 +112,7 @@ class Monad m => TournamentRepository m where
     updateTournamentMaxParticipants :: TournamentId -> Int -> m ()
     updateTournamentVisibility :: TournamentId -> Visibility -> m ()
     updateTournamentFormat   :: TournamentId -> TournamentFormat -> m ()
+    updateTournamentThirdPlaceMatch :: TournamentId -> Bool -> m ()
     listAllTournaments :: m [Tournament]
 
 -- Creation-shaped input for RegistrationRepository.createRegistration.

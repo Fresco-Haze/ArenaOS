@@ -25,6 +25,7 @@ export default function CreateTournamentPage() {
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<Field, string>>>({})
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [thirdPlaceMatch, setThirdPlaceMatch] = useState(false)
 
   // ProtectedRoute guarantees this, but keep TypeScript honest.
   if (!user) return null
@@ -47,6 +48,7 @@ export default function CreateTournamentPage() {
         organizer: user.username,
         visibility,
         maxParticipants: parsedMax,
+        thirdPlaceMatch,
       })
       navigate(`/tournaments/${res.tournamentId}`)
     } catch (err) {
@@ -120,6 +122,15 @@ export default function CreateTournamentPage() {
           {fieldErrors.maxParticipants && (
             <span role="alert" className="form-error">{fieldErrors.maxParticipants}</span>
           )}
+        </label>
+        <label>
+          <input
+            type="checkbox"
+            checked={thirdPlaceMatch}
+            onChange={(e) => setThirdPlaceMatch(e.target.checked)}
+          />
+          Play a third-place match
+          <span className="muted"> (only played with 4 or more players)</span>
         </label>
 
         {error && <p role="alert" className="form-error">{error}</p>}

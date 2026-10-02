@@ -384,3 +384,53 @@ textarea {
   background: var(--surface);
   color: var(--text);
 }
+
+.third-place {
+  margin-top: 2rem;
+  max-width: 20.5rem;
+}
+
+.score-entry {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.score-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.score-name {
+  font-weight: 600;
+}
+
+.score-stepper {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.score-stepper button {
+  width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
+  font-size: 1.125rem;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.score-value {
+  width: 3rem;
+  text-align: center;
+  -moz-appearance: textfield;
+}
+
+.score-value::-webkit-outer-spin-button,
+.score-value::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}

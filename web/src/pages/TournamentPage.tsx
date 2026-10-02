@@ -79,11 +79,16 @@ export default function TournamentPage({ id }: { id: string }) {
             No players have registered yet.
           </p>
         ) : (
-          <ul className="plain-list">
-            {view.participants.map((p, i) => (
-              <li key={i}>{participantName(p)}</li>
-            ))}
-          </ul>
+        <ul className="plain-list">
+           {view.participants.map((p, i) => (
+             <li key={i}>
+               {participantName(p)}
+               {p.type === 'Squad' && (
+                 <span className="muted"> — {p.team.members.join(', ')}</span>
+               )}
+             </li>
+           ))}
+         </ul>
         )}
       </section>
 

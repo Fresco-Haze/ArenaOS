@@ -1,5 +1,5 @@
 import { api, apiVoid } from '../api'
-import { Match, Tournament, RegistrationResult, BracketIdResult, CreateTournamentResponse } from '../model'
+import { Match, Tournament, RegistrationResult, BracketIdResult, CreateTournamentResponse, CreateTeamResponse } from '../model'
 
 export function publish(id: number) {
   return apiVoid(`/tournaments/${id}/publish`, { method: 'POST' })
@@ -55,9 +55,38 @@ export function createTournament(input: {
   organizer: string
   visibility: 'Public' | 'Private'
   maxParticipants: number
+  thirdPlaceMatch: boolean
 }) {
   return api('/tournaments', CreateTournamentResponse, {
     method: 'POST',
     body: JSON.stringify({ ...input, format: 'SingleElimination' }),
+  })
+}
+
+export function setThirdPlaceMatch(id: number, enabled: boolean) {
+  return apiVoid(`/tournaments/${id}/third-place-match`, {
+    method: 'POST',
+    body: JSON.stringify({ thirdPlaceMatch: enabled }),
+  })
+}
+
+export function recordEFootballResult(matchId: number, scoreA: number, scoreB: number) {
+  return api(`/matches/${matchId}/efootball-result`, Match, {
+    method: 'POST',
+    body: JSON.stringify({ scoreA, scoreB }),
+  })
+}
+
+export function registerSquad(id: number, teamName: string) {
+  return api(`/tournaments/${id}/registrations`, RegistrationResult, {
+    method: 'POST',
+    body: JSON.stringify({ type: 'Squad', teamName }),
+  })
+}
+
+export function createTeam(input: { name: string; captain: string; members: string[] }) {
+  return api('/teams', CreateTeamResponse, {
+    method: 'POST',
+    body: JSON.stringify(input),
   })
 }

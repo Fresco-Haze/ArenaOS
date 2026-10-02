@@ -121,11 +121,12 @@ dispatch args = case args of
         , newTournamentFormat          = SingleElimination
         , newTournamentVisibility      = Public
         , newTournamentMaxParticipants = maxP
+        , newTournamentThirdPlaceMatch = False
         }
       liftIO $ case outcome of
         Left err  -> putStrLn ("Create failed: " ++ show err)
         Right tid -> putStrLn ("Created tournament " ++ show (unTournamentId tid))
-        
+
   ["register-user", username, email, password] -> do
     outcome <- registerUser RegisterUserRequest
       { registerUsername = Username (pack username)

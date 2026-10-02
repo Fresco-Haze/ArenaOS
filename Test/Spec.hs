@@ -22,6 +22,7 @@ import Shell.Persistence.Port hiding
   , updateTournamentVisibility
   , updateTournamentFormat
   , updateTournamentMaxParticipants
+  , updateTournamentThirdPlaceMatch
   )
 
 import Shell.Persistence.SQLite.ParticipantRepository ()
@@ -104,7 +105,7 @@ import Domain.Scoreable (mkEFootballScore)
 import Shell.Persistence.SQLite.EFootballScoreRepository ()
 import qualified Engine.BracketGeneration as BracketGeneration
 import qualified Engine.Seeding           as Seeding
-import Domain.Bracket (BracketNode(..), BracketNodeId(..), BracketSide(..), MatchSlot(..),BracketId(..))
+import Domain.Bracket (Bracket(..), BracketNode(..), BracketNodeId(..), BracketSide(..), MatchSlot(..),BracketId(..))
 import Application.UseCases.GetRoundRobinStandings (getRoundRobinStandings, GetRoundRobinStandingsError(..))
 import Engine.Standings (Standing(..))
 import qualified Engine.Standings as Standings
@@ -145,6 +146,8 @@ import qualified Application.UseCases.GetTournament as GetT
 import qualified Application.UseCases.ListMyTournaments as ListMine
 import Application.Internal.Authorization (AuthorizationError(..), requireAdministrator, requireVisibleToViewer)
 import qualified Application.UseCases.ListPublicTournaments as LP
+import Application.UseCases.UpdateTournamentThirdPlaceMatch (updateTournamentThirdPlaceMatch, UpdateTournamentThirdPlaceMatchError(..))
+import qualified Application.UseCases.UpdateTournamentThirdPlaceMatch as UTTP
 
 
 data TestTxError = TestTxError deriving (Eq, Show)
@@ -224,6 +227,7 @@ createOpenTournament ownerId name maxP = do
     , newTournamentFormat          = SingleElimination
     , newTournamentVisibility      = Public
     , newTournamentMaxParticipants = maxP
+    , newTournamentThirdPlaceMatch = False
     }
   advanceToRegistrationOpen ownerId tid
   pure tid
@@ -256,6 +260,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 4
+          , newTournamentThirdPlaceMatch = False
           }
 
         forM_ participants $ \p -> case p of
@@ -305,6 +310,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 8
+          , newTournamentThirdPlaceMatch = False
           }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
@@ -361,6 +367,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 8
+          , newTournamentThirdPlaceMatch = False
           }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
@@ -430,6 +437,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 3
+          , newTournamentThirdPlaceMatch = False
           }
 
         forM_ participants $ \p -> case p of
@@ -484,6 +492,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False
           }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
@@ -518,6 +527,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False
           }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
@@ -551,6 +561,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False
           }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
@@ -567,6 +578,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False
           }
         advanceToRegistrationOpen ownerId otherTid
         _ <- unwrap =<< registerParticipant otherTid eve
@@ -597,6 +609,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False
           }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
@@ -635,6 +648,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False
           }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
@@ -673,6 +687,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False
           }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
@@ -704,6 +719,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False
           }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
@@ -735,6 +751,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False
           }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
@@ -768,6 +785,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False
           }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
@@ -797,6 +815,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False
           }
         _ <- unwrap =<< publishTournament ownerId tid
         _ <- unwrap =<< openRegistration ownerId tid
@@ -832,6 +851,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False
           }
         closeRegistration ownerId tid
 
@@ -852,6 +872,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False
           }
         publishTournament impostorId tid
 
@@ -873,6 +894,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False
           }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
@@ -898,6 +920,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False
           }
         advanceToRegistrationClosed ownerId tid
         startTournament ownerId tid
@@ -920,6 +943,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False
           }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
@@ -945,14 +969,16 @@ spec = before_ resetTestDb $ do
           { newTournamentName = TournamentName "Cancel From Draft"
           , newTournamentOrganizer = OrganizerName "Test Organizer", newTournamentOwner = ownerId
           , newTournamentFormat = SingleElimination, newTournamentVisibility = Public
-          , newTournamentMaxParticipants = 2 }
+          , newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False }
         _ <- unwrap =<< cancelTournament ownerId tidDraft "no longer needed"
 
         tidPublished <- createTournament NewTournament
           { newTournamentName = TournamentName "Cancel From Published"
           , newTournamentOrganizer = OrganizerName "Test Organizer", newTournamentOwner = ownerId
           , newTournamentFormat = SingleElimination, newTournamentVisibility = Public
-          , newTournamentMaxParticipants = 2 }
+          , newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False }
         _ <- unwrap =<< publishTournament ownerId tidPublished
         _ <- unwrap =<< cancelTournament ownerId tidPublished "no longer needed"
 
@@ -960,7 +986,8 @@ spec = before_ resetTestDb $ do
           { newTournamentName = TournamentName "Cancel From RegOpen"
           , newTournamentOrganizer = OrganizerName "Test Organizer", newTournamentOwner = ownerId
           , newTournamentFormat = SingleElimination, newTournamentVisibility = Public
-          , newTournamentMaxParticipants = 2 }
+          , newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False }
         _ <- unwrap =<< publishTournament ownerId tidRegOpen
         _ <- unwrap =<< openRegistration ownerId tidRegOpen
         _ <- unwrap =<< cancelTournament ownerId tidRegOpen "no longer needed"
@@ -969,7 +996,8 @@ spec = before_ resetTestDb $ do
           { newTournamentName = TournamentName "Cancel From RegClosed"
           , newTournamentOrganizer = OrganizerName "Test Organizer", newTournamentOwner = ownerId
           , newTournamentFormat = SingleElimination, newTournamentVisibility = Public
-          , newTournamentMaxParticipants = 2 }
+          , newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False }
         advanceToRegistrationClosed ownerId tidRegClosed
         _ <- unwrap =<< cancelTournament ownerId tidRegClosed "no longer needed"
 
@@ -980,7 +1008,8 @@ spec = before_ resetTestDb $ do
           { newTournamentName = TournamentName "Cancel From InProgress"
           , newTournamentOrganizer = OrganizerName "Test Organizer", newTournamentOwner = ownerId
           , newTournamentFormat = SingleElimination, newTournamentVisibility = Public
-          , newTournamentMaxParticipants = 2 }
+          , newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
           Squad team         -> Repo.saveTeam team
@@ -1013,6 +1042,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False
           }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
@@ -1045,6 +1075,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False
           }
         _ <- unwrap =<< cancelTournament ownerId tid "first cancellation"
         cancelTournament ownerId tid "second cancellation"
@@ -1064,6 +1095,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False
           }
         cancelTournament ownerId tid ""
 
@@ -1089,6 +1121,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 8
+          , newTournamentThirdPlaceMatch = False
           }
         _ <- unwrap =<< updateTournamentName ownerId tid (TournamentName "Renamed Cup")
         Repo.getTournament tid
@@ -1108,6 +1141,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 8
+          , newTournamentThirdPlaceMatch = False
           }
         _ <- unwrap =<< publishTournament ownerId tid
         _ <- unwrap =<< updateTournamentVisibility ownerId tid Private
@@ -1138,6 +1172,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False
           }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
@@ -1169,6 +1204,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False
           }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
@@ -1202,6 +1238,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False
           }
         _ <- unwrap =<< cancelTournament ownerId tid "no longer needed"
 
@@ -1224,6 +1261,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False
           }
         updateTournamentName impostorId tid (TournamentName "Hijacked")
 
@@ -1246,6 +1284,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 8
+          , newTournamentThirdPlaceMatch = False
           }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
@@ -1273,6 +1312,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 8
+          , newTournamentThirdPlaceMatch = False
           }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
@@ -1298,7 +1338,7 @@ spec = before_ resetTestDb $ do
             , tournamentVisibility = Public
             , tournamentMaxParticipants = 2
             , tournamentBracket = Nothing
-            , tournamentOwner = UserId 1
+            , tournamentOwner = UserId 1, tournamentThirdPlaceMatch = False
             }
           tournaments = map mkT [Draft, Draft, Published, InProgress, Completed, Completed, Completed, Cancelled]
           overview = buildTournamentOverview tournaments
@@ -1324,11 +1364,13 @@ spec = before_ resetTestDb $ do
         _ <- createTournament NewTournament
           { newTournamentName = TournamentName "Mine 1", newTournamentOrganizer = OrganizerName "x"
           , newTournamentOwner = ownerId, newTournamentFormat = SingleElimination
-          , newTournamentVisibility = Public, newTournamentMaxParticipants = 2 }
+          , newTournamentVisibility = Public, newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False }
         _ <- createTournament NewTournament
           { newTournamentName = TournamentName "Not Mine", newTournamentOrganizer = OrganizerName "x"
           , newTournamentOwner = otherId, newTournamentFormat = SingleElimination
-          , newTournamentVisibility = Public, newTournamentMaxParticipants = 2 }
+          , newTournamentVisibility = Public, newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False }
         liftIO $ saveSession ownerId
         getOrganizerDashboard
 
@@ -1421,6 +1463,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False
           }
         let alice = Individual (Player (PlayerName "Alice"))
         Repo.savePlayer (Player (PlayerName "Alice"))
@@ -1446,6 +1489,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False
           }
         forM_ [alice, bob, carol] $ \p -> case p of
           Individual player -> Repo.savePlayer player
@@ -1472,6 +1516,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False
           }
         advanceToRegistrationOpen ownerId tid
         let alice = Individual (Player (PlayerName "Alice"))
@@ -1501,6 +1546,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False
           }
         advanceToRegistrationOpen ownerId tid
         _ <- unwrap =<< registerCodParticipant tid (Squad team)
@@ -1528,6 +1574,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False
           }
         -- Deliberately still Draft -- no lifecycle advancement.
         registerCodParticipant tid (Squad team)
@@ -1549,6 +1596,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False
           }
         advanceToRegistrationOpen ownerId tid
         let alice = Individual (Player (PlayerName "Alice"))
@@ -1578,6 +1626,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False
           }
         advanceToRegistrationOpen ownerId tid
         _ <- unwrap =<< registerPubgParticipant tid (Squad team)
@@ -1605,6 +1654,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False
           }
         -- Deliberately still Draft -- no lifecycle advancement.
         registerPubgParticipant tid (Squad team)
@@ -1627,6 +1677,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False
           }
 
         advanceToRegistrationOpen ownerId tid
@@ -1664,6 +1715,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False
           }
 
         advanceToRegistrationOpen ownerId tid
@@ -1699,6 +1751,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False
           }
 
         -- Deliberately still Draft. No lifecycle advancement.
@@ -1972,11 +2025,13 @@ spec = before_ resetTestDb $ do
         _ <- createTournament NewTournament
           { newTournamentName = TournamentName "Owner1 Cup", newTournamentOrganizer = OrganizerName "x"
           , newTournamentOwner = owner1, newTournamentFormat = SingleElimination
-          , newTournamentVisibility = Public, newTournamentMaxParticipants = 2 }
+          , newTournamentVisibility = Public, newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False }
         _ <- createTournament NewTournament
           { newTournamentName = TournamentName "Owner2 Cup", newTournamentOrganizer = OrganizerName "x"
           , newTournamentOwner = owner2, newTournamentFormat = SingleElimination
-          , newTournamentVisibility = Public, newTournamentMaxParticipants = 2 }
+          , newTournamentVisibility = Public, newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False }
         getAdministratorDashboard admin
       case result of
         Left err    -> expectationFailure ("runSQLiteM failed: " ++ show err)
@@ -2061,6 +2116,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False
           }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
@@ -2099,6 +2155,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False
           }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
@@ -2137,6 +2194,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False
           }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
@@ -2172,6 +2230,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False
           }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
@@ -2215,6 +2274,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = DoubleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 4
+          , newTournamentThirdPlaceMatch = False
           }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
@@ -2280,6 +2340,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = DoubleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 4
+          , newTournamentThirdPlaceMatch = False
           }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
@@ -2349,6 +2410,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = DoubleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 4
+          , newTournamentThirdPlaceMatch = False
           }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
@@ -2430,6 +2492,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = DoubleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 3
+          , newTournamentThirdPlaceMatch = False
           }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
@@ -2496,6 +2559,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = DoubleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 4
+          , newTournamentThirdPlaceMatch = False
           }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
@@ -2551,6 +2615,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = DoubleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 4
+          , newTournamentThirdPlaceMatch = False
           }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
@@ -2719,6 +2784,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = RoundRobin
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 3
+          , newTournamentThirdPlaceMatch = False
           }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
@@ -2778,6 +2844,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = RoundRobin
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 3
+          , newTournamentThirdPlaceMatch = False
           }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
@@ -2840,6 +2907,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = RoundRobin
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 3
+          , newTournamentThirdPlaceMatch = False
           }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
@@ -2913,7 +2981,8 @@ spec = before_ resetTestDb $ do
         tid <- createTournament NewTournament
           { newTournamentName = TournamentName "Not RoundRobin Cup", newTournamentOrganizer = OrganizerName "Test Organizer"
           , newTournamentOwner = ownerId, newTournamentFormat = SingleElimination
-          , newTournamentVisibility = Public, newTournamentMaxParticipants = 2 }
+          , newTournamentVisibility = Public, newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False }
         getRoundRobinStandings ownerId tid
       case result of
         Left err    -> expectationFailure ("runSQLiteM failed: " ++ show err)
@@ -2926,7 +2995,8 @@ spec = before_ resetTestDb $ do
         tid <- createTournament NewTournament
           { newTournamentName = TournamentName "No Bracket RR Cup", newTournamentOrganizer = OrganizerName "Test Organizer"
           , newTournamentOwner = ownerId, newTournamentFormat = RoundRobin
-          , newTournamentVisibility = Public, newTournamentMaxParticipants = 3 }
+          , newTournamentVisibility = Public, newTournamentMaxParticipants = 3
+          , newTournamentThirdPlaceMatch = False }
         getRoundRobinStandings ownerId tid
       case result of
         Left err    -> expectationFailure ("runSQLiteM failed: " ++ show err)
@@ -2942,7 +3012,8 @@ spec = before_ resetTestDb $ do
         tid <- createTournament NewTournament
           { newTournamentName = TournamentName "Private RR Cup", newTournamentOrganizer = OrganizerName "Test Organizer"
           , newTournamentOwner = ownerId, newTournamentFormat = RoundRobin
-          , newTournamentVisibility = Private, newTournamentMaxParticipants = 3 }
+          , newTournamentVisibility = Private, newTournamentMaxParticipants = 3
+          , newTournamentThirdPlaceMatch = False }
         forM_ participants $ \p -> case p of Individual player -> Repo.savePlayer player; Squad team -> Repo.saveTeam team
         advanceToRegistrationOpen ownerId tid
         forM_ participants (\p -> unwrap =<< registerParticipant tid p)
@@ -2962,7 +3033,8 @@ spec = before_ resetTestDb $ do
         tid <- createTournament NewTournament
           { newTournamentName = TournamentName "Private RR Owner Cup", newTournamentOrganizer = OrganizerName "Test Organizer"
           , newTournamentOwner = ownerId, newTournamentFormat = RoundRobin
-          , newTournamentVisibility = Private, newTournamentMaxParticipants = 3 }
+          , newTournamentVisibility = Private, newTournamentMaxParticipants = 3
+          , newTournamentThirdPlaceMatch = False }
         forM_ participants $ \p -> case p of Individual player -> Repo.savePlayer player; Squad team -> Repo.saveTeam team
         advanceToRegistrationOpen ownerId tid
         forM_ participants (\p -> unwrap =<< registerParticipant tid p)
@@ -2985,7 +3057,8 @@ spec = before_ resetTestDb $ do
         tid <- createTournament NewTournament
           { newTournamentName = TournamentName "Public RR Cup", newTournamentOrganizer = OrganizerName "Test Organizer"
           , newTournamentOwner = ownerId, newTournamentFormat = RoundRobin
-          , newTournamentVisibility = Public, newTournamentMaxParticipants = 3 }
+          , newTournamentVisibility = Public, newTournamentMaxParticipants = 3
+          , newTournamentThirdPlaceMatch = False }
         forM_ participants $ \p -> case p of Individual player -> Repo.savePlayer player; Squad team -> Repo.saveTeam team
         advanceToRegistrationOpen ownerId tid
         forM_ participants (\p -> unwrap =<< registerParticipant tid p)
@@ -3032,6 +3105,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False
           }
 
         inner <- withTxEither $ do
@@ -3059,6 +3133,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False
           }
 
         inner <- withTxEither $ do
@@ -3091,6 +3166,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 8
+          , newTournamentThirdPlaceMatch = False
           }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
@@ -3159,7 +3235,8 @@ spec = before_ resetTestDb $ do
           { newTournamentName = TournamentName "Correction Case A Cup"
           , newTournamentOrganizer = OrganizerName "Test Organizer"
           , newTournamentOwner = ownerId, newTournamentFormat = SingleElimination
-          , newTournamentVisibility = Public, newTournamentMaxParticipants = 4 }
+          , newTournamentVisibility = Public, newTournamentMaxParticipants = 4
+          , newTournamentThirdPlaceMatch = False }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
           Squad team         -> Repo.saveTeam team
@@ -3196,7 +3273,8 @@ spec = before_ resetTestDb $ do
           { newTournamentName = TournamentName "Correction Case B Cup"
           , newTournamentOrganizer = OrganizerName "Test Organizer"
           , newTournamentOwner = ownerId, newTournamentFormat = SingleElimination
-          , newTournamentVisibility = Public, newTournamentMaxParticipants = 5 }
+          , newTournamentVisibility = Public, newTournamentMaxParticipants = 5
+          , newTournamentThirdPlaceMatch = False }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
           Squad team         -> Repo.saveTeam team
@@ -3255,7 +3333,8 @@ spec = before_ resetTestDb $ do
           { newTournamentName = TournamentName "Correction Case C Cup"
           , newTournamentOrganizer = OrganizerName "Test Organizer"
           , newTournamentOwner = ownerId, newTournamentFormat = SingleElimination
-          , newTournamentVisibility = Public, newTournamentMaxParticipants = 4 }
+          , newTournamentVisibility = Public, newTournamentMaxParticipants = 4
+          , newTournamentThirdPlaceMatch = False }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
           Squad team         -> Repo.saveTeam team
@@ -3296,7 +3375,8 @@ spec = before_ resetTestDb $ do
           { newTournamentName = TournamentName "Correction Case D Cup"
           , newTournamentOrganizer = OrganizerName "Test Organizer"
           , newTournamentOwner = ownerId, newTournamentFormat = SingleElimination
-          , newTournamentVisibility = Public, newTournamentMaxParticipants = 4 }
+          , newTournamentVisibility = Public, newTournamentMaxParticipants = 4
+          , newTournamentThirdPlaceMatch = False }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
           Squad team         -> Repo.saveTeam team
@@ -3338,7 +3418,8 @@ spec = before_ resetTestDb $ do
           { newTournamentName = TournamentName "Correction Chain Cup"
           , newTournamentOrganizer = OrganizerName "Test Organizer"
           , newTournamentOwner = ownerId, newTournamentFormat = SingleElimination
-          , newTournamentVisibility = Public, newTournamentMaxParticipants = 5 }
+          , newTournamentVisibility = Public, newTournamentMaxParticipants = 5
+          , newTournamentThirdPlaceMatch = False }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
           Squad team         -> Repo.saveTeam team
@@ -3394,6 +3475,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 4
+          , newTournamentThirdPlaceMatch = False
           }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
@@ -3444,6 +3526,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 5
+          , newTournamentThirdPlaceMatch = False
           }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
@@ -3508,7 +3591,8 @@ spec = before_ resetTestDb $ do
           , newTournamentOwner = ownerId
           , newTournamentFormat = SingleElimination
           , newTournamentVisibility = Public
-          , newTournamentMaxParticipants = 8 }
+          , newTournamentMaxParticipants = 8
+          , newTournamentThirdPlaceMatch = False }
 
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
@@ -3655,6 +3739,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False
           }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
@@ -3686,6 +3771,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False
           }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
@@ -3722,6 +3808,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False
           }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
@@ -3760,6 +3847,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 4
+          , newTournamentThirdPlaceMatch = False
           }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
@@ -3835,6 +3923,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False
           }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
@@ -3866,6 +3955,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False
           }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
@@ -3896,6 +3986,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False
           }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
@@ -3927,6 +4018,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False
           }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
@@ -3959,6 +4051,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False
           }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
@@ -3990,6 +4083,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False
           }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
@@ -4021,7 +4115,8 @@ spec = before_ resetTestDb $ do
           { newTournamentName = TournamentName "OpGuard StartMatch Paused Cup"
           , newTournamentOrganizer = OrganizerName "Test Organizer"
           , newTournamentOwner = ownerId, newTournamentFormat = SingleElimination
-          , newTournamentVisibility = Public, newTournamentMaxParticipants = 2 }
+          , newTournamentVisibility = Public, newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
           Squad team         -> Repo.saveTeam team
@@ -4050,7 +4145,8 @@ spec = before_ resetTestDb $ do
           { newTournamentName = TournamentName "OpGuard StartMatch Cancelled Cup"
           , newTournamentOrganizer = OrganizerName "Test Organizer"
           , newTournamentOwner = ownerId, newTournamentFormat = SingleElimination
-          , newTournamentVisibility = Public, newTournamentMaxParticipants = 2 }
+          , newTournamentVisibility = Public, newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
           Squad team         -> Repo.saveTeam team
@@ -4079,7 +4175,8 @@ spec = before_ resetTestDb $ do
           { newTournamentName = TournamentName "OpGuard Record Paused Cup"
           , newTournamentOrganizer = OrganizerName "Test Organizer"
           , newTournamentOwner = ownerId, newTournamentFormat = SingleElimination
-          , newTournamentVisibility = Public, newTournamentMaxParticipants = 2 }
+          , newTournamentVisibility = Public, newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
           Squad team         -> Repo.saveTeam team
@@ -4112,7 +4209,8 @@ spec = before_ resetTestDb $ do
           { newTournamentName = TournamentName "OpGuard Record Cancelled Cup"
           , newTournamentOrganizer = OrganizerName "Test Organizer"
           , newTournamentOwner = ownerId, newTournamentFormat = SingleElimination
-          , newTournamentVisibility = Public, newTournamentMaxParticipants = 2 }
+          , newTournamentVisibility = Public, newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
           Squad team         -> Repo.saveTeam team
@@ -4143,7 +4241,8 @@ spec = before_ resetTestDb $ do
           { newTournamentName = TournamentName "OpGuard Complete Paused Cup"
           , newTournamentOrganizer = OrganizerName "Test Organizer"
           , newTournamentOwner = ownerId, newTournamentFormat = SingleElimination
-          , newTournamentVisibility = Public, newTournamentMaxParticipants = 2 }
+          , newTournamentVisibility = Public, newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
           Squad team         -> Repo.saveTeam team
@@ -4179,7 +4278,8 @@ spec = before_ resetTestDb $ do
           { newTournamentName = TournamentName "OpGuard Correct DE Paused Cup"
           , newTournamentOrganizer = OrganizerName "Test Organizer"
           , newTournamentOwner = ownerId, newTournamentFormat = DoubleElimination
-          , newTournamentVisibility = Public, newTournamentMaxParticipants = 4 }
+          , newTournamentVisibility = Public, newTournamentMaxParticipants = 4
+          , newTournamentThirdPlaceMatch = False }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
           Squad team         -> Repo.saveTeam team
@@ -4213,7 +4313,8 @@ spec = before_ resetTestDb $ do
           { newTournamentName = TournamentName "OpGuard Correct DE Cancelled Cup"
           , newTournamentOrganizer = OrganizerName "Test Organizer"
           , newTournamentOwner = ownerId, newTournamentFormat = DoubleElimination
-          , newTournamentVisibility = Public, newTournamentMaxParticipants = 4 }
+          , newTournamentVisibility = Public, newTournamentMaxParticipants = 4
+          , newTournamentThirdPlaceMatch = False }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
           Squad team         -> Repo.saveTeam team
@@ -4246,7 +4347,8 @@ spec = before_ resetTestDb $ do
           { newTournamentName = TournamentName "OpGuard Correct RR Paused Cup"
           , newTournamentOrganizer = OrganizerName "Test Organizer"
           , newTournamentOwner = ownerId, newTournamentFormat = RoundRobin
-          , newTournamentVisibility = Public, newTournamentMaxParticipants = 3 }
+          , newTournamentVisibility = Public, newTournamentMaxParticipants = 3
+          , newTournamentThirdPlaceMatch = False }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
           Squad team         -> Repo.saveTeam team
@@ -4279,7 +4381,8 @@ spec = before_ resetTestDb $ do
           { newTournamentName = TournamentName "OpGuard Correct RR Cancelled Cup"
           , newTournamentOrganizer = OrganizerName "Test Organizer"
           , newTournamentOwner = ownerId, newTournamentFormat = RoundRobin
-          , newTournamentVisibility = Public, newTournamentMaxParticipants = 3 }
+          , newTournamentVisibility = Public, newTournamentMaxParticipants = 3
+          , newTournamentThirdPlaceMatch = False }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
           Squad team         -> Repo.saveTeam team
@@ -4319,6 +4422,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = DoubleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 4
+          , newTournamentThirdPlaceMatch = False
           }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
@@ -4401,6 +4505,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = DoubleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 4
+          , newTournamentThirdPlaceMatch = False
           }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
@@ -4473,7 +4578,8 @@ spec = before_ resetTestDb $ do
           { newTournamentName = TournamentName "Atomicity GF1 Cup"
           , newTournamentOrganizer = OrganizerName "Test Organizer"
           , newTournamentOwner = ownerId, newTournamentFormat = DoubleElimination
-          , newTournamentVisibility = Public, newTournamentMaxParticipants = 4 }
+          , newTournamentVisibility = Public, newTournamentMaxParticipants = 4
+          , newTournamentThirdPlaceMatch = False }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
           Squad team         -> Repo.saveTeam team
@@ -4559,6 +4665,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False
           }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
@@ -4630,6 +4737,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False
           }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
@@ -4659,6 +4767,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False
           }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
@@ -4693,6 +4802,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False
           }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
@@ -4736,7 +4846,8 @@ spec = before_ resetTestDb $ do
           { newTournamentName = TournamentName "SMS Ownership Cup"
           , newTournamentOrganizer = OrganizerName "Test Organizer"
           , newTournamentOwner = ownerId, newTournamentFormat = SingleElimination
-          , newTournamentVisibility = Public, newTournamentMaxParticipants = 2 }
+          , newTournamentVisibility = Public, newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
           Squad team         -> Repo.saveTeam team
@@ -4765,7 +4876,8 @@ spec = before_ resetTestDb $ do
           { newTournamentName = TournamentName "SMS NotScheduled Cup"
           , newTournamentOrganizer = OrganizerName "Test Organizer"
           , newTournamentOwner = ownerId, newTournamentFormat = SingleElimination
-          , newTournamentVisibility = Public, newTournamentMaxParticipants = 2 }
+          , newTournamentVisibility = Public, newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
           Squad team         -> Repo.saveTeam team
@@ -4795,7 +4907,8 @@ spec = before_ resetTestDb $ do
           { newTournamentName = TournamentName "SMS Completed Cup"
           , newTournamentOrganizer = OrganizerName "Test Organizer"
           , newTournamentOwner = ownerId, newTournamentFormat = SingleElimination
-          , newTournamentVisibility = Public, newTournamentMaxParticipants = 2 }
+          , newTournamentVisibility = Public, newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
           Squad team         -> Repo.saveTeam team
@@ -4828,7 +4941,8 @@ spec = before_ resetTestDb $ do
           { newTournamentName = TournamentName "SMS Cancelled Cup"
           , newTournamentOrganizer = OrganizerName "Test Organizer"
           , newTournamentOwner = ownerId, newTournamentFormat = SingleElimination
-          , newTournamentVisibility = Public, newTournamentMaxParticipants = 2 }
+          , newTournamentVisibility = Public, newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
           Squad team         -> Repo.saveTeam team
@@ -4864,7 +4978,8 @@ spec = before_ resetTestDb $ do
           { newTournamentName = TournamentName "SMS Paused Cup"
           , newTournamentOrganizer = OrganizerName "Test Organizer"
           , newTournamentOwner = ownerId, newTournamentFormat = SingleElimination
-          , newTournamentVisibility = Public, newTournamentMaxParticipants = 4 }
+          , newTournamentVisibility = Public, newTournamentMaxParticipants = 4
+          , newTournamentThirdPlaceMatch = False }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
           Squad team         -> Repo.saveTeam team
@@ -4898,7 +5013,8 @@ spec = before_ resetTestDb $ do
           { newTournamentName = TournamentName "SMS Roundtrip Cup"
           , newTournamentOrganizer = OrganizerName "Test Organizer"
           , newTournamentOwner = ownerId, newTournamentFormat = SingleElimination
-          , newTournamentVisibility = Public, newTournamentMaxParticipants = 2 }
+          , newTournamentVisibility = Public, newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
           Squad team         -> Repo.saveTeam team
@@ -4933,7 +5049,8 @@ spec = before_ resetTestDb $ do
         tid <- createTournament NewTournament
           { newTournamentName = TournamentName "GTS No Bracket Cup", newTournamentOrganizer = OrganizerName "Test Organizer"
           , newTournamentOwner = ownerId, newTournamentFormat = SingleElimination
-          , newTournamentVisibility = Public, newTournamentMaxParticipants = 2 }
+          , newTournamentVisibility = Public, newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False }
         getTournamentSchedule ownerId tid
       case result of
         Left err    -> expectationFailure ("runSQLiteM failed: " ++ show err)
@@ -4950,7 +5067,8 @@ spec = before_ resetTestDb $ do
         tid <- createTournament NewTournament
           { newTournamentName = TournamentName "GTS Private Cup", newTournamentOrganizer = OrganizerName "Test Organizer"
           , newTournamentOwner = ownerId, newTournamentFormat = SingleElimination
-          , newTournamentVisibility = Private, newTournamentMaxParticipants = 2 }
+          , newTournamentVisibility = Private, newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False }
         forM_ participants $ \p -> case p of Individual player -> Repo.savePlayer player; Squad team -> Repo.saveTeam team
         advanceToRegistrationOpen ownerId tid
         forM_ participants (\p -> unwrap =<< registerParticipant tid p)
@@ -4971,7 +5089,8 @@ spec = before_ resetTestDb $ do
         tid <- createTournament NewTournament
           { newTournamentName = TournamentName "GTS Private Owner Cup", newTournamentOrganizer = OrganizerName "Test Organizer"
           , newTournamentOwner = ownerId, newTournamentFormat = SingleElimination
-          , newTournamentVisibility = Private, newTournamentMaxParticipants = 2 }
+          , newTournamentVisibility = Private, newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False }
         forM_ participants $ \p -> case p of Individual player -> Repo.savePlayer player; Squad team -> Repo.saveTeam team
         advanceToRegistrationOpen ownerId tid
         forM_ participants (\p -> unwrap =<< registerParticipant tid p)
@@ -4995,7 +5114,8 @@ spec = before_ resetTestDb $ do
         tid <- createTournament NewTournament
           { newTournamentName = TournamentName "GTS Public Cup", newTournamentOrganizer = OrganizerName "Test Organizer"
           , newTournamentOwner = ownerId, newTournamentFormat = SingleElimination
-          , newTournamentVisibility = Public, newTournamentMaxParticipants = 2 }
+          , newTournamentVisibility = Public, newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False }
         forM_ participants $ \p -> case p of Individual player -> Repo.savePlayer player; Squad team -> Repo.saveTeam team
         advanceToRegistrationOpen ownerId tid
         forM_ participants (\p -> unwrap =<< registerParticipant tid p)
@@ -5016,7 +5136,8 @@ spec = before_ resetTestDb $ do
         tid <- createTournament NewTournament
           { newTournamentName = TournamentName "GTS Completed Cup", newTournamentOrganizer = OrganizerName "Test Organizer"
           , newTournamentOwner = ownerId, newTournamentFormat = SingleElimination
-          , newTournamentVisibility = Public, newTournamentMaxParticipants = 2 }
+          , newTournamentVisibility = Public, newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False }
         forM_ participants $ \p -> case p of Individual player -> Repo.savePlayer player; Squad team -> Repo.saveTeam team
         advanceToRegistrationOpen ownerId tid
         forM_ participants (\p -> unwrap =<< registerParticipant tid p)
@@ -5044,7 +5165,8 @@ spec = before_ resetTestDb $ do
         tid <- createTournament NewTournament
           { newTournamentName = TournamentName "GTS Order Cup", newTournamentOrganizer = OrganizerName "Test Organizer"
           , newTournamentOwner = ownerId, newTournamentFormat = SingleElimination
-          , newTournamentVisibility = Public, newTournamentMaxParticipants = 8 }
+          , newTournamentVisibility = Public, newTournamentMaxParticipants = 8
+          , newTournamentThirdPlaceMatch = False }
         forM_ participants $ \p -> case p of Individual player -> Repo.savePlayer player; Squad team -> Repo.saveTeam team
         advanceToRegistrationOpen ownerId tid
         forM_ participants (\p -> unwrap =<< registerParticipant tid p)
@@ -5111,6 +5233,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 4
+          , newTournamentThirdPlaceMatch = False
           }
         stored <- Repo.listAllTournaments
         pure (outcome, length stored)
@@ -5131,6 +5254,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 4
+          , newTournamentThirdPlaceMatch = False
           }
         stored <- Repo.listAllTournaments
         pure (outcome, length stored)
@@ -5156,6 +5280,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False
           }
         forM_ participants $ \p -> case p of
           Individual player -> Repo.savePlayer player
@@ -5270,6 +5395,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 4
+          , newTournamentThirdPlaceMatch = False
           }
         RPC.registerParticipantChecked ownerId tid
           (Individual (Player (PlayerName "Alice")))
@@ -5368,6 +5494,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Private
           , newTournamentMaxParticipants = 4
+          , newTournamentThirdPlaceMatch = False
           }
         GetT.getTournament (Just strangerId) tid
       case result of
@@ -5412,7 +5539,7 @@ spec = before_ resetTestDb $ do
           , tournamentOrganizer = OrganizerName "x", tournamentFormat = SingleElimination
           , tournamentState = st, tournamentVisibility = vis
           , tournamentMaxParticipants = 2, tournamentBracket = Nothing
-          , tournamentOwner = UserId 1 }
+          , tournamentOwner = UserId 1, tournamentThirdPlaceMatch = False }
         owner    = Just (UserId 1)
         stranger = Just (UserId 2)
 
@@ -5454,6 +5581,7 @@ spec = before_ resetTestDb $ do
           , newTournamentFormat          = SingleElimination
           , newTournamentVisibility      = Public
           , newTournamentMaxParticipants = 4
+          , newTournamentThirdPlaceMatch = False
           }
         GetT.getTournament Nothing tid
       case result of
@@ -5466,7 +5594,7 @@ spec = before_ resetTestDb $ do
           , tournamentOrganizer = OrganizerName "x", tournamentFormat = SingleElimination
           , tournamentState = st, tournamentVisibility = vis
           , tournamentMaxParticipants = 2, tournamentBracket = Nothing
-          , tournamentOwner = UserId 1 }
+          , tournamentOwner = UserId 1, tournamentThirdPlaceMatch = False }
         ids = map (unTournamentId . tournamentId)
 
     it "keeps only Public tournaments past Draft, newest first" $
@@ -5478,3 +5606,473 @@ spec = before_ resetTestDb $ do
     it "caps the result at the limit" $
       ids (LP.selectPublic 2 [ mk i Published Public | i <- [1 .. 5] ])
         `shouldBe` [5, 4]
+
+  describe "Third-Place (Bronze) Match (v0.11)" $ do
+
+    it "SE without third-place match: unaffected baseline (4 players, bronze match never exists)" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "tp-baseline-owner"
+        let participants@[alice,bob,carol,dave] =
+              [ Individual (Player (PlayerName n)) | n <- ["Alice","Bob","Carol","Dave"] ]
+        tid <- createTournament NewTournament
+          { newTournamentName            = TournamentName "TP Baseline Cup"
+          , newTournamentOrganizer       = OrganizerName "Test Organizer"
+          , newTournamentOwner           = ownerId
+          , newTournamentFormat          = SingleElimination
+          , newTournamentVisibility      = Public
+          , newTournamentMaxParticipants = 4
+          , newTournamentThirdPlaceMatch = False
+          }
+        forM_ participants $ \p -> case p of
+          Individual player -> Repo.savePlayer player
+          Squad team         -> Repo.saveTeam team
+        advanceToRegistrationOpen ownerId tid
+        forM_ participants (\p -> unwrap =<< registerParticipant tid p)
+        _ <- unwrap =<< closeRegistration ownerId tid
+        bracketId <- unwrap =<< generateBracket ownerId tid
+        (bracket, _) <- Repo.getBracket bracketId
+
+        let playWinner p ms = do
+              let m = head (filter (\x -> matchCompetitorA x == p || matchCompetitorB x == p) ms)
+              _ <- unwrap =<< startMatch ownerId (matchId m)
+              _ <- unwrap =<< recordMatchResult ownerId (matchId m) (Winner p)
+              pure ()
+
+        semis <- Repo.listMatchesForBracket bracketId
+        liftIO $ length semis `shouldBe` 2
+        playWinner alice semis
+        playWinner carol semis
+
+        afterSemis <- Repo.listMatchesForBracket bracketId
+        liftIO $ length afterSemis `shouldBe` 3   -- 2 semis + final; no bronze match, ever
+        let final = head (filter (\m -> matchStatus m == Scheduled) afterSemis)
+        playWinner alice [final]
+
+        _ <- unwrap =<< startTournament ownerId tid
+        completion <- completeTournament ownerId tid
+        finalCount <- length <$> Repo.listMatchesForBracket bracketId
+        pure (bracket, completion, finalCount)
+
+      case result of
+        Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right (bracket, completion, finalCount) -> do
+          bracketThirdPlaceNodeId bracket `shouldBe` Nothing
+          completion `shouldSatisfy` isRight
+          finalCount `shouldBe` 3
+
+    it "SE with third-place match enabled (4 players): node exists at generation, bronze match materializes once both semis complete, correct competitors, records a result normally" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "tp-4p-owner"
+        let participants@[alice,bob,carol,dave] =
+              [ Individual (Player (PlayerName n)) | n <- ["Alice","Bob","Carol","Dave"] ]
+        tid <- createTournament NewTournament
+          { newTournamentName            = TournamentName "TP Four Player Cup"
+          , newTournamentOrganizer       = OrganizerName "Test Organizer"
+          , newTournamentOwner           = ownerId
+          , newTournamentFormat          = SingleElimination
+          , newTournamentVisibility      = Public
+          , newTournamentMaxParticipants = 4
+          , newTournamentThirdPlaceMatch = True
+          }
+        forM_ participants $ \p -> case p of
+          Individual player -> Repo.savePlayer player
+          Squad team         -> Repo.saveTeam team
+        advanceToRegistrationOpen ownerId tid
+        forM_ participants (\p -> unwrap =<< registerParticipant tid p)
+        _ <- unwrap =<< closeRegistration ownerId tid
+        bracketId <- unwrap =<< generateBracket ownerId tid
+        (bracket, _) <- Repo.getBracket bracketId
+
+        let playWinner p ms = do
+              let m = head (filter (\x -> matchCompetitorA x == p || matchCompetitorB x == p) ms)
+              _ <- unwrap =<< startMatch ownerId (matchId m)
+              _ <- unwrap =<< recordMatchResult ownerId (matchId m) (Winner p)
+              pure ()
+
+        semis <- Repo.listMatchesForBracket bracketId
+        liftIO $ length semis `shouldBe` 2
+        -- Alice beats Bob, Carol beats Dave -- Bob and Dave, the two
+        -- semifinal losers, should meet in the bronze match.
+        playWinner alice semis
+        playWinner carol semis
+
+        afterSemis <- Repo.listMatchesForBracket bracketId
+        liftIO $ length afterSemis `shouldBe` 4   -- final + bronze both materialize together
+
+        let Just tpNodeId = bracketThirdPlaceNodeId bracket
+            bronzeMatch = head (filter (\m -> matchBracketNode m == tpNodeId) afterSemis)
+
+        liftIO $ [matchCompetitorA bronzeMatch, matchCompetitorB bronzeMatch]
+          `shouldMatchList` [bob, dave]
+
+        -- Bronze match records a result exactly like any other match.
+        _ <- unwrap =<< startMatch ownerId (matchId bronzeMatch)
+        _ <- unwrap =<< recordMatchResult ownerId (matchId bronzeMatch) (Winner bob)
+        bronzeAfter <- Repo.getMatch (matchId bronzeMatch)
+
+        pure (bronzeAfter, bob)
+
+      case result of
+        Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right (bronzeAfter, bob) -> do
+          matchStatus bronzeAfter `shouldBe` Match.Completed
+          matchOutcome bronzeAfter `shouldBe` Just (Winner bob)
+
+    it "bronze match does not materialize until both semis complete" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "tp-timing-owner"
+        let participants@[alice,bob,carol,dave] =
+              [ Individual (Player (PlayerName n)) | n <- ["Alice","Bob","Carol","Dave"] ]
+        tid <- createTournament NewTournament
+          { newTournamentName            = TournamentName "TP Timing Cup"
+          , newTournamentOrganizer       = OrganizerName "Test Organizer"
+          , newTournamentOwner           = ownerId
+          , newTournamentFormat          = SingleElimination
+          , newTournamentVisibility      = Public
+          , newTournamentMaxParticipants = 4
+          , newTournamentThirdPlaceMatch = True
+          }
+        forM_ participants $ \p -> case p of
+          Individual player -> Repo.savePlayer player
+          Squad team         -> Repo.saveTeam team
+        advanceToRegistrationOpen ownerId tid
+        forM_ participants (\p -> unwrap =<< registerParticipant tid p)
+        _ <- unwrap =<< closeRegistration ownerId tid
+        bracketId <- unwrap =<< generateBracket ownerId tid
+
+        let playWinner p ms = do
+              let m = head (filter (\x -> matchCompetitorA x == p || matchCompetitorB x == p) ms)
+              _ <- unwrap =<< startMatch ownerId (matchId m)
+              _ <- unwrap =<< recordMatchResult ownerId (matchId m) (Winner p)
+              pure ()
+
+        semis <- Repo.listMatchesForBracket bracketId
+        playWinner alice semis
+
+        afterOneSemi <- Repo.listMatchesForBracket bracketId
+        let countAfterOneSemi = length afterOneSemi
+
+        playWinner carol semis
+
+        afterBothSemis <- Repo.listMatchesForBracket bracketId
+        pure (countAfterOneSemi, length afterBothSemis)
+
+      case result of
+        Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right (countAfterOneSemi, countAfterBothSemis) -> do
+          countAfterOneSemi   `shouldBe` 2   -- only the 2 semis exist; one still Scheduled
+          countAfterBothSemis `shouldBe` 4   -- final + bronze materialize together, once both semis are Completed
+
+    it "final completed before the bronze match: completion rejected until bronze is also Completed" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "tp-order-final-first-owner"
+        let participants@[alice,bob,carol,dave] =
+              [ Individual (Player (PlayerName n)) | n <- ["Alice","Bob","Carol","Dave"] ]
+        tid <- createTournament NewTournament
+          { newTournamentName            = TournamentName "TP Final First Cup"
+          , newTournamentOrganizer       = OrganizerName "Test Organizer"
+          , newTournamentOwner           = ownerId
+          , newTournamentFormat          = SingleElimination
+          , newTournamentVisibility      = Public
+          , newTournamentMaxParticipants = 4
+          , newTournamentThirdPlaceMatch = True
+          }
+        forM_ participants $ \p -> case p of
+          Individual player -> Repo.savePlayer player
+          Squad team         -> Repo.saveTeam team
+        advanceToRegistrationOpen ownerId tid
+        forM_ participants (\p -> unwrap =<< registerParticipant tid p)
+        _ <- unwrap =<< closeRegistration ownerId tid
+        bracketId <- unwrap =<< generateBracket ownerId tid
+
+        let playWinner p ms = do
+              let m = head (filter (\x -> matchCompetitorA x == p || matchCompetitorB x == p) ms)
+              _ <- unwrap =<< startMatch ownerId (matchId m)
+              _ <- unwrap =<< recordMatchResult ownerId (matchId m) (Winner p)
+              pure ()
+
+        semis <- Repo.listMatchesForBracket bracketId
+        playWinner alice semis
+        playWinner carol semis
+
+        afterSemis <- Repo.listMatchesForBracket bracketId
+        let scheduled = filter (\m -> matchStatus m == Scheduled) afterSemis
+        liftIO $ length scheduled `shouldBe` 2   -- final + bronze
+
+        playWinner alice scheduled   -- final only (Alice v Carol)
+
+        _ <- unwrap =<< startTournament ownerId tid
+        tooEarly <- completeTournament ownerId tid
+
+        afterFinal <- Repo.listMatchesForBracket bracketId
+        let bronzeMatch = head (filter (\m -> matchStatus m == Scheduled) afterFinal)
+        _ <- unwrap =<< startMatch ownerId (matchId bronzeMatch)
+        _ <- unwrap =<< recordMatchResult ownerId (matchId bronzeMatch) (Winner (matchCompetitorA bronzeMatch))
+
+        completion <- completeTournament ownerId tid
+        pure (tooEarly, completion)
+
+      case result of
+        Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right (tooEarly, completion) -> do
+          tooEarly   `shouldBe` Left (CT.InvalidCompletion TournamentNotComplete)
+          completion `shouldSatisfy` isRight
+
+    it "bronze match completed before the final: completion rejected until final is also Completed" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "tp-order-bronze-first-owner"
+        let participants@[alice,bob,carol,dave] =
+              [ Individual (Player (PlayerName n)) | n <- ["Alice","Bob","Carol","Dave"] ]
+        tid <- createTournament NewTournament
+          { newTournamentName            = TournamentName "TP Bronze First Cup"
+          , newTournamentOrganizer       = OrganizerName "Test Organizer"
+          , newTournamentOwner           = ownerId
+          , newTournamentFormat          = SingleElimination
+          , newTournamentVisibility      = Public
+          , newTournamentMaxParticipants = 4
+          , newTournamentThirdPlaceMatch = True
+          }
+        forM_ participants $ \p -> case p of
+          Individual player -> Repo.savePlayer player
+          Squad team         -> Repo.saveTeam team
+        advanceToRegistrationOpen ownerId tid
+        forM_ participants (\p -> unwrap =<< registerParticipant tid p)
+        _ <- unwrap =<< closeRegistration ownerId tid
+        bracketId <- unwrap =<< generateBracket ownerId tid
+
+        let playWinner p ms = do
+              let m = head (filter (\x -> matchCompetitorA x == p || matchCompetitorB x == p) ms)
+              _ <- unwrap =<< startMatch ownerId (matchId m)
+              _ <- unwrap =<< recordMatchResult ownerId (matchId m) (Winner p)
+              pure ()
+
+        semis <- Repo.listMatchesForBracket bracketId
+        playWinner alice semis
+        playWinner carol semis
+
+        afterSemis <- Repo.listMatchesForBracket bracketId
+        let scheduled = filter (\m -> matchStatus m == Scheduled) afterSemis
+        playWinner bob scheduled   -- bronze only (Bob v Dave)
+
+        tooEarly <- completeTournament ownerId tid
+
+        afterBronze <- Repo.listMatchesForBracket bracketId
+        let finalMatch = head (filter (\m -> matchStatus m == Scheduled) afterBronze)
+        _ <- unwrap =<< startMatch ownerId (matchId finalMatch)
+        _ <- unwrap =<< recordMatchResult ownerId (matchId finalMatch) (Winner (matchCompetitorA finalMatch))
+
+        _ <- unwrap =<< startTournament ownerId tid
+        completion <- completeTournament ownerId tid
+        pure (tooEarly, completion)
+
+      case result of
+        Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right (tooEarly, completion) -> do
+          tooEarly   `shouldBe` Left (CT.InvalidCompletion TournamentNotComplete)
+          completion `shouldSatisfy` isRight
+
+    it "rejects DoubleElimination with thirdPlaceMatch = True at creation" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "tp-de-reject-owner"
+        outcome <- CTU.createTournamentChecked NewTournament
+          { newTournamentName            = TournamentName "TP DE Reject Cup"
+          , newTournamentOrganizer       = OrganizerName "Test Organizer"
+          , newTournamentOwner           = ownerId
+          , newTournamentFormat          = DoubleElimination
+          , newTournamentVisibility      = Public
+          , newTournamentMaxParticipants = 4
+          , newTournamentThirdPlaceMatch = True
+          }
+        stored <- Repo.listAllTournaments
+        pure (outcome, length stored)
+      case result of
+        Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right (outcome, count) -> do
+          outcome `shouldBe` Left (CTU.InvalidTournament TV.ThirdPlaceMatchRequiresSingleElimination)
+          count `shouldBe` 0
+
+    it "rejects RoundRobin with thirdPlaceMatch = True at creation" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "tp-rr-reject-owner"
+        outcome <- CTU.createTournamentChecked NewTournament
+          { newTournamentName            = TournamentName "TP RR Reject Cup"
+          , newTournamentOrganizer       = OrganizerName "Test Organizer"
+          , newTournamentOwner           = ownerId
+          , newTournamentFormat          = RoundRobin
+          , newTournamentVisibility      = Public
+          , newTournamentMaxParticipants = 3
+          , newTournamentThirdPlaceMatch = True
+          }
+        stored <- Repo.listAllTournaments
+        pure (outcome, length stored)
+      case result of
+        Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right (outcome, count) -> do
+          outcome `shouldBe` Left (CTU.InvalidTournament TV.ThirdPlaceMatchRequiresSingleElimination)
+          count `shouldBe` 0
+
+    it "3-player bracket: bye-shaped semifinal suppresses the bronze match entirely, even with the option enabled" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "tp-3p-owner"
+        let alice = Individual (Player (PlayerName "Alice"))
+            bob   = Individual (Player (PlayerName "Bob"))
+            carol = Individual (Player (PlayerName "Carol"))
+            participants = [alice, bob, carol]
+        tid <- createTournament NewTournament
+          { newTournamentName            = TournamentName "TP Three Player Cup"
+          , newTournamentOrganizer       = OrganizerName "Test Organizer"
+          , newTournamentOwner           = ownerId
+          , newTournamentFormat          = SingleElimination
+          , newTournamentVisibility      = Public
+          , newTournamentMaxParticipants = 3
+          , newTournamentThirdPlaceMatch = True
+          }
+        forM_ participants $ \p -> case p of
+          Individual player -> Repo.savePlayer player
+          Squad team         -> Repo.saveTeam team
+        advanceToRegistrationOpen ownerId tid
+        forM_ participants (\p -> unwrap =<< registerParticipant tid p)
+        _ <- unwrap =<< closeRegistration ownerId tid
+        bracketId <- unwrap =<< generateBracket ownerId tid
+        (bracket, _) <- Repo.getBracket bracketId
+
+        semiMatches <- Repo.listMatchesForBracket bracketId
+        liftIO $ length semiMatches `shouldBe` 1   -- Alice's bye
+        let semiMatch = head semiMatches
+        _ <- unwrap =<< startMatch ownerId (matchId semiMatch)
+        _ <- unwrap =<< recordMatchResult ownerId (matchId semiMatch) (Winner (matchCompetitorB semiMatch))
+
+        allMatches <- Repo.listMatchesForBracket bracketId
+        let finalMatch = head (filter (\m -> matchStatus m == Scheduled) allMatches)
+        _ <- unwrap =<< startMatch ownerId (matchId finalMatch)
+        _ <- unwrap =<< recordMatchResult ownerId (matchId finalMatch) (Winner (matchCompetitorA finalMatch))
+
+        _ <- unwrap =<< startTournament ownerId tid
+        completion <- completeTournament ownerId tid
+        finalCount <- length <$> Repo.listMatchesForBracket bracketId
+        pure (bracket, completion, finalCount)
+
+      case result of
+        Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right (bracket, completion, finalCount) -> do
+          bracketThirdPlaceNodeId bracket `shouldBe` Nothing
+          completion `shouldSatisfy` isRight
+          finalCount `shouldBe` 2
+
+    it "rejects changing format to DoubleElimination while thirdPlaceMatch = True" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "tp-format-change-owner"
+        tid <- createTournament NewTournament
+          { newTournamentName            = TournamentName "TP Format Change Cup"
+          , newTournamentOrganizer       = OrganizerName "Test Organizer"
+          , newTournamentOwner           = ownerId
+          , newTournamentFormat          = SingleElimination
+          , newTournamentVisibility      = Public
+          , newTournamentMaxParticipants = 4
+          , newTournamentThirdPlaceMatch = True
+          }
+        outcome <- updateTournamentFormat ownerId tid DoubleElimination
+        after   <- Repo.getTournament tid
+        pure (outcome, tournamentFormat after)
+
+      case result of
+        Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right (outcome, formatAfter) -> do
+          outcome     `shouldBe` Left (UTF.InvalidTournament TV.ThirdPlaceMatchRequiresSingleElimination)
+          formatAfter `shouldBe` SingleElimination   -- rejected, nothing persisted
+
+    it "disabling thirdPlaceMatch before bracket generation: no bronze match materializes, normal SE completion" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "tp-disable-owner"
+        let participants@[alice,bob,carol,dave] =
+              [ Individual (Player (PlayerName n)) | n <- ["Alice","Bob","Carol","Dave"] ]
+        tid <- createTournament NewTournament
+          { newTournamentName            = TournamentName "TP Disable Cup"
+          , newTournamentOrganizer       = OrganizerName "Test Organizer"
+          , newTournamentOwner           = ownerId
+          , newTournamentFormat          = SingleElimination
+          , newTournamentVisibility      = Public
+          , newTournamentMaxParticipants = 4
+          , newTournamentThirdPlaceMatch = True
+          }
+        forM_ participants $ \p -> case p of
+          Individual player -> Repo.savePlayer player
+          Squad team         -> Repo.saveTeam team
+        advanceToRegistrationOpen ownerId tid
+        forM_ participants (\p -> unwrap =<< registerParticipant tid p)
+
+        -- Disable while still RegistrationOpen (before RegistrationClosed,
+        -- per the locked design's "editable pre-RegistrationClosed" rule).
+        _ <- unwrap =<< updateTournamentThirdPlaceMatch ownerId tid False
+
+        _ <- unwrap =<< closeRegistration ownerId tid
+        bracketId <- unwrap =<< generateBracket ownerId tid
+        (bracket, _) <- Repo.getBracket bracketId
+
+        let playWinner p ms = do
+              let m = head (filter (\x -> matchCompetitorA x == p || matchCompetitorB x == p) ms)
+              _ <- unwrap =<< startMatch ownerId (matchId m)
+              _ <- unwrap =<< recordMatchResult ownerId (matchId m) (Winner p)
+              pure ()
+
+        semis <- Repo.listMatchesForBracket bracketId
+        playWinner alice semis
+        playWinner carol semis
+
+        afterSemis <- Repo.listMatchesForBracket bracketId
+        let scheduled = filter (\m -> matchStatus m == Scheduled) afterSemis
+        liftIO $ length scheduled `shouldBe` 1   -- final only -- no bronze match to wait on
+        playWinner alice scheduled
+
+        _ <- unwrap =<< startTournament ownerId tid
+        completion <- completeTournament ownerId tid
+        pure (bracket, completion)
+
+      case result of
+        Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right (bracket, completion) -> do
+          bracketThirdPlaceNodeId bracket `shouldBe` Nothing
+          completion `shouldSatisfy` isRight
+
+    it "rejects toggling thirdPlaceMatch once the bracket exists" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "tp-toggle-guard-owner"
+        let participants = [ Individual (Player (PlayerName n)) | n <- ["Alice","Bob","Carol","Dave"] ]
+        tid <- createTournament NewTournament
+          { newTournamentName            = TournamentName "TP Toggle Guard Cup"
+          , newTournamentOrganizer       = OrganizerName "Test Organizer"
+          , newTournamentOwner           = ownerId
+          , newTournamentFormat          = SingleElimination
+          , newTournamentVisibility      = Public
+          , newTournamentMaxParticipants = 4
+          , newTournamentThirdPlaceMatch = True
+          }
+        forM_ participants $ \p -> case p of
+          Individual player -> Repo.savePlayer player
+          Squad team         -> Repo.saveTeam team
+        advanceToRegistrationOpen ownerId tid
+        forM_ participants (\p -> unwrap =<< registerParticipant tid p)
+        _ <- unwrap =<< closeRegistration ownerId tid
+        _ <- unwrap =<< generateBracket ownerId tid
+        outcome <- updateTournamentThirdPlaceMatch ownerId tid False
+        after   <- Repo.getTournament tid
+        pure (outcome, tournamentThirdPlaceMatch after)
+
+      case result of
+        Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right (outcome, flagAfter) -> do
+          outcome   `shouldBe` Left UTTP.BracketAlreadyGenerated
+          flagAfter `shouldBe` True
+
+

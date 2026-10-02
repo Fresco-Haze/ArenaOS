@@ -70,6 +70,9 @@ statements =
     \                        ('Draft', 'Published', 'RegistrationOpen', 'RegistrationClosed', \
     \                         'InProgress', 'Paused', 'Completed', 'Cancelled')), \
     \  visibility         TEXT NOT NULL CHECK (visibility IN ('Public', 'Private')), \
+    \ third_place_match INTEGER NOT NULL DEFAULT 0 CHECK (third_place_match IN (0, 1)), \
+    \  participant_mode   TEXT NOT NULL DEFAULT 'IndividualOnly' \
+    \                        CHECK (participant_mode IN ('IndividualOnly', 'SquadOnly')), \
     \  max_participants   INTEGER NOT NULL CHECK (max_participants >= 2), \
     \  bracket_id         INTEGER REFERENCES brackets(id) \
     \)"
@@ -92,6 +95,7 @@ statements =
   \  tournament_id INTEGER NOT NULL REFERENCES tournaments(id), \
   \  gf1_node_id   INTEGER REFERENCES bracket_nodes(id), \
   \  reset_node_id INTEGER REFERENCES bracket_nodes(id), \
+  \ third_place_node_id INTEGER REFERENCES bracket_nodes(id), \
   \  CHECK ((gf1_node_id IS NULL) = (reset_node_id IS NULL)) \
   \)"
 

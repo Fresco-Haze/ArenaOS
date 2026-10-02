@@ -1,4 +1,4 @@
-import type { BracketNode, Slot } from '../model'
+import type { BracketNode,BracketView, Slot } from '../model'
 import { participantName } from './participants'
 
 export type RoundGroup = { round: number; nodes: BracketNode[] }
@@ -69,13 +69,35 @@ export function champion(groups: RoundGroup[]): string | null {
   return winningSlot.type === 'Filled' ? participantName(winningSlot.participant) : null
 }
 
-export function isFinalDecided(nodes: BracketNode[]): boolean {
-  const groups = groupByRound(nodes)
-  if (groups.length === 0) return false
-  const final = groups[groups.length - 1]
-  return final.nodes.length === 1 && final.nodes[0].match?.status === 'Completed'
-}
+
 
 export function actionableMatches(nodes: BracketNode[]): BracketNode[] {
   return nodes.filter((n) => n.match && (n.match.status === 'Scheduled' || n.match.status === 'InProgress'))
+}
+
+
+// The bronze node shares the final's round, so it must be pulled out before
+// grouping. Otherwise the final's round has two nodes and champion() gives up.
+export function splitThirdPlace(bracket: BracketView): {
+  main: BracketNode[]
+  thirdPlace: BracketNode | null
+} {
+  const id = bracket.thirdPlaceNodeId
+  if (id === null) return { main: bracket.nodes, thirdPlace: null }
+  return {
+    main: bracket.nodes.filter((n) => n.nodeId !== id),
+    thirdPlace: bracket.nodes.find((n) => n.nodeId === id) ?? null,
+  }
+}
+
+// Mirrors the backend rule: the final AND the third-place match (if one exists)
+// must both be Completed.
+export function isBracketDecided(bracket: BracketView): boolean {
+  const { main, thirdPlace } = splitThirdPlace(bracket)
+  const groups = groupByRound(main)
+  if (groups.length === 0) return false
+  const final = groups[groups.length - 1]
+  const finalDone = final.nodes.length === 1 && final.nodes[0].match?.status === 'Completed'
+  const thirdDone = thirdPlace === null || thirdPlace.match?.status === 'Completed'
+  return finalDone && thirdDone
 }

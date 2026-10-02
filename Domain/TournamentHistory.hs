@@ -13,6 +13,7 @@ data ChangedField
     | FieldVisibility
     | FieldFormat
     | FieldMaxParticipants
+    | FieldThirdPlaceMatch
     deriving (Show, Eq)
 
 data TournamentHistoryEvent

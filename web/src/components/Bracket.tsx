@@ -1,5 +1,5 @@
-import { buildNodeLabels, champion, groupByRound, roundName, slotLabel } from '../lib/bracket'
 import type { BracketNode, BracketView } from '../model'
+import { buildNodeLabels, champion, groupByRound, roundName, slotLabel, splitThirdPlace } from '../lib/bracket'
 
 function outcomeSide(node: BracketNode): 'A' | 'B' | null {
   const o = node.match?.outcome
@@ -45,7 +45,8 @@ function NodeCard({ node, nodeLabels }: { node: BracketNode; nodeLabels: Map<num
 }
 
 export default function Bracket({ bracket }: { bracket: BracketView }) {
-  const groups = groupByRound(bracket.nodes)
+  const { main, thirdPlace } = splitThirdPlace(bracket)
+  const groups = groupByRound(main)
   if (groups.length === 0) {
     return <p className="muted">The bracket has not been generated yet.</p>
   }
@@ -71,6 +72,13 @@ export default function Bracket({ bracket }: { bracket: BracketView }) {
           ))}
         </div>
       </div>
+      {thirdPlace && (
+        <div className="third-place">
+          <h3 className="bracket-round-heading">Third place</h3>
+          <NodeCard node={thirdPlace} nodeLabels={nodeLabels} />
+        </div>
+      )}
     </div>
   )
 }
+

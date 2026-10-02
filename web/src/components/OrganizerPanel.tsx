@@ -1,12 +1,14 @@
+import { Link } from 'react-router'
 import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { ApiError } from '../api'
 import ConfirmDialog from './ConfirmDialog'
 import MatchActions from './MatchActions'
-import { actionableMatches, isFinalDecided } from '../lib/bracket'
+import { actionableMatches, isBracketDecided } from '../lib/bracket'
 import {
-  publish, openRegistration, addParticipant, closeRegistration,
+  publish, openRegistration, addParticipant, registerSquad, closeRegistration,
   generateBracket, startTournament, completeTournament, cancelTournament,
+  setThirdPlaceMatch,
 } from '../lib/tournamentActions'
 import type { BracketView, Tournament } from '../model'
 
@@ -67,6 +69,41 @@ function AddParticipantForm({ tournamentId, onDone }: { tournamentId: number; on
   )
 }
 
+function RegisterSquadForm({ tournamentId, onDone }: { tournamentId: number; onDone: () => Promise<void> }) {
+  const [teamName, setTeamName] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault()
+    setBusy(true)
+    setError(null)
+    try {
+      await registerSquad(tournamentId, teamName)
+      setTeamName('')
+      await onDone()
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Could not reach the server')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="inline-form">
+      <label>
+        Team name
+        <input value={teamName} onChange={(e) => setTeamName(e.target.value)} required />
+      </label>
+      <p className="muted">
+        Don't have a team yet? <Link to="/teams/new">Create one</Link>.
+      </p>
+      {error && <p role="alert" className="form-error">{error}</p>}
+      <button type="submit" disabled={busy}>{busy ? 'Registering' : 'Register team'}</button>
+    </form>
+  )
+}
+
 function CancelAction({ tournamentId, onDone }: { tournamentId: number; onDone: () => Promise<void> }) {
   const [open, setOpen] = useState(false)
   const [reason, setReason] = useState('')
@@ -113,6 +150,39 @@ function CloseRegistrationAction({ tournamentId, participantCount, onDone }:
   )
 }
 
+function ThirdPlaceToggle({ tournament, onDone }: { tournament: Tournament; onDone: () => Promise<void> }) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function toggle(next: boolean) {
+    setBusy(true)
+    setError(null)
+    try {
+      await setThirdPlaceMatch(tournament.tournamentId, next)
+      await onDone()
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Could not reach the server')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="action-item">
+      <label>
+        <input
+          type="checkbox"
+          checked={tournament.thirdPlaceMatch}
+          disabled={busy}
+          onChange={(e) => void toggle(e.target.checked)}
+        />
+        Third-place match
+      </label>
+      {error && <p role="alert" className="form-error">{error}</p>}
+    </div>
+  )
+}
+
 type Props = {
   tournament: Tournament
   bracket: BracketView | null
@@ -126,6 +196,12 @@ export default function OrganizerPanel({ tournament, bracket, participantCount, 
   return (
     <section className="section organizer-panel">
       <h2>Organizer controls</h2>
+
+      {tournament.format === 'SingleElimination' &&
+       (['Draft', 'Published', 'RegistrationOpen'].includes(tournament.state) ||
+          (tournament.state === 'RegistrationClosed' && !tournament.bracketId)) && (
+          <ThirdPlaceToggle tournament={tournament} onDone={reload} />
+       )}
 
       {tournament.state === 'Draft' && (
         <div className="action-row">
@@ -144,6 +220,7 @@ export default function OrganizerPanel({ tournament, bracket, participantCount, 
       {tournament.state === 'RegistrationOpen' && (
         <>
           <AddParticipantForm tournamentId={id} onDone={reload} />
+          <RegisterSquadForm tournamentId={id} onDone={reload} />
           <div className="action-row">
             <CloseRegistrationAction tournamentId={id} participantCount={participantCount} onDone={reload} />
             <CancelAction tournamentId={id} onDone={reload} />
@@ -168,15 +245,19 @@ export default function OrganizerPanel({ tournament, bracket, participantCount, 
               <p className="muted">Waiting for the next match to be ready.</p>
             ) : (
               actionableMatches(bracket.nodes).map((n) => (
-                <MatchActions key={n.nodeId} node={n} onDone={reload} />
+                <MatchActions key={n.nodeId} node={n} format={tournament.format} onDone={reload} />
               ))
             )}
           </div>
           <div className="action-row">
-            {isFinalDecided(bracket.nodes) ? (
+            {isBracketDecided(bracket) ? (
               <ActionButton label="Complete tournament" onRun={async () => { await completeTournament(id); await reload() }} />
             ) : (
-              <p className="muted">Complete becomes available once the final is decided.</p>
+              <p className="muted">
+                {bracket.thirdPlaceNodeId !== null
+                  ? 'Complete becomes available once the final and the third-place match are decided.'
+                  : 'Complete becomes available once the final is decided.'}
+              </p>
             )}
             <CancelAction tournamentId={id} onDone={reload} />
           </div>

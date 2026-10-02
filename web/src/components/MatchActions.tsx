@@ -1,15 +1,23 @@
 import { useState } from 'react'
 import { ApiError } from '../api'
-import ConfirmDialog from './ConfirmDialog'
+import EFootballResultDialog from './EFootballResultDialog'
 import { participantName } from '../lib/participants'
-import { startMatch, recordResult } from '../lib/tournamentActions'
-import type { BracketNode } from '../model'
+import { startMatch } from '../lib/tournamentActions'
+import type { BracketNode, TournamentFormat } from '../model'
 
-export default function MatchActions({ node, onDone }: { node: BracketNode; onDone: () => Promise<void> }) {
+export default function MatchActions({
+  node,
+  format,
+  onDone,
+}: {
+  node: BracketNode
+  format: TournamentFormat
+  onDone: () => Promise<void>
+}) {
   const { match } = node
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [confirmSide, setConfirmSide] = useState<'A' | 'B' | null>(null)
+  const [scoreDialogOpen, setScoreDialogOpen] = useState(false)
 
   if (!match) return null
 
@@ -29,12 +37,6 @@ export default function MatchActions({ node, onDone }: { node: BracketNode; onDo
     }
   }
 
-  async function handleConfirmWinner() {
-    if (!confirmSide) return
-    await recordResult(match.matchId, confirmSide)
-    await onDone()
-  }
-
   return (
     <div className="match-actions">
       <p className="match-players">{nameA} vs {nameB}</p>
@@ -45,21 +47,17 @@ export default function MatchActions({ node, onDone }: { node: BracketNode; onDo
         </button>
       )}
       {match.status === 'InProgress' && (
-        <div className="match-actions-buttons">
-          <button onClick={() => setConfirmSide('A')}>{nameA} wins</button>
-          <button onClick={() => setConfirmSide('B')}>{nameB} wins</button>
-        </div>
+        <button onClick={() => setScoreDialogOpen(true)}>Record score</button>
       )}
-      <ConfirmDialog
-        open={confirmSide !== null}
-        title="Confirm result"
-        confirmLabel="Confirm result"
-        onConfirm={handleConfirmWinner}
-        onClose={() => setConfirmSide(null)}
-      >
-        <p>Confirm: {confirmSide === 'A' ? nameA : nameB} wins against {confirmSide === 'A' ? nameB : nameA}?</p>
-        <p className="muted">Results can't be corrected in this version.</p>
-      </ConfirmDialog>
+      <EFootballResultDialog
+        open={scoreDialogOpen}
+        matchId={match.matchId}
+        nameA={nameA}
+        nameB={nameB}
+        format={format}
+        onDone={onDone}
+        onClose={() => setScoreDialogOpen(false)}
+      />
     </div>
   )
 }

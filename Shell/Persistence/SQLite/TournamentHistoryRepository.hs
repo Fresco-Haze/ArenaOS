@@ -26,12 +26,14 @@ changedFieldToText FieldName            = "Name"
 changedFieldToText FieldVisibility      = "Visibility"
 changedFieldToText FieldFormat          = "Format"
 changedFieldToText FieldMaxParticipants = "MaxParticipants"
+changedFieldToText FieldThirdPlaceMatch = "ThirdPlaceMatch"
 
 textToChangedField :: String -> IO ChangedField
 textToChangedField "Name"            = pure FieldName
 textToChangedField "Visibility"      = pure FieldVisibility
 textToChangedField "Format"          = pure FieldFormat
 textToChangedField "MaxParticipants" = pure FieldMaxParticipants
+textToChangedField "ThirdPlaceMatch" = pure FieldThirdPlaceMatch
 textToChangedField other             =
     throwIO (StorageFailure ("Unknown changed field in storage: " ++ other))
 

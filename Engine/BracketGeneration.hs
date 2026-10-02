@@ -1,9 +1,10 @@
-module Engine.BracketGeneration (bracketSize, buildTopology, buildLosersTopology,buildDoubleEliminationTopology,buildRoundRobinTopology,findParent,findSibling) where
+module Engine.BracketGeneration (bracketSize, buildTopology, buildLosersTopology,buildDoubleEliminationTopology,buildRoundRobinTopology,findParent,findSibling,addThirdPlaceMatch) where
 
 import Domain.Bracket (BracketNode(..), BracketNodeId(..), BracketSide(..), MatchSlot(..))
 import Data.List (find, partition,nub,tails)
 import Data.Maybe (isJust, fromJust)
 import Domain.Participant (Participant)
+import Domain.Ids (BracketNodeId(..))
 
 -- | Smallest power of two >= n. n=0 or n=1 both yield 1, but
 -- validateParticipants (Engine.Validation) already rejects fewer
@@ -188,4 +189,20 @@ buildRoundRobinTopology ps =
   | (i, (a, b)) <- zip [1 ..] (pairUp ps) ]
   where
     pairUp xs = [ (a, b) | (a:rest) <- tails xs, b <- rest ]
-                                 
+
+addThirdPlaceMatch :: [BracketNode] -> ([BracketNode], Maybe BracketNodeId)
+addThirdPlaceMatch nodes
+  | wbRoundCount < 2      = (nodes, Nothing)  -- size 1/2: no semifinal round exists
+  | length semis /= 2     = (nodes, Nothing)  -- shouldn't happen; defensive
+  | any isByeShaped semis = (nodes, Nothing)  -- only possible at size 4 (3 real players)
+  | otherwise              = (nodes ++ [tp], Just (nodeId tp))
+  where
+    wbRoundCount = maximum (map nodeRound nodes)
+    semis = filter ((== wbRoundCount - 1) . nodeRound) nodes
+    isByeShaped n = case (nodeSlotA n, nodeSlotB n) of
+      (Filled _, ByeSlot) -> True
+      (ByeSlot, Filled _) -> True
+      _ -> False
+    [semiA, semiB] = semis
+    nextId = BracketNodeId (1 + maximum (map (unBracketNodeId . nodeId) nodes))
+    tp = BracketNode nextId (AwaitingLoserOf (nodeId semiA)) (AwaitingLoserOf (nodeId semiB)) wbRoundCount Winners

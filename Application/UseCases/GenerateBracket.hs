@@ -92,12 +92,12 @@ generateBracket currentUser tid = do
                              BracketGeneration.buildDoubleEliminationTopology seededWB size
                           resolvedNodes = ByeResolution.resolveAutomaticAdvancements (seededWB ++ otherNodes)
 
-                      finalizeBracketGeneration tid tournament resolvedNodes (Just gf1Id) (Just resetId)
+                      finalizeBracketGeneration tid tournament resolvedNodes (Just gf1Id) (Just resetId) Nothing
 
                     RoundRobin -> do
                       let resolvedNodes = BracketGeneration.buildRoundRobinTopology validParticipants
 
-                      finalizeBracketGeneration tid tournament resolvedNodes Nothing Nothing
+                      finalizeBracketGeneration tid tournament resolvedNodes Nothing Nothing Nothing
 
                     SingleElimination -> do
                       let size          = BracketGeneration.bracketSize (length validParticipants)
@@ -105,8 +105,11 @@ generateBracket currentUser tid = do
                           seeded        = Seeding.seedParticipants validParticipants topology
                           resolvedNodes = ByeResolution.resolveAutomaticAdvancements seeded
 
-                      finalizeBracketGeneration tid tournament resolvedNodes Nothing Nothing
-
+                          (finalNodes, mThirdPlaceId)
+                            | tournamentThirdPlaceMatch tournament =
+                                BracketGeneration.addThirdPlaceMatch resolvedNodes
+                            | otherwise = (resolvedNodes, Nothing)
+                      finalizeBracketGeneration tid tournament finalNodes Nothing Nothing mThirdPlaceId
 -- | All three TournamentFormat constructors are matched explicitly
 -- (no catch-all) so GHC's exhaustiveness checking itself guards
 -- against a future format being silently mishandled here.
@@ -133,14 +136,15 @@ finalizeBracketGeneration
   :: ( BracketRepository m, MatchRepository m, TournamentRepository m,ParticipantRepository m
      , TournamentHistoryRepository m, Transactional m )
   => TournamentId -> Tournament -> [BracketNode]
-  -> Maybe BracketNodeId -> Maybe BracketNodeId
+  -> Maybe BracketNodeId -> Maybe BracketNodeId -> Maybe BracketNodeId
   -> m (Either GenerateBracketError BracketId)
-finalizeBracketGeneration tid tournament resolvedNodes mGf1Id mResetId =
+finalizeBracketGeneration tid tournament resolvedNodes mGf1Id mResetId mThirdPlaceId =
   withTxN $ do
       bracketId <- Repo.createBracket tid
       nodeIdMap <- Repo.saveBracket
           Bracket { bracketId = bracketId, bracketTournament = tid
-                  , bracketGF1NodeId = mGf1Id, bracketResetNodeId = mResetId }
+                  , bracketGF1NodeId = mGf1Id, bracketResetNodeId = mResetId
+                  , bracketThirdPlaceNodeId = mThirdPlaceId }
           resolvedNodes
 
       let readyIds = Materialization.readyNodes resolvedNodes
