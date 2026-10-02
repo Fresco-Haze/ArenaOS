@@ -202,4 +202,5 @@ statements =
   , "CREATE INDEX IF NOT EXISTS idx_matches_bracket          ON matches(bracket_id)"
   , "CREATE INDEX IF NOT EXISTS idx_nodes_bracket             ON bracket_nodes(bracket_id)"
   , "CREATE INDEX IF NOT EXISTS idx_team_members_team         ON team_members(team_id)"
+  , "CREATE UNIQUE INDEX IF NOT EXISTS idx_teams_name_nocase ON teams(name COLLATE NOCASE)"
   ]

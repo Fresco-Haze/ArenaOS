@@ -27,7 +27,7 @@ import Domain.Ids (TournamentId(..), BracketId(..),UserId(..))
 import Domain.Participant (Participant(..), Player(..), PlayerName(..), Team(..), TeamName(..), TeamCaptain(..))
 import Domain.Tournament
   ( TournamentName(..), OrganizerName(..), TournamentFormat(..)
-  , Visibility(..), TournamentState(..)
+  , Visibility(..), TournamentState(..), ParticipantMode(..)
   )
 import Domain.User (User(..), Username(..), Email(..), AccountStatus(..))
 import Domain.Match (Match(..), MatchId(..), MatchOutcome(..))
@@ -122,6 +122,7 @@ dispatch args = case args of
         , newTournamentVisibility      = Public
         , newTournamentMaxParticipants = maxP
         , newTournamentThirdPlaceMatch = False
+        , newTournamentParticipantMode = IndividualOnly
         }
       liftIO $ case outcome of
         Left err  -> putStrLn ("Create failed: " ++ show err)

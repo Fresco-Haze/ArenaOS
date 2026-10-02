@@ -27,10 +27,10 @@ instance ParticipantRepository SQLiteM where
     getTeam (TeamName tname) = do
         conn <- asks envConnection
         rows <- liftIO (query conn
-          "SELECT id, captain_player_id FROM teams WHERE name = ?"
-          (Only tname) :: IO [(Int, Int)])
+          "SELECT id, captain_player_id, name FROM teams WHERE name = ? COLLATE NOCASE"
+          (Only tname) :: IO [(Int, Int, String)])
         case rows of
-            [(tid, captainId)] -> do
+            [(tid, captainId, storedName)] -> do
                 captain <- liftIO $ getPlayerById conn captainId
                 memberIds <- liftIO (query conn
                   "SELECT player_id FROM team_members WHERE team_id = ?"
@@ -38,7 +38,7 @@ instance ParticipantRepository SQLiteM where
                 members <- liftIO $ traverse
                   (\(Only pid) -> getPlayerById conn pid)
                   memberIds
-                pure (Team (TeamName tname) captain members)
+                pure (Team (TeamName storedName) captain members)
             [] ->
                 liftIO $ throwIO (NotFound ("Team not found: " ++ tname))
             _ ->
@@ -154,7 +154,7 @@ instance ParticipantRepository SQLiteM where
     teamExists (TeamName tname) = do
         conn <- asks envConnection
         rows <- liftIO (query conn
-          "SELECT 1 FROM teams WHERE name = ? LIMIT 1"
+          "SELECT 1 FROM teams WHERE name = ? COLLATE NOCASE LIMIT 1"
           (Only tname) :: IO [Only Int])
         pure (not (null rows))
 
@@ -208,7 +208,7 @@ getTeamIdByName :: TeamName -> SQLiteM Int
 getTeamIdByName (TeamName tname) = do
     conn <- asks envConnection
     rows <- liftIO $ query conn
-      "SELECT id FROM teams WHERE name = ?" (Only tname)
+      "SELECT id FROM teams WHERE name = ? COLLATE NOCASE" (Only tname)
     case rows of
         (Only tid : _) -> pure tid
         []             -> liftIO $ throwIO (NotFound ("team: " <> tname))
