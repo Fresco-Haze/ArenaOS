@@ -42,6 +42,7 @@ import Domain.Tournament
   , Visibility(..), TournamentState(..), Tournament(..), TournamentId(..)
   )
 import Domain.Tournament (ParticipantMode(..))
+import qualified Application.UseCases.CreateTeam as CTM
 import Domain.Match (Match(..),MatchId(..), MatchStatus(Scheduled), MatchOutcome(..))
 import Domain.User (User(..),Email(..), PasswordHash(..), Username(..), AccountStatus(..))
 import Domain.MatchError (MatchError(..))
@@ -5512,6 +5513,53 @@ spec = before_ resetTestDb $ do
         Right (outcome, count) -> do
           outcome `shouldSatisfy` isRight
           count   `shouldBe` 1
+    it "finds a team regardless of casing and returns the name as stored" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        mapM_ Repo.savePlayer (teamMembers modeTestTeam)
+        Repo.saveTeam modeTestTeam
+        found  <- Repo.getTeam (TeamName "fALCONS")
+        exists <- Repo.teamExists (TeamName "FALCONS")
+        pure (teamName found, exists)
+      case result of
+        Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right (name, exists) -> do
+          name   `shouldBe` TeamName "Falcons"
+          exists `shouldBe` True
+
+    it "treats differently-cased team names as the same participant" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "rpc-owner-case-dup"
+        tid <- createOpenTournamentWithMode ownerId "Case Dup Cup" 4 SquadOnly
+        mapM_ Repo.savePlayer (teamMembers modeTestTeam)
+        Repo.saveTeam modeTestTeam
+        t1 <- Repo.getTeam (TeamName "FALCONS")
+        t2 <- Repo.getTeam (TeamName "falcons")
+        r1 <- RPC.registerParticipantChecked ownerId tid (Squad t1)
+        r2 <- RPC.registerParticipantChecked ownerId tid (Squad t2)
+        regs <- Repo.listRegistrations tid
+        pure (r1, r2, length regs)
+      case result of
+        Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right (r1, r2, count) -> do
+          r1    `shouldSatisfy` isRight
+          r2    `shouldBe` Left RPC.AlreadyRegistered
+          count `shouldBe` 1
+
+    it "refuses to create a team whose name differs only by case" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        let cap = Player (PlayerName "CaseCap")
+            mk n = Team { teamName = TeamName n, teamCaptain = cap, teamMembers = [cap] }
+        c1 <- CTM.createTeam (mk "Falcons")
+        c2 <- CTM.createTeam (mk "FALCONS")
+        pure (c1, c2)
+      case result of
+        Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right (c1, c2) -> do
+          c1 `shouldBe` Right ()
+          c2 `shouldBe` Left (CTM.TeamNameAlreadyExists (TeamName "FALCONS"))
     it "rejects a non-owner and registers nothing" $ do
       result <- runSQLiteM testDbPath $ do
         setupSchema
