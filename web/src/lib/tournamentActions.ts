@@ -32,10 +32,13 @@ export function startMatch(matchId: number) {
   return api(`/matches/${matchId}/start`, Match, { method: 'POST' })
 }
 
-export function recordResult(matchId: number, winner: 'A' | 'B') {
+export function recordResult(
+  matchId: number,
+  outcome: { type: 'Winner' | 'Forfeit' | 'Disqualification'; winner: 'A' | 'B' } | { type: 'Draw' | 'NoContest' },
+) {
   return api(`/matches/${matchId}/result`, Match, {
     method: 'POST',
-    body: JSON.stringify({ type: 'Winner', winner }),
+    body: JSON.stringify(outcome),
   })
 }
 

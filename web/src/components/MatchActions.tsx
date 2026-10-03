@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { ApiError } from '../api'
 import EFootballResultDialog from './EFootballResultDialog'
+import WinnerDialog from './WinnerDialog'
 import { participantName } from '../lib/participants'
 import { startMatch } from '../lib/tournamentActions'
 import type { BracketNode, TournamentFormat } from '../model'
@@ -18,6 +19,7 @@ export default function MatchActions({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [scoreDialogOpen, setScoreDialogOpen] = useState(false)
+  const [winnerDialogOpen, setWinnerDialogOpen] = useState(false)
 
   if (!match) return null
   const matchId = match.matchId
@@ -48,7 +50,10 @@ export default function MatchActions({
         </button>
       )}
       {match.status === 'InProgress' && (
-        <button onClick={() => setScoreDialogOpen(true)}>Record score</button>
+        <>
+          <button onClick={() => setScoreDialogOpen(true)}>Record score</button>
+          <button onClick={() => setWinnerDialogOpen(true)}>Declare winner</button>
+        </>
       )}
       <EFootballResultDialog
         open={scoreDialogOpen}
@@ -58,6 +63,15 @@ export default function MatchActions({
         format={format}
         onDone={onDone}
         onClose={() => setScoreDialogOpen(false)}
+      />
+      <WinnerDialog
+        open={winnerDialogOpen}
+        matchId={matchId}
+        nameA={nameA}
+        nameB={nameB}
+        format={format}
+        onDone={onDone}
+        onClose={() => setWinnerDialogOpen(false)}
       />
     </div>
   )
