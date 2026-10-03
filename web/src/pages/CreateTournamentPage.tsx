@@ -30,6 +30,7 @@ export default function CreateTournamentPage() {
 
   // ProtectedRoute guarantees this, but keep TypeScript honest.
   if (!user) return null
+  const username = user.username
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
@@ -46,7 +47,7 @@ export default function CreateTournamentPage() {
     try {
       const res = await createTournament({
         name,
-        organizer: user.username,
+        organizer: username,
         visibility,
         maxParticipants: parsedMax,
         thirdPlaceMatch,

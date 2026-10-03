@@ -20,6 +20,7 @@ export default function MatchActions({
   const [scoreDialogOpen, setScoreDialogOpen] = useState(false)
 
   if (!match) return null
+  const matchId = match.matchId
 
   const nameA = participantName(match.competitorA)
   const nameB = participantName(match.competitorB)
@@ -28,7 +29,7 @@ export default function MatchActions({
     setBusy(true)
     setError(null)
     try {
-      await startMatch(match.matchId)
+      await startMatch(matchId)
       await onDone()
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'Could not reach the server')

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { ApiError } from '../api'
-import type { ReactNode, SyntheticEvent } from 'react'
+import type { ReactNode } from 'react'
 
 type Props = {
   open: boolean
