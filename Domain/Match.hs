@@ -22,6 +22,12 @@ data MatchStatus
     | Cancelled
     deriving (Eq, Show)
 
+-- For Winner, Forfeit and Disqualification the Participant is the one who
+-- advances (the beneficiary), NOT the one who forfeited or was disqualified.
+-- RecordMatchResult, Engine.Standings and CompleteTournament all rely on this.
+-- For Winner, Forfeit and Disqualification the Participant is the one who
+-- advances (the beneficiary), NOT the one who forfeited or was disqualified.
+-- RecordMatchResult, Engine.Standings and CompleteTournament all rely on this.
 data MatchOutcome
     = Winner Participant
     | Draw
