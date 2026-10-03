@@ -219,8 +219,8 @@ export default function OrganizerPanel({ tournament, bracket, participantCount, 
 
       {tournament.state === 'RegistrationOpen' && (
         <>
-          <AddParticipantForm tournamentId={id} onDone={reload} />
-          <RegisterSquadForm tournamentId={id} onDone={reload} />
+          {tournament.participantMode === 'IndividualOnly' && <AddParticipantForm tournamentId={id} onDone={reload} />}
+          {tournament.participantMode === 'SquadOnly' && <RegisterSquadForm tournamentId={id} onDone={reload} />}
           <div className="action-row">
             <CloseRegistrationAction tournamentId={id} participantCount={participantCount} onDone={reload} />
             <CancelAction tournamentId={id} onDone={reload} />

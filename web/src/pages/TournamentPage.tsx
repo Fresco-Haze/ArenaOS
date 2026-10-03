@@ -62,7 +62,7 @@ export default function TournamentPage({ id }: { id: string }) {
 
       <p className="meta">
         {stateLabel[t.state]} · {formatLabel[t.format]} · up to{' '}
-        {t.maxParticipants} players
+        {t.maxParticipants} {t.participantMode === 'SquadOnly' ? 'teams' : 'players'}
       </p>
 
       <p className="meta">
@@ -71,12 +71,12 @@ export default function TournamentPage({ id }: { id: string }) {
 
       <section className="section">
         <h2>
-          Players ({view.participants.length} of {t.maxParticipants})
+          {t.participantMode === 'SquadOnly' ? 'Teams' : 'Players'} ({view.participants.length} of {t.maxParticipants})
         </h2>
 
         {view.participants.length === 0 ? (
           <p className="muted">
-            No players have registered yet.
+            {t.participantMode === 'SquadOnly' ? 'No teams have registered yet.' : 'No players have registered yet.'}
           </p>
         ) : (
         <ul className="plain-list">

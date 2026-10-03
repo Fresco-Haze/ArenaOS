@@ -56,6 +56,7 @@ export function createTournament(input: {
   visibility: 'Public' | 'Private'
   maxParticipants: number
   thirdPlaceMatch: boolean
+  participantMode?: 'IndividualOnly' | 'SquadOnly'
 }) {
   return api('/tournaments', CreateTournamentResponse, {
     method: 'POST',

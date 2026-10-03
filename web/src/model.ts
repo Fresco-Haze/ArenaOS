@@ -12,6 +12,9 @@ export const TournamentFormat = z.enum([
 ])
 export type TournamentFormat = z.infer<typeof TournamentFormat>
 
+export const ParticipantMode = z.enum(['IndividualOnly', 'SquadOnly'])
+export type ParticipantMode = z.infer<typeof ParticipantMode>
+
 export const Tournament = z.object({
   tournamentId: z.number(),
   name: z.string(),
@@ -21,6 +24,7 @@ export const Tournament = z.object({
   visibility: z.enum(['Public', 'Private']),
   maxParticipants: z.number(),
   thirdPlaceMatch: z.boolean(),
+  participantMode: ParticipantMode,
   bracketId: z.number().nullable(),
 })
 export type Tournament = z.infer<typeof Tournament>

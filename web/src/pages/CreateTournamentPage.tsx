@@ -26,6 +26,7 @@ export default function CreateTournamentPage() {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [thirdPlaceMatch, setThirdPlaceMatch] = useState(false)
+  const [participantMode, setParticipantMode] = useState<'IndividualOnly' | 'SquadOnly'>('IndividualOnly')
 
   // ProtectedRoute guarantees this, but keep TypeScript honest.
   if (!user) return null
@@ -49,6 +50,7 @@ export default function CreateTournamentPage() {
         visibility,
         maxParticipants: parsedMax,
         thirdPlaceMatch,
+        participantMode,
       })
       navigate(`/tournaments/${res.tournamentId}`)
     } catch (err) {
@@ -88,6 +90,28 @@ export default function CreateTournamentPage() {
           <span role="alert" className="form-error">{fieldErrors.organizer}</span>
         )}
 
+        <fieldset>
+          <legend>Who is competing?</legend>
+          <label>
+            <input
+              type="radio"
+              name="participantMode"
+              checked={participantMode === 'IndividualOnly'}
+              onChange={() => setParticipantMode('IndividualOnly')}
+            />
+            Individual players
+          </label>
+          <label>
+            <input
+              type="radio"
+              name="participantMode"
+              checked={participantMode === 'SquadOnly'}
+              onChange={() => setParticipantMode('SquadOnly')}
+            />
+            Teams
+          </label>
+          <p className="muted">Can't be changed after the tournament is created.</p>
+        </fieldset>
         <fieldset>
           <legend>Visibility</legend>
           <label>
