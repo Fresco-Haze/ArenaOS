@@ -27,7 +27,7 @@ import qualified Shell.Persistence.Port as Repo
 import Domain.Ids (UserId(..), TournamentId(..), BracketId(..), BracketNodeId(..))
 import Domain.Match (Match(..), MatchId(..), MatchOutcome(..))
 import Domain.MatchError (MatchError(..))
-import Domain.Scoreable (EFootballScore, mkEFootballScore, ScoreError(..))
+import Domain.Scoreable (EFootballScore, mkEFootballScore, ScoreError(..), unEFootballScore)
 import Application.UseCases.RecordEFootballResult (recordEFootballResult, RecordEFootballResultError(..))
 import Engine.Error (EngineError(..))
 import Application.Internal.Authorization (AuthorizationError(..))
@@ -245,6 +245,20 @@ toOutcome m r = case r of
     pick SideA = matchCompetitorA m
     pick SideB = matchCompetitorB m
 
+getBracketWithScores
+  :: Maybe UserId -> TournamentId
+  -> SQLiteM (Either GetB.GetBracketError (GetB.BracketView, Map.Map MatchId (Int, Int)))
+getBracketWithScores mu tid = do
+  result <- GetB.getBracket mu tid
+  case result of
+    Left err -> pure (Left err)
+    Right v  -> do
+      found <- traverse
+        (\m -> fmap ((,) (matchId m)) <$> Repo.getEFootballScore (matchId m))
+        (GetB.viewMatches v)
+      let scores = Map.fromList
+            [ (mid, (unEFootballScore a, unEFootballScore b)) | Just (mid, (a, b)) <- found ]
+      pure (Right (v, scores))
 recordViaApi :: UserId -> MatchId -> OutcomeReq
              -> SQLiteM (Either Record.RecordMatchResultError Match)
 recordViaApi uid mid req = do
@@ -261,23 +275,24 @@ slotJson (AwaitingLoserOf n) =
 slotJson ByeSlot =
   object ["type" .= ("Bye" :: Text)]
 
-nodeJson :: [Match] -> BracketNode -> Value
-nodeJson matches n = object
+nodeJson :: Map.Map MatchId (Int, Int) -> [Match] -> BracketNode -> Value
+nodeJson scores matches n = object
   [ "nodeId" .= unBracketNodeId (nodeId n)
   , "round"  .= nodeRound n
   , "stage"  .= T.pack (show (nodeStage n))
   , "slotA"  .= slotJson (nodeSlotA n)
   , "slotB"  .= slotJson (nodeSlotB n)
   , "match"  .= fmap matchJson (find (\m -> matchBracketNode m == nodeId n) matches)
+  , "score"  .= (find (\m -> matchBracketNode m == nodeId n) matches >>= \m -> fmap (\(a, b) -> object ["a" .= a, "b" .= b]) (Map.lookup (matchId m) scores))
   ]
 
-bracketViewJson :: GetB.BracketView -> Value
-bracketViewJson v = object
+bracketViewJson :: Map.Map MatchId (Int, Int) -> GetB.BracketView -> Value
+bracketViewJson scores v = object
   [ "tournamentId"     .= unTournamentId (tournamentId t)
   , "format"           .= T.pack (show (tournamentFormat t))
   , "bracketId"        .= fmap unBracketId (tournamentBracket t)
   , "thirdPlaceNodeId" .= fmap unBracketNodeId (bracketThirdPlaceNodeId (GetB.viewBracket v))
-  , "nodes"            .= map (nodeJson (GetB.viewMatches v)) sortedNodes
+  , "nodes"            .= map (nodeJson scores (GetB.viewMatches v)) sortedNodes
   ]
   where
     t = GetB.viewTournament v
@@ -856,8 +871,8 @@ main = do
             (\uid tid -> Cancel.cancelTournament uid tid why) fromCancel
 
     get "/tournaments/:id/bracket" $
-      runViewAction lock GetB.getBracket fromGetBracket $ \v ->
-        json (bracketViewJson v)
+      runViewAction lock getBracketWithScores fromGetBracket $ \(v, scores) ->
+        json (bracketViewJson scores v)
 
     get "/tournaments/:id" $
       runViewAction lock GetT.getTournament fromGetTournament $ \v ->
