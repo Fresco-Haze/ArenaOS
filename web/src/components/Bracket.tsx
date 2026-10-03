@@ -21,7 +21,7 @@ function statusText(node: BracketNode): string {
     }
   }
   if (node.slotA.type === 'Bye' || node.slotB.type === 'Bye') return 'Bye'
-  return 'Waiting for players'
+  return 'Waiting for competitors'
 }
 
 function SlotRow({ label, isWinner, score }: { label: string; isWinner: boolean; score?: number }) {

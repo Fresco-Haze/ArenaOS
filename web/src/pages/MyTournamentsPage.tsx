@@ -56,7 +56,7 @@ export default function MyTournamentsPage() {
                 <Link to={`/tournaments/${t.tournamentId}`}>{t.name}</Link>
               </h2>
               <p className="meta">
-                {stateLabel[t.state]} · {formatLabel[t.format]} · up to {t.maxParticipants} players
+                {stateLabel[t.state]} · {formatLabel[t.format]} · up to {t.maxParticipants} {t.participantMode === 'SquadOnly' ? 'teams' : 'players'}
               </p>
             </li>
           ))}

@@ -51,7 +51,7 @@ export default function HomePage() {
                 <Link to={`/tournaments/${t.tournamentId}`}>{t.name}</Link>
               </h2>
               <p className="meta">
-                {stateLabel[t.state]} · {formatLabel[t.format]} · up to {t.maxParticipants} players
+                {stateLabel[t.state]} · {formatLabel[t.format]} · up to {t.maxParticipants} {t.participantMode === 'SquadOnly' ? 'teams' : 'players'}
               </p>
               <p className="meta">Organized by {t.organizer}</p>
             </li>

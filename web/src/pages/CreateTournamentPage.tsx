@@ -155,7 +155,7 @@ export default function CreateTournamentPage() {
             onChange={(e) => setThirdPlaceMatch(e.target.checked)}
           />
           Play a third-place match
-          <span className="muted"> (only played with 4 or more players)</span>
+          <span className="muted"> (only played with 4 or more {participantMode === 'SquadOnly' ? 'teams' : 'players'})</span>
         </label>
 
         {error && <p role="alert" className="form-error">{error}</p>}

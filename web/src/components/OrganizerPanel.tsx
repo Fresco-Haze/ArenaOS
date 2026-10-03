@@ -131,8 +131,8 @@ function CancelAction({ tournamentId, onDone }: { tournamentId: number; onDone: 
   )
 }
 
-function CloseRegistrationAction({ tournamentId, participantCount, onDone }:
-  { tournamentId: number; participantCount: number; onDone: () => Promise<void> }) {
+function CloseRegistrationAction({ tournamentId, participantCount, unit, onDone }:
+  { tournamentId: number; participantCount: number; unit: string; onDone: () => Promise<void> }) {
   const [open, setOpen] = useState(false)
   return (
     <>
@@ -144,7 +144,7 @@ function CloseRegistrationAction({ tournamentId, participantCount, onDone }:
         onConfirm={async () => { await closeRegistration(tournamentId); await onDone() }}
         onClose={() => setOpen(false)}
       >
-        <p>Close registration with {participantCount} players? This can't be reopened.</p>
+        <p>Close registration with {participantCount} {unit}? This can't be reopened.</p>
       </ConfirmDialog>
     </>
   )
@@ -222,7 +222,7 @@ export default function OrganizerPanel({ tournament, bracket, participantCount, 
           {tournament.participantMode === 'IndividualOnly' && <AddParticipantForm tournamentId={id} onDone={reload} />}
           {tournament.participantMode === 'SquadOnly' && <RegisterSquadForm tournamentId={id} onDone={reload} />}
           <div className="action-row">
-            <CloseRegistrationAction tournamentId={id} participantCount={participantCount} onDone={reload} />
+            <CloseRegistrationAction tournamentId={id} participantCount={participantCount} unit={tournament.participantMode === 'SquadOnly' ? 'teams' : 'players'} onDone={reload} />
             <CancelAction tournamentId={id} onDone={reload} />
           </div>
         </>
