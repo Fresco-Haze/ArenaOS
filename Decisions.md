@@ -47,6 +47,8 @@ ArenaOS is built as four pieces sharing one Haskell core, only two of which are 
 - **Three actions require an explicit confirmation dialog**: Cancel (reason required, non-blank), Close registration, and Record result (explicit winner confirmation) — chosen because each is either destructive or hard/impossible to reverse through the current API.
 - **Result correction has no frontend in v1.** The backend supports it; v1's UI treats every recorded result as permanent.
 - **Live viewing polls every 20 seconds**, only while the browser tab is visible, and stops once a tournament reaches `Completed` or `Cancelled`. Returning to a hidden tab triggers an immediate refetch rather than waiting for the next tick. A failed poll keeps the last good data on screen with a "couldn't refresh" notice rather than blanking the view.
+- **Result recording has two paths.** "Record score" takes eFootball goals, derives the winner, stores the score and shows it on the bracket card. "Declare winner" records only the outcome (winner A or B, or a draw in round robin) through the generic result endpoint, so it suits games without a goals score. Elimination matches cannot end in a draw.
+- **Registration follows the tournament's participant mode.** A tournament is created for individuals or for teams, and the page shows only the matching form. Individuals can be added one at a time or pasted as a list (one name per line, duplicates ignored regardless of case); teams are registered one at a time and must already exist.
 
 ## 6. Explicitly Deferred (out of v1 scope)
 
@@ -58,7 +60,6 @@ ArenaOS is built as four pieces sharing one Haskell core, only two of which are 
 - Team/game-specific platform features (Call of Duty, PUBG, or any other game-specific registration flow) in the frontend. **ArenaOS v1 is tournament-engine complete, not game-platform complete** — the engine can run a tournament end to end, but the product layer for specific games, teams, and their registration/eligibility rules is deliberately later.
 - Production-grade token persistence or expiry — see Known Limitations below
 - Production deployment infrastructure
-- **Participant mode UI polish.** The create form has a "Who is competing?" selector (fixed at creation) and the tournament page shows only the matching registration form, but some copy still says "players" for team tournaments (the close-registration confirmation and the create form's third-place hint), and the selector fieldset is vertically large. Cosmetic; revisit when the create page needs the space.
 
 ## 7. Known v1 Limitations
 
