@@ -79,6 +79,7 @@ export const BracketNode = z.object({
   slotA: Slot,
   slotB: Slot,
   match: Match.nullable(),
+  score: z.object({ a: z.number(), b: z.number() }).nullish(),
 })
 export type BracketNode = z.infer<typeof BracketNode>
 

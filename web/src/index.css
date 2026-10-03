@@ -448,3 +448,14 @@ textarea {
   align-items: center;
   gap: var(--space-2);
 }
+.slot-right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.slot-score {
+  min-width: 1.25rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}

@@ -24,11 +24,14 @@ function statusText(node: BracketNode): string {
   return 'Waiting for players'
 }
 
-function SlotRow({ label, isWinner }: { label: string; isWinner: boolean }) {
+function SlotRow({ label, isWinner, score }: { label: string; isWinner: boolean; score?: number }) {
   return (
     <div className={isWinner ? 'slot slot-winner' : 'slot'}>
       <span>{label}</span>
-      {isWinner && <span className="slot-tag">Winner</span>}
+      <span className="slot-right">
+        {isWinner && <span className="slot-tag">Winner</span>}
+        {score !== undefined && <span className="slot-score">{score}</span>}
+      </span>
     </div>
   )
 }
@@ -37,8 +40,8 @@ function NodeCard({ node, nodeLabels }: { node: BracketNode; nodeLabels: Map<num
   const winSide = outcomeSide(node)
   return (
     <div className="match-card">
-      <SlotRow label={slotLabel(node.slotA, nodeLabels)} isWinner={winSide === 'A'} />
-      <SlotRow label={slotLabel(node.slotB, nodeLabels)} isWinner={winSide === 'B'} />
+      <SlotRow label={slotLabel(node.slotA, nodeLabels)} isWinner={winSide === 'A'} score={node.score?.a} />
+      <SlotRow label={slotLabel(node.slotB, nodeLabels)} isWinner={winSide === 'B'} score={node.score?.b} />
       <p className="match-status">{statusText(node)}</p>
     </div>
   )
