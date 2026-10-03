@@ -434,3 +434,17 @@ textarea {
   -webkit-appearance: none;
   margin: 0;
 }
+.dialog fieldset {
+  display: grid;
+  gap: var(--space-2);
+  margin: var(--space-3) 0 0;
+  padding: var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.dialog fieldset label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
