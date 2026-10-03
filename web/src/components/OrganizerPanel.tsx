@@ -36,39 +36,124 @@ function ActionButton({ label, busyLabel, onRun }: { label: string; busyLabel?: 
   )
 }
 
-function AddParticipantForm({ tournamentId, onDone }: { tournamentId: number; onDone: () => Promise<void> }) {
-  const [name, setName] = useState('')
+type ImportResult = {
+  added: number
+  alreadyIn: string[]
+  rejected: { name: string; why: string }[]
+  left: string[]
+  stopped: string | null
+}
+
+// One name per line: trimmed, blanks dropped, duplicates dropped ignoring case
+// (player names are case-sensitive in the backend, so "Alice" and "alice"
+// would otherwise register as two different players).
+function cleanNames(raw: string): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const line of raw.split(/\r?\n/)) {
+    const name = line.trim()
+    if (!name) continue
+    const key = name.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(name)
+  }
+  return out
+}
+
+function AddManyPlayersForm({ tournamentId, room, onDone }: { tournamentId: number; room: number; onDone: () => Promise<void> }) {
+  const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [result, setResult] = useState<ImportResult | null>(null)
+
+  const names = cleanNames(text)
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
+    if (names.length === 0) return
     setBusy(true)
-    setError(null)
+    setResult(null)
+    let added = 0
+    const alreadyIn: string[] = []
+    const rejected: { name: string; why: string }[] = []
+    let left: string[] = []
+    let stopped: string | null = null
+
+    for (let i = 0; i < names.length; i++) {
+      try {
+        await addParticipant(tournamentId, names[i])
+        added++
+      } catch (err) {
+        if (err instanceof ApiError && err.code === 'ALREADY_REGISTERED') {
+          alreadyIn.push(names[i])
+        } else if (err instanceof ApiError && err.code === 'VALIDATION_FAILED') {
+          rejected.push({ name: names[i], why: err.message })
+        } else {
+          // Full, registration closed, session expired, server down:
+          // more calls would only fail the same way.
+          stopped = err instanceof ApiError ? err.message : 'Could not reach the server'
+          left = names.slice(i)
+          break
+        }
+      }
+    }
+
+    setResult({ added, alreadyIn, rejected, left, stopped })
+    setText(left.join('\n'))
     try {
-      await addParticipant(tournamentId, name)
-      setName('')
       await onDone()
-    } catch (err) {
-      console.error('addParticipant failed:', err)
-      setError(err instanceof ApiError ? err.message : 'Could not reach the server')
+    } catch {
+      // the page shows its own refresh error
     } finally {
       setBusy(false)
     }
   }
 
   return (
-    <form onSubmit={handleSubmit} className="inline-form">
+    <form onSubmit={handleSubmit} className="inline-form bulk-add">
       <label>
-        Player name
-        <input value={name} onChange={(e) => setName(e.target.value)} required />
+        Player names
+        <textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          rows={Math.min(Math.max(text.split(/\r?\n/).length, 1), 8)}
+          placeholder="Type a name, or paste a list (one per line)"
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault()
+              e.currentTarget.form?.requestSubmit()
+            }
+          }}
+        />
       </label>
-      {error && <p role="alert" className="form-error">{error}</p>}
-      <button type="submit" disabled={busy}>{busy ? 'Adding' : 'Add player'}</button>
+      {names.length > 1 && (
+        <p className="muted">
+          {names.length} {names.length === 1 ? 'name' : 'names'}
+          {names.length > room && ` - room for ${Math.max(room, 0)} more, the rest will stay in the box`}
+        </p>
+      )}
+      <button type="submit" disabled={busy || names.length === 0}>
+        {busy ? 'Adding' : names.length > 1 ? 'Add ' + names.length + ' players' : 'Add player'}
+      </button>
+      {result && (
+        <div role="status">
+          <p>Added {result.added}.</p>
+          {result.alreadyIn.length > 0 && (
+            <p className="muted">Already registered: {result.alreadyIn.join(', ')}</p>
+          )}
+          {result.rejected.map((r) => (
+            <p key={r.name} className="form-error">{r.name}: {r.why}</p>
+          ))}
+          {result.stopped && (
+            <p className="form-error">
+              {result.stopped} {result.left.length} {result.left.length === 1 ? 'name is' : 'names are'} still in the box.
+            </p>
+          )}
+        </div>
+      )}
     </form>
   )
 }
-
 function RegisterSquadForm({ tournamentId, onDone }: { tournamentId: number; onDone: () => Promise<void> }) {
   const [teamName, setTeamName] = useState('')
   const [busy, setBusy] = useState(false)
@@ -219,7 +304,7 @@ export default function OrganizerPanel({ tournament, bracket, participantCount, 
 
       {tournament.state === 'RegistrationOpen' && (
         <>
-          {tournament.participantMode === 'IndividualOnly' && <AddParticipantForm tournamentId={id} onDone={reload} />}
+          {tournament.participantMode === 'IndividualOnly' && <AddManyPlayersForm tournamentId={id} room={tournament.maxParticipants - participantCount} onDone={reload} />}
           {tournament.participantMode === 'SquadOnly' && <RegisterSquadForm tournamentId={id} onDone={reload} />}
           <div className="action-row">
             <CloseRegistrationAction tournamentId={id} participantCount={participantCount} unit={tournament.participantMode === 'SquadOnly' ? 'teams' : 'players'} onDone={reload} />

@@ -459,3 +459,16 @@ textarea {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
+.bulk-add {
+  flex-direction: column;
+  align-items: stretch;
+  max-width: 360px;
+}
+
+.bulk-add .muted {
+  margin: 0;
+}
+.bulk-add textarea {
+  min-height: 0;
+  resize: vertical;
+}
