@@ -49,11 +49,14 @@ ArenaOS is built as four pieces sharing one Haskell core, only two of which are 
 - **Live viewing polls every 20 seconds**, only while the browser tab is visible, and stops once a tournament reaches `Completed` or `Cancelled`. Returning to a hidden tab triggers an immediate refetch rather than waiting for the next tick. A failed poll keeps the last good data on screen with a "couldn't refresh" notice rather than blanking the view.
 - **Result recording has two paths.** "Record score" takes eFootball goals, derives the winner, stores the score and shows it on the bracket card. "Declare winner" records only the outcome (winner A or B, or a draw in round robin) through the generic result endpoint, so it suits games without a goals score. Elimination matches cannot end in a draw.
 - **Registration follows the tournament's participant mode.** A tournament is created for individuals or for teams, and the page shows only the matching form. Individuals can be added one at a time or pasted as a list (one name per line, duplicates ignored regardless of case); teams are registered one at a time and must already exist.
+- **Final standings (1st to 4th) are worked out in the browser from the finished bracket.** Single elimination uses the final plus the third-place match, and shows a shared 3rd if there was none. Double elimination uses the deciding grand-final match and the last two losers-bracket matches, so with few players a bye can leave no 4th. The list only appears once the whole bracket is decided.
+- **The third-place match is always on for new single-elimination tournaments.** This is enforced in the create form only: the API still accepts tournaments without it, older tournaments keep their setting, and the backend skips the match when there are fewer than four players.
+- **Double elimination is shown as Winners, Losers and Grand final sections.** The grand-final and reset node ids come from the API. The reset card appears only when it holds a real match, and the tournament can be completed after the grand final unless the losers-bracket champion won it, in which case the reset must be decided first.
 
 ## 6. Explicitly Deferred (out of v1 scope)
 
 - Player self-registration, player accounts, and any `User`-to-`Player` link
-- **The v1 create/manage workflow is Single Elimination only.** The backend supports Double Elimination and Round Robin, and the tournament page can already render a backend-produced bracket in either format — but v1's create form only offers Single Elimination, and there is no frontend for DE-specific actions (grand final/reset) or RR standings.
+- **Round robin has no frontend.** The create form offers single and double elimination. Round robin can only be created through the API, and the tournament page has no standings table for it.
 - A frontend for result correction or tournament reopening (the backend supports both)
 - **No frontend scheduling UI.** The backend supports setting and reading a match's scheduled time; no part of v1's UI exposes it.
 - Server-push (SSE/WebSockets) — v1 uses polling only
