@@ -88,6 +88,8 @@ export const BracketView = z.object({
   format: TournamentFormat,
   bracketId: z.number().nullable(),
   thirdPlaceNodeId: z.number().nullable(),
+  grandFinalNodeId: z.number().nullish(),
+  resetNodeId: z.number().nullish(),
   nodes: z.array(BracketNode),
 })
 export type BracketView = z.infer<typeof BracketView>

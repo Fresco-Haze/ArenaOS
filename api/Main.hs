@@ -292,6 +292,8 @@ bracketViewJson scores v = object
   , "format"           .= T.pack (show (tournamentFormat t))
   , "bracketId"        .= fmap unBracketId (tournamentBracket t)
   , "thirdPlaceNodeId" .= fmap unBracketNodeId (bracketThirdPlaceNodeId (GetB.viewBracket v))
+  , "grandFinalNodeId" .= fmap unBracketNodeId (bracketGF1NodeId (GetB.viewBracket v))
+  , "resetNodeId"      .= fmap unBracketNodeId (bracketResetNodeId (GetB.viewBracket v))
   , "nodes"            .= map (nodeJson scores (GetB.viewMatches v)) sortedNodes
   ]
   where
