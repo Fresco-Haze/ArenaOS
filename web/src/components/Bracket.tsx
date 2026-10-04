@@ -17,7 +17,7 @@ function statusText(node: BracketNode): string {
       case 'InProgress':
         return 'In progress'
       case 'Completed':
-        return 'Completed'
+        return node.match.outcome?.type === 'Forfeit' ? 'Completed (forfeit)' : node.match.outcome?.type === 'Disqualification' ? 'Completed (disqualification)' : 'Completed'
       case 'Cancelled':
         return 'Cancelled'
     }

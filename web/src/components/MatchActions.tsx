@@ -52,7 +52,7 @@ export default function MatchActions({
       {match.status === 'InProgress' && (
         <div className="match-actions-buttons">
           <button onClick={() => setScoreDialogOpen(true)}>Record score</button>
-          <button onClick={() => setWinnerDialogOpen(true)}>Declare winner</button>
+          <button onClick={() => setWinnerDialogOpen(true)}>Declare result</button>
         </div>
       )}
       <EFootballResultDialog
