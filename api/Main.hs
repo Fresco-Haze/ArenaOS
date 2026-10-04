@@ -28,6 +28,7 @@ import Domain.Ids (UserId(..), TournamentId(..), BracketId(..), BracketNodeId(..
 import Domain.Match (Match(..), MatchId(..), MatchOutcome(..))
 import Domain.MatchError (MatchError(..))
 import Domain.Scoreable (EFootballScore, mkEFootballScore, ScoreError(..), unEFootballScore)
+import Engine.Standings (Standing(..), computeStandings)
 import Application.UseCases.RecordEFootballResult (recordEFootballResult, RecordEFootballResultError(..))
 import Engine.Error (EngineError(..))
 import Application.Internal.Authorization (AuthorizationError(..))
@@ -286,6 +287,12 @@ nodeJson scores matches n = object
   , "score"  .= (find (\m -> matchBracketNode m == nodeId n) matches >>= \m -> fmap (\(a, b) -> object ["a" .= a, "b" .= b]) (Map.lookup (matchId m) scores))
   ]
 
+standingsJson :: Tournament -> [Match] -> Maybe [Value]
+standingsJson t matches
+  | tournamentFormat t == RoundRobin =
+      Just [ object ["participant" .= participantJson (standingParticipant s), "points" .= standingPoints s]
+           | s <- computeStandings matches ]
+  | otherwise = Nothing
 bracketViewJson :: Map.Map MatchId (Int, Int) -> GetB.BracketView -> Value
 bracketViewJson scores v = object
   [ "tournamentId"     .= unTournamentId (tournamentId t)
@@ -294,6 +301,7 @@ bracketViewJson scores v = object
   , "thirdPlaceNodeId" .= fmap unBracketNodeId (bracketThirdPlaceNodeId (GetB.viewBracket v))
   , "grandFinalNodeId" .= fmap unBracketNodeId (bracketGF1NodeId (GetB.viewBracket v))
   , "resetNodeId"      .= fmap unBracketNodeId (bracketResetNodeId (GetB.viewBracket v))
+  , "standings"        .= standingsJson t (GetB.viewMatches v)
   , "nodes"            .= map (nodeJson scores (GetB.viewMatches v)) sortedNodes
   ]
   where
@@ -442,7 +450,7 @@ fromStartTournament StartT.BracketNotGenerated  =
 fromTournamentError :: TournamentError -> ApiError
 fromTournamentError TournamentNotComplete =
   ApiError status409 "TOURNAMENT_NOT_COMPLETE"
-    "The final match has not been decided yet" (object [])
+    "The tournament is not finished yet" (object [])
 fromTournamentError TournamentAlreadyCompleted =
   ApiError status409 "TOURNAMENT_ALREADY_COMPLETED"
     "The tournament is already completed" (object [])
