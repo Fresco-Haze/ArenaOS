@@ -93,6 +93,10 @@ export function splitThirdPlace(bracket: BracketView): {
 // Mirrors the backend rule: the final AND the third-place match (if one exists)
 // must both be Completed.
 export function isBracketDecided(bracket: BracketView): boolean {
+  if (bracket.format === 'RoundRobin') {
+    const played = bracket.nodes.filter((n) => n.match)
+    return played.length > 0 && played.every((n) => n.match?.status === 'Completed')
+  }
   if (bracket.grandFinalNodeId != null) return isDoubleElimDecided(bracket)
   const { main, thirdPlace } = splitThirdPlace(bracket)
   const groups = groupByRound(main)

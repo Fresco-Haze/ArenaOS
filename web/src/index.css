@@ -523,3 +523,28 @@ textarea {
   min-width: 5.5rem;
   color: var(--muted);
 }
+.rr-table {
+  width: 100%;
+  max-width: 28rem;
+  border-collapse: collapse;
+}
+
+.rr-table th,
+.rr-table td {
+  text-align: left;
+  padding: var(--space-1) var(--space-3) var(--space-1) 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.rr-table th {
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 0.875rem;
+}
+
+.rr-matches {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+}

@@ -25,7 +25,7 @@ export default function CreateTournamentPage() {
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<Field, string>>>({})
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const [format, setFormat] = useState<'SingleElimination' | 'DoubleElimination'>('SingleElimination')
+  const [format, setFormat] = useState<'SingleElimination' | 'DoubleElimination' | 'RoundRobin'>('SingleElimination')
   const [participantMode, setParticipantMode] = useState<'IndividualOnly' | 'SquadOnly'>('IndividualOnly')
 
   // ProtectedRoute guarantees this, but keep TypeScript honest.
@@ -112,9 +112,20 @@ export default function CreateTournamentPage() {
             />
             Double elimination
           </label>
+          <label>
+            <input
+              type="radio"
+              name="format"
+              checked={format === 'RoundRobin'}
+              onChange={() => setFormat('RoundRobin')}
+            />
+            Round robin
+          </label>
           <p className="muted">
             {format === 'DoubleElimination'
               ? 'A first loss sends you to the losers bracket, so everyone plays at least twice.'
+              : format === 'RoundRobin'
+              ? 'Everyone plays everyone once. Points decide the table: 3 for a win, 1 for a draw.'
               : 'One loss and you are out.'}
           </p>
         </fieldset>
@@ -178,7 +189,9 @@ export default function CreateTournamentPage() {
         <p className="muted">
           {format === 'SingleElimination'
             ? `A third-place match is always played, so 1st to 4th are decided (needs 4 or more ${participantMode === 'SquadOnly' ? 'teams' : 'players'}).`
-            : 'Double elimination decides the top four by itself.'}
+            : format === 'DoubleElimination'
+            ? 'Double elimination decides the top four by itself.'
+            : 'Round robin ranks everyone by points.'}
         </p>
 
         {error && <p role="alert" className="form-error">{error}</p>}

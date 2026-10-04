@@ -60,7 +60,7 @@ export function createTournament(input: {
   maxParticipants: number
   thirdPlaceMatch: boolean
   participantMode?: 'IndividualOnly' | 'SquadOnly'
-  format?: 'SingleElimination' | 'DoubleElimination'
+  format?: 'SingleElimination' | 'DoubleElimination' | 'RoundRobin'
 }) {
   return api('/tournaments', CreateTournamentResponse, {
     method: 'POST',

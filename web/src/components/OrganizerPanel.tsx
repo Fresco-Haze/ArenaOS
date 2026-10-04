@@ -341,7 +341,9 @@ export default function OrganizerPanel({ tournament, bracket, participantCount, 
               <p className="muted">
                 {bracket.thirdPlaceNodeId !== null
                   ? 'Complete becomes available once the final and the third-place match are decided.'
-                  : 'Complete becomes available once the final is decided.'}
+                  : tournament.format === 'RoundRobin'
+                    ? 'Complete becomes available once every match is decided.'
+                    : 'Complete becomes available once the final is decided.'}
               </p>
             )}
             <CancelAction tournamentId={id} onDone={reload} />

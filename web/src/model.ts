@@ -90,6 +90,7 @@ export const BracketView = z.object({
   thirdPlaceNodeId: z.number().nullable(),
   grandFinalNodeId: z.number().nullish(),
   resetNodeId: z.number().nullish(),
+  standings: z.array(z.object({ participant: Participant, points: z.number() })).nullish(),
   nodes: z.array(BracketNode),
 })
 export type BracketView = z.infer<typeof BracketView>

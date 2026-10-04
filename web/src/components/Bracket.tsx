@@ -1,6 +1,8 @@
 import type { BracketNode, BracketView } from '../model'
 import { buildNodeLabels, champion, groupByRound, roundName, slotLabel, splitThirdPlace } from '../lib/bracket'
 import { buildDoubleElimLabels, doubleElimChampion, placements, sectionRoundNames, splitDoubleElim } from '../lib/bracket'
+import { isBracketDecided } from '../lib/bracket'
+import { participantName } from '../lib/participants'
 import type { RoundGroup } from '../lib/bracket'
 
 function outcomeSide(node: BracketNode): 'A' | 'B' | null {
@@ -17,7 +19,7 @@ function statusText(node: BracketNode): string {
       case 'InProgress':
         return 'In progress'
       case 'Completed':
-        return node.match.outcome?.type === 'Forfeit' ? 'Completed (forfeit)' : node.match.outcome?.type === 'Disqualification' ? 'Completed (disqualification)' : 'Completed'
+        return node.match.outcome?.type === 'Forfeit' ? 'Completed (forfeit)' : node.match.outcome?.type === 'Disqualification' ? 'Completed (disqualification)' : node.match.outcome?.type === 'Draw' ? 'Completed (draw)' : 'Completed'
       case 'Cancelled':
         return 'Cancelled'
     }
@@ -61,6 +63,68 @@ function Standings({ bracket }: { bracket: BracketView }) {
           <span>{p.names.join(', ')}</span>
         </div>
       ))}
+    </div>
+  )
+}
+function RoundRobinView({ bracket }: { bracket: BracketView }) {
+  const nodes = [...bracket.nodes].sort((a, b) => a.nodeId - b.nodeId)
+  const rows = bracket.standings ?? []
+  const decided = isBracketDecided(bracket)
+  const played = new Map<string, number>()
+  for (const n of nodes) {
+    if (n.match?.status !== 'Completed') continue
+    for (const slot of [n.slotA, n.slotB]) {
+      if (slot.type === 'Filled') {
+        const name = participantName(slot.participant)
+        played.set(name, (played.get(name) ?? 0) + 1)
+      }
+    }
+  }
+  const levelAtTop = rows.length > 1 && rows[0].points === rows[1].points
+  const anyLevel = rows.some((r, i) => i > 0 && r.points === rows[i - 1].points)
+  const labels = new Map<number, string>()
+
+  return (
+    <div>
+      {decided && rows.length > 0 && !levelAtTop && (
+        <p className="champion">Winner: {participantName(rows[0].participant)}</p>
+      )}
+      {decided && levelAtTop && <p className="muted">The top places are level on points.</p>}
+      <h3 className="bracket-section-heading">Standings</h3>
+      <table className="rr-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Name</th>
+            <th>Played</th>
+            <th>Pts</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r, i) => {
+            const name = participantName(r.participant)
+            return (
+              <tr key={name}>
+                <td>{i + 1}</td>
+                <td>{name}</td>
+                <td>{played.get(name) ?? 0}</td>
+                <td>{r.points}</td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+      {anyLevel && (
+        <p className="muted">
+          Level on points: ordered by the results between them where possible. If they are still level, the order shown is not a ranking.
+        </p>
+      )}
+      <h3 className="bracket-section-heading">Matches</h3>
+      <div className="rr-matches">
+        {nodes.map((n) => (
+          <NodeCard key={n.nodeId} node={n} nodeLabels={labels} />
+        ))}
+      </div>
     </div>
   )
 }
@@ -128,6 +192,7 @@ function DoubleElimBracket({ bracket }: { bracket: BracketView }) {
 }
 export default function Bracket({ bracket }: { bracket: BracketView }) {
   if (bracket.grandFinalNodeId != null) return <DoubleElimBracket bracket={bracket} />
+  if (bracket.format === 'RoundRobin') return <RoundRobinView bracket={bracket} />
   const { main, thirdPlace } = splitThirdPlace(bracket)
   const groups = groupByRound(main)
   if (groups.length === 0) {
