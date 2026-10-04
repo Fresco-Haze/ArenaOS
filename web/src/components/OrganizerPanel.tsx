@@ -327,7 +327,7 @@ export default function OrganizerPanel({ tournament, bracket, participantCount, 
         <>
           <div className="matches-list">
             {actionableMatches(bracket.nodes).length === 0 ? (
-              <p className="muted">Waiting for the next match to be ready.</p>
+              <p className="muted">{isBracketDecided(bracket) ? 'All matches are decided.' : 'Waiting for the next match to be ready.'}</p>
             ) : (
               actionableMatches(bracket.nodes).map((n) => (
                 <MatchActions key={n.nodeId} node={n} format={tournament.format} onDone={reload} />
