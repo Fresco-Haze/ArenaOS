@@ -1,5 +1,7 @@
 import type { BracketNode, BracketView } from '../model'
 import { buildNodeLabels, champion, groupByRound, roundName, slotLabel, splitThirdPlace } from '../lib/bracket'
+import { buildDoubleElimLabels, doubleElimChampion, sectionRoundNames, splitDoubleElim } from '../lib/bracket'
+import type { RoundGroup } from '../lib/bracket'
 
 function outcomeSide(node: BracketNode): 'A' | 'B' | null {
   const o = node.match?.outcome
@@ -47,7 +49,69 @@ function NodeCard({ node, nodeLabels }: { node: BracketNode; nodeLabels: Map<num
   )
 }
 
+function RoundColumns({ groups, names, nodeLabels }: { groups: RoundGroup[]; names: string[]; nodeLabels: Map<number, string> }) {
+  return (
+    <div className="bracket-scroll">
+      <div className="bracket">
+        {groups.map((g, i) => (
+          <div key={g.round} className="bracket-column">
+            <h3 className="bracket-round-heading">{names[i]}</h3>
+            <div className="bracket-matches">
+              {g.nodes.map((n) => (
+                <NodeCard key={n.nodeId} node={n} nodeLabels={nodeLabels} />
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function DoubleElimBracket({ bracket }: { bracket: BracketView }) {
+  const { winners, losers, grandFinal, reset } = splitDoubleElim(bracket)
+  const wGroups = groupByRound(winners)
+  const lGroups = groupByRound(losers)
+  const wNames = sectionRoundNames(wGroups.length, 'Winners')
+  const lNames = sectionRoundNames(lGroups.length, 'Losers')
+  const nodeLabels = buildDoubleElimLabels(
+    [{ groups: wGroups, names: wNames }, { groups: lGroups, names: lNames }],
+    grandFinal,
+    reset,
+  )
+  const champ = doubleElimChampion(bracket)
+  // An unplayed reset is BYE vs BYE: nothing to show.
+  const showReset = reset !== null && !(reset.slotA.type === 'Bye' && reset.slotB.type === 'Bye')
+
+  return (
+    <div>
+      {champ && <p className="champion">Champion: {champ}</p>}
+      <h3 className="bracket-section-heading">Winners bracket</h3>
+      <RoundColumns groups={wGroups} names={wNames} nodeLabels={nodeLabels} />
+      {lGroups.length > 0 && (
+        <>
+          <h3 className="bracket-section-heading">Losers bracket</h3>
+          <RoundColumns groups={lGroups} names={lNames} nodeLabels={nodeLabels} />
+        </>
+      )}
+      {grandFinal && (
+        <div className="bracket-final">
+          <h3 className="bracket-section-heading">Grand final</h3>
+          <NodeCard node={grandFinal} nodeLabels={nodeLabels} />
+          {showReset && reset && (
+            <>
+              <h3 className="bracket-round-heading">Reset match</h3>
+              <p className="muted">Played only if the losers-bracket champion wins the grand final.</p>
+              <NodeCard node={reset} nodeLabels={nodeLabels} />
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
 export default function Bracket({ bracket }: { bracket: BracketView }) {
+  if (bracket.grandFinalNodeId != null) return <DoubleElimBracket bracket={bracket} />
   const { main, thirdPlace } = splitThirdPlace(bracket)
   const groups = groupByRound(main)
   if (groups.length === 0) {

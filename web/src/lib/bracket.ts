@@ -93,6 +93,7 @@ export function splitThirdPlace(bracket: BracketView): {
 // Mirrors the backend rule: the final AND the third-place match (if one exists)
 // must both be Completed.
 export function isBracketDecided(bracket: BracketView): boolean {
+  if (bracket.grandFinalNodeId != null) return isDoubleElimDecided(bracket)
   const { main, thirdPlace } = splitThirdPlace(bracket)
   const groups = groupByRound(main)
   if (groups.length === 0) return false
@@ -100,4 +101,72 @@ export function isBracketDecided(bracket: BracketView): boolean {
   const finalDone = final.nodes.length === 1 && final.nodes[0].match?.status === 'Completed'
   const thirdDone = thirdPlace === null || thirdPlace.match?.status === 'Completed'
   return finalDone && thirdDone
+}
+export function splitDoubleElim(bracket: BracketView): {
+  winners: BracketNode[]
+  losers: BracketNode[]
+  grandFinal: BracketNode | null
+  reset: BracketNode | null
+} {
+  const gfId = bracket.grandFinalNodeId ?? null
+  const resetId = bracket.resetNodeId ?? null
+  const grandFinal = bracket.nodes.find((n) => n.nodeId === gfId) ?? null
+  const reset = bracket.nodes.find((n) => n.nodeId === resetId) ?? null
+  const rest = bracket.nodes.filter((n) => n.nodeId !== gfId && n.nodeId !== resetId)
+  return {
+    winners: rest.filter((n) => n.stage === 'Winners'),
+    losers: rest.filter((n) => n.stage === 'Losers'),
+    grandFinal,
+    reset,
+  }
+}
+
+export function sectionRoundNames(count: number, prefix: 'Winners' | 'Losers'): string[] {
+  return Array.from({ length: count }, (_, i) =>
+    i === count - 1 ? `${prefix} final` : `${prefix} round ${i + 1}`,
+  )
+}
+
+export function buildDoubleElimLabels(
+  sections: { groups: RoundGroup[]; names: string[] }[],
+  grandFinal: BracketNode | null,
+  reset: BracketNode | null,
+): Map<number, string> {
+  const labels = new Map<number, string>()
+  for (const s of sections) {
+    s.groups.forEach((g, gi) => {
+      g.nodes.forEach((n, i) => {
+        labels.set(n.nodeId, g.nodes.length === 1 ? s.names[gi] : `${s.names[gi]} match ${i + 1}`)
+      })
+    })
+  }
+  if (grandFinal) labels.set(grandFinal.nodeId, 'Grand final')
+  if (reset) labels.set(reset.nodeId, 'Reset match')
+  return labels
+}
+
+function winnerName(node: BracketNode | null): string | null {
+  const m = node?.match
+  if (!node || !m || m.status !== 'Completed' || !m.outcome || !('winner' in m.outcome)) return null
+  const slot = m.outcome.winner === 'A' ? node.slotA : node.slotB
+  return slot.type === 'Filled' ? participantName(slot.participant) : null
+}
+
+// Mirrors CompleteTournament: the grand final decides it unless the losers-bracket
+// champion (side B) wins it, in which case the reset match must be decided too.
+export function isDoubleElimDecided(bracket: BracketView): boolean {
+  const { grandFinal, reset } = splitDoubleElim(bracket)
+  const gf = grandFinal?.match
+  if (!gf || gf.status !== 'Completed' || !gf.outcome || !('winner' in gf.outcome)) return false
+  if (gf.outcome.winner === 'A') return true
+  const r = reset?.match
+  return !!r && r.status === 'Completed' && !!r.outcome && 'winner' in r.outcome
+}
+
+export function doubleElimChampion(bracket: BracketView): string | null {
+  if (!isDoubleElimDecided(bracket)) return null
+  const { grandFinal, reset } = splitDoubleElim(bracket)
+  const o = grandFinal?.match?.outcome
+  const gfSide = o && 'winner' in o ? o.winner : null
+  return winnerName(gfSide === 'A' ? grandFinal : reset)
 }

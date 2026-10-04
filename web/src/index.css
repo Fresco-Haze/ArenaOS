@@ -472,3 +472,40 @@ textarea {
   min-height: 0;
   resize: vertical;
 }
+.form fieldset {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.form fieldset label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.form fieldset .muted {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 0.875rem;
+}
+
+.form label:has(> input[type="checkbox"]) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.bracket-section-heading {
+  margin: var(--space-6) 0 var(--space-2);
+  font-size: 1.0625rem;
+}
+
+.bracket-final {
+  max-width: 20.5rem;
+}
