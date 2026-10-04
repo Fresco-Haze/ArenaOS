@@ -1,6 +1,6 @@
 import type { BracketNode, BracketView } from '../model'
 import { buildNodeLabels, champion, groupByRound, roundName, slotLabel, splitThirdPlace } from '../lib/bracket'
-import { buildDoubleElimLabels, doubleElimChampion, sectionRoundNames, splitDoubleElim } from '../lib/bracket'
+import { buildDoubleElimLabels, doubleElimChampion, placements, sectionRoundNames, splitDoubleElim } from '../lib/bracket'
 import type { RoundGroup } from '../lib/bracket'
 
 function outcomeSide(node: BracketNode): 'A' | 'B' | null {
@@ -49,6 +49,21 @@ function NodeCard({ node, nodeLabels }: { node: BracketNode; nodeLabels: Map<num
   )
 }
 
+function Standings({ bracket }: { bracket: BracketView }) {
+  const list = placements(bracket)
+  if (list.length === 0) return null
+  return (
+    <div className="standings">
+      <h3 className="bracket-section-heading">Final standings</h3>
+      {list.map((p) => (
+        <div key={p.place} className="standing-row">
+          <span className="standing-place">{p.place}</span>
+          <span>{p.names.join(', ')}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
 function RoundColumns({ groups, names, nodeLabels }: { groups: RoundGroup[]; names: string[]; nodeLabels: Map<number, string> }) {
   return (
     <div className="bracket-scroll">
@@ -86,6 +101,7 @@ function DoubleElimBracket({ bracket }: { bracket: BracketView }) {
   return (
     <div>
       {champ && <p className="champion">Champion: {champ}</p>}
+      <Standings bracket={bracket} />
       <h3 className="bracket-section-heading">Winners bracket</h3>
       <RoundColumns groups={wGroups} names={wNames} nodeLabels={nodeLabels} />
       {lGroups.length > 0 && (
@@ -125,6 +141,7 @@ export default function Bracket({ bracket }: { bracket: BracketView }) {
   return (
     <div>
       {champ && <p className="champion">Champion: {champ}</p>}
+      <Standings bracket={bracket} />
       <div className="bracket-scroll">
         <div className="bracket">
           {groups.map((g) => (

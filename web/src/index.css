@@ -509,3 +509,17 @@ textarea {
 .bracket-final {
   max-width: 20.5rem;
 }
+.standings {
+  margin: 0 0 var(--space-4);
+}
+
+.standing-row {
+  display: flex;
+  gap: var(--space-3);
+  padding: var(--space-1) 0;
+}
+
+.standing-place {
+  min-width: 5.5rem;
+  color: var(--muted);
+}

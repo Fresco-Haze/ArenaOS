@@ -25,7 +25,6 @@ export default function CreateTournamentPage() {
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<Field, string>>>({})
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const [thirdPlaceMatch, setThirdPlaceMatch] = useState(false)
   const [format, setFormat] = useState<'SingleElimination' | 'DoubleElimination'>('SingleElimination')
   const [participantMode, setParticipantMode] = useState<'IndividualOnly' | 'SquadOnly'>('IndividualOnly')
 
@@ -51,7 +50,7 @@ export default function CreateTournamentPage() {
         organizer: username,
         visibility,
         maxParticipants: parsedMax,
-        thirdPlaceMatch: format === 'SingleElimination' && thirdPlaceMatch,
+        thirdPlaceMatch: format === 'SingleElimination',
         format,
         participantMode,
       })
@@ -176,16 +175,11 @@ export default function CreateTournamentPage() {
             <span role="alert" className="form-error">{fieldErrors.maxParticipants}</span>
           )}
         </label>
-        <label>
-          <input
-            type="checkbox"
-            checked={format === 'SingleElimination' && thirdPlaceMatch}
-            onChange={(e) => setThirdPlaceMatch(e.target.checked)}
-            disabled={format !== 'SingleElimination'}
-          />
-          Play a third-place match
-          <span className="muted"> (single elimination only, played with 4 or more {participantMode === 'SquadOnly' ? 'teams' : 'players'})</span>
-        </label>
+        <p className="muted">
+          {format === 'SingleElimination'
+            ? `A third-place match is always played, so 1st to 4th are decided (needs 4 or more ${participantMode === 'SquadOnly' ? 'teams' : 'players'}).`
+            : 'Double elimination decides the top four by itself.'}
+        </p>
 
         {error && <p role="alert" className="form-error">{error}</p>}
         <button type="submit" disabled={busy}>

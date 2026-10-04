@@ -282,7 +282,7 @@ export default function OrganizerPanel({ tournament, bracket, participantCount, 
     <section className="section organizer-panel">
       <h2>Organizer controls</h2>
 
-      {tournament.format === 'SingleElimination' &&
+      {tournament.format === 'SingleElimination' && !tournament.thirdPlaceMatch &&
        (['Draft', 'Published', 'RegistrationOpen'].includes(tournament.state) ||
           (tournament.state === 'RegistrationClosed' && !tournament.bracketId)) && (
           <ThirdPlaceToggle tournament={tournament} onDone={reload} />
