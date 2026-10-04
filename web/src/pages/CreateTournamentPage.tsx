@@ -26,6 +26,7 @@ export default function CreateTournamentPage() {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [thirdPlaceMatch, setThirdPlaceMatch] = useState(false)
+  const [format, setFormat] = useState<'SingleElimination' | 'DoubleElimination'>('SingleElimination')
   const [participantMode, setParticipantMode] = useState<'IndividualOnly' | 'SquadOnly'>('IndividualOnly')
 
   // ProtectedRoute guarantees this, but keep TypeScript honest.
@@ -50,7 +51,8 @@ export default function CreateTournamentPage() {
         organizer: username,
         visibility,
         maxParticipants: parsedMax,
-        thirdPlaceMatch,
+        thirdPlaceMatch: format === 'SingleElimination' && thirdPlaceMatch,
+        format,
         participantMode,
       })
       navigate(`/tournaments/${res.tournamentId}`)
@@ -91,6 +93,32 @@ export default function CreateTournamentPage() {
           <span role="alert" className="form-error">{fieldErrors.organizer}</span>
         )}
 
+        <fieldset>
+          <legend>Format</legend>
+          <label>
+            <input
+              type="radio"
+              name="format"
+              checked={format === 'SingleElimination'}
+              onChange={() => setFormat('SingleElimination')}
+            />
+            Single elimination
+          </label>
+          <label>
+            <input
+              type="radio"
+              name="format"
+              checked={format === 'DoubleElimination'}
+              onChange={() => setFormat('DoubleElimination')}
+            />
+            Double elimination
+          </label>
+          <p className="muted">
+            {format === 'DoubleElimination'
+              ? 'A first loss sends you to the losers bracket, so everyone plays at least twice.'
+              : 'One loss and you are out.'}
+          </p>
+        </fieldset>
         <fieldset>
           <legend>Who is competing?</legend>
           <label>
@@ -151,11 +179,12 @@ export default function CreateTournamentPage() {
         <label>
           <input
             type="checkbox"
-            checked={thirdPlaceMatch}
+            checked={format === 'SingleElimination' && thirdPlaceMatch}
             onChange={(e) => setThirdPlaceMatch(e.target.checked)}
+            disabled={format !== 'SingleElimination'}
           />
           Play a third-place match
-          <span className="muted"> (only played with 4 or more {participantMode === 'SquadOnly' ? 'teams' : 'players'})</span>
+          <span className="muted"> (single elimination only, played with 4 or more {participantMode === 'SquadOnly' ? 'teams' : 'players'})</span>
         </label>
 
         {error && <p role="alert" className="form-error">{error}</p>}

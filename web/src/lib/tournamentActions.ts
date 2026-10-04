@@ -60,10 +60,11 @@ export function createTournament(input: {
   maxParticipants: number
   thirdPlaceMatch: boolean
   participantMode?: 'IndividualOnly' | 'SquadOnly'
+  format?: 'SingleElimination' | 'DoubleElimination'
 }) {
   return api('/tournaments', CreateTournamentResponse, {
     method: 'POST',
-    body: JSON.stringify({ ...input, format: 'SingleElimination' }),
+    body: JSON.stringify({ ...input, format: input.format ?? 'SingleElimination' }),
   })
 }
 
