@@ -276,6 +276,23 @@ translateLineageError match (NoLoserTarget _) = CorrectionIntegrityViolation (ma
 
 
 
+-- | DE counterpart of slotRepairs. Recording writes the winner into the winner
+-- target node and the loser into the loser target node (propagateWinner /
+-- propagateLoser), so a correction must swap them there too. A target with no
+-- Match row yet still has filled slots, so this works on nodes alone.
+repairTargetSlots
+  :: (BracketRepository m)
+  => Match -> MatchOutcome -> Maybe BracketNodeId -> Maybe BracketNodeId -> m ()
+repairTargetSlots match newOutcome winnerTarget loserTarget =
+  case (correctedParticipant newOutcome, matchOutcome match >>= correctedParticipant) of
+    (Just newWinner, Just oldWinner) -> do
+      (_, nodes) <- Repo.getBracket (matchBracket match)
+      let repairs = catMaybes
+            [ winnerTarget >>= \t -> find ((== t) . nodeId) nodes >>= swapInNode oldWinner newWinner
+            , loserTarget  >>= \t -> find ((== t) . nodeId) nodes >>= swapInNode newWinner oldWinner
+            ]
+      mapM_ Repo.updateNodeSlots repairs
+    _ -> pure ()
 validateTarget :: Maybe Match -> Either CorrectMatchResultError ()
 validateTarget Nothing = Right ()
 validateTarget (Just m)
@@ -315,7 +332,7 @@ applyDualTargetCorrection match newOutcome winnerTargetMatch loserTargetMatch =
              pure (Right corrected)
 
 handleWBSource
-  :: (MatchRepository m)
+  :: (MatchRepository m, BracketRepository m)
   => Match -> MatchOutcome -> [Match] -> BracketNodeId -> BracketNodeId
   -> m (Either CorrectMatchResultError Match)
 handleWBSource match newOutcome allMatches winnerTargetId loserTargetId = do
@@ -323,10 +340,15 @@ handleWBSource match newOutcome allMatches winnerTargetId loserTargetId = do
       loserTargetMatch  = find ((== loserTargetId)  . matchBracketNode) allMatches
   case validateTarget winnerTargetMatch *> validateTarget loserTargetMatch of
     Left err -> pure (Left err)
-    Right () -> applyDualTargetCorrection match newOutcome winnerTargetMatch loserTargetMatch
+    Right () -> do
+      r <- applyDualTargetCorrection match newOutcome winnerTargetMatch loserTargetMatch
+      case r of
+        Right _ -> repairTargetSlots match newOutcome (Just winnerTargetId) (Just loserTargetId)
+        Left _  -> pure ()
+      pure r
 
 handleLBSource
-  :: (MatchRepository m)
+  :: (MatchRepository m, BracketRepository m)
   => Match -> MatchOutcome -> [Match] -> BracketNodeId
   -> m (Either CorrectMatchResultError Match)
 handleLBSource match newOutcome allMatches targetId = do
@@ -337,7 +359,8 @@ handleLBSource match newOutcome allMatches targetId = do
       case (correctedParticipant newOutcome, matchOutcome match >>= correctedParticipant) of
         (Nothing, _) -> applySourceOnlyCorrection match newOutcome
         (_, Nothing) -> pure (Left (SourceMatchOutcomeInvalid (matchId match)))
-        (Just newWinner, Just oldWinner) ->
+        (Just newWinner, Just oldWinner) -> do
+          repairTargetSlots match newOutcome (Just targetId) Nothing
           case targetMatch of
             Nothing -> applySourceOnlyCorrection match newOutcome
             Just tm ->
