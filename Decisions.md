@@ -56,7 +56,7 @@ ArenaOS is built as four pieces sharing one Haskell core, only two of which are 
 ## 6. Explicitly Deferred (out of v1 scope)
 
 - Player self-registration, player accounts, and any `User`-to-`Player` link
-- **Round robin has no frontend.** The create form offers single and double elimination. Round robin can only be created through the API, and the tournament page has no standings table for it.
+- **Round robin is a flat match grid plus a standings table.** The create form offers single elimination, double elimination and round robin. A round robin shows every match as a card, because they all share round 1 and columns make no sense, and a standings table computed by the backend (3 points for a win, 1 for a draw, and a forfeit or disqualification counts as a win for the team that advances), sent as a `standings` field on the bracket response. Teams level on points are ordered by the results between them; if that does not separate them the order shown is arbitrary and the page says so. The tournament can be completed once every match is completed. A round robin of n players has n(n-1)/2 matches, and the create form does not warn about that.
 - A frontend for result correction or tournament reopening (the backend supports both)
 - **No frontend scheduling UI.** The backend supports setting and reading a match's scheduled time; no part of v1's UI exposes it.
 - Server-push (SSE/WebSockets) — v1 uses polling only
