@@ -20,8 +20,8 @@ import qualified Shell.Persistence.Port as Repo
 import Engine.BracketGeneration (buildTopology, findParent)  -- findParent needs exporting
 import Application.Internal.Authorization (AuthorizationError, requireTournamentOwner)
 import qualified Domain.Tournament
-import Data.Maybe (catMaybes)
-import Domain.Bracket (BracketNode(..), BracketNodeId, Bracket(..), BracketSide(..))
+import Data.Maybe (catMaybes, listToMaybe)
+import Domain.Bracket (BracketNode(..), BracketNodeId, Bracket(..), BracketSide(..), MatchSlot(..))
 import Engine.Correction.DoubleEliminationLineage
   ( resolveWBWinnerTarget, resolveWBLoserTarget, resolveLBTarget
   , LineageError(..), GF1Outcome(..), classifyGF1Outcome
@@ -70,7 +70,7 @@ correctSingleElimination match newOutcome =
       , newParticipant /= matchCompetitorB match ->
         pure (Left (CorrectedParticipantNotInMatch newParticipant))
     _ -> do
-      (_, nodes) <- Repo.getBracket (matchBracket match)
+      (bracket, nodes) <- Repo.getBracket (matchBracket match)
       let size = length (filter ((== 1) . nodeRound) nodes) * 2
           path = downstreamPath (matchBracketNode match) size
 
@@ -90,21 +90,81 @@ correctSingleElimination match newOutcome =
               case matchOutcome match >>= correctedParticipant of
                 Nothing ->
                   pure (Left (SourceMatchOutcomeInvalid (matchId match)))
-                Just oldParticipant -> do
-                  case downstreamMatches of
-                    [] -> do
-                      let corrected = match { matchOutcome = Just newOutcome }
-                      Repo.saveMatch corrected
-                      pure (Right corrected)
-                    nextMatch : _ ->
-                      case findReplacementSlot nextMatch oldParticipant newParticipant of
-                        Nothing ->
-                          pure (Left (CorrectionIntegrityViolation (matchId nextMatch)))
-                        Just updated -> do
-                          let corrected = match { matchOutcome = Just newOutcome }
-                          Repo.saveMatch corrected
-                          Repo.saveMatch updated
-                          pure (Right corrected)
+                Just oldParticipant ->
+                  applySingleElimCorrection bracket nodes allMatches path downstreamMatches
+                    match newOutcome oldParticipant newParticipant
+
+-- | Recording a result writes the bracket's node slots (RecordMatchResult), so a
+-- correction must too: the node the winner advanced into takes the new winner and
+-- the third-place node (fed by the loser) takes the new loser. Match records are
+-- repaired the same way. A started bronze match blocks the correction.
+applySingleElimCorrection
+  :: (MatchRepository m, BracketRepository m)
+  => Bracket -> [BracketNode] -> [Match] -> [BracketNodeId] -> [Match]
+  -> Match -> MatchOutcome -> Participant -> Participant
+  -> m (Either CorrectMatchResultError Match)
+applySingleElimCorrection bracket nodes allMatches path downstreamMatches match newOutcome oldParticipant newParticipant =
+  case bronzeMatch of
+    Just b | matchStatus b /= Match.Scheduled ->
+      pure (Left (DownstreamMatchStarted (matchId b)))
+    _ ->
+      case (nextUpdate, bronzeUpdate) of
+        (Left e, _) -> pure (Left e)
+        (_, Left e) -> pure (Left e)
+        (Right mNext, Right mBronze) -> do
+          Repo.saveMatch corrected
+          mapM_ Repo.saveMatch (catMaybes [mNext, mBronze])
+          mapM_ Repo.updateNodeSlots repairedNodes
+          pure (Right corrected)
+  where
+    corrected = match { matchOutcome = Just newOutcome }
+    oldLoser  = otherCompetitor match oldParticipant
+    newLoser  = otherCompetitor match newParticipant
+    bronzeMatch = do
+      tp <- bracketThirdPlaceNodeId bracket
+      b  <- find ((== tp) . matchBracketNode) allMatches
+      if matchCompetitorA b == oldLoser || matchCompetitorB b == oldLoser
+        then Just b
+        else Nothing
+    nextUpdate = case downstreamMatches of
+      []            -> Right Nothing
+      nextMatch : _ -> case findReplacementSlot nextMatch oldParticipant newParticipant of
+        Nothing      -> Left (CorrectionIntegrityViolation (matchId nextMatch))
+        Just updated -> Right (Just updated)
+    bronzeUpdate = case bronzeMatch of
+      Nothing -> Right Nothing
+      Just b  -> case findReplacementSlot b oldLoser newLoser of
+        Nothing      -> Left (CorrectionIntegrityViolation (matchId b))
+        Just updated -> Right (Just updated)
+    repairedNodes =
+      slotRepairs (bracketThirdPlaceNodeId bracket) path nodes
+        (oldParticipant, newParticipant) (oldLoser, newLoser)
+
+otherCompetitor :: Match -> Participant -> Participant
+otherCompetitor m p
+  | p == matchCompetitorA m = matchCompetitorB m
+  | otherwise               = matchCompetitorA m
+
+-- | Replaces old with new in whichever slot of the node holds it, if either does.
+swapInNode :: Participant -> Participant -> BracketNode -> Maybe BracketNode
+swapInNode old new n
+  | nodeSlotA n == Filled old = Just n { nodeSlotA = Filled new }
+  | nodeSlotB n == Filled old = Just n { nodeSlotB = Filled new }
+  | otherwise                 = Nothing
+
+slotRepairs
+  :: Maybe BracketNodeId -> [BracketNodeId] -> [BracketNode]
+  -> (Participant, Participant) -> (Participant, Participant)
+  -> [BracketNode]
+slotRepairs mThirdPlace path nodes (oldWinner, newWinner) (oldLoser, newLoser) =
+  catMaybes
+    [ do pid <- listToMaybe path
+         n   <- find ((== pid) . nodeId) nodes
+         swapInNode oldWinner newWinner n
+    , do tp <- mThirdPlace
+         n  <- find ((== tp) . nodeId) nodes
+         swapInNode oldLoser newLoser n
+    ]
 
 correctDoubleElimination
   :: (MatchRepository m, BracketRepository m)

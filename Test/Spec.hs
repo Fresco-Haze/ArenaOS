@@ -5951,6 +5951,104 @@ spec = before_ resetTestDb $ do
           matchStatus bronzeAfter `shouldBe` Match.Completed
           matchOutcome bronzeAfter `shouldBe` Just (Winner bob)
 
+    it "correcting a semifinal also corrects the final's bracket slot, not just the match record" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "corr-slot-owner"
+        let participants@[alice,bob,carol,dave] =
+              [ Individual (Player (PlayerName n)) | n <- ["Alice","Bob","Carol","Dave"] ]
+        tid <- createTournament NewTournament
+          { newTournamentName            = TournamentName "Correction Slot Cup"
+          , newTournamentOrganizer       = OrganizerName "Test Organizer"
+          , newTournamentOwner           = ownerId
+          , newTournamentFormat          = SingleElimination
+          , newTournamentVisibility      = Public
+          , newTournamentMaxParticipants = 4
+          , newTournamentThirdPlaceMatch = False
+          , newTournamentParticipantMode = IndividualOnly
+          }
+        forM_ participants $ \p -> case p of
+          Individual player -> Repo.savePlayer player
+          Squad team         -> Repo.saveTeam team
+        advanceToRegistrationOpen ownerId tid
+        forM_ participants (\p -> unwrap =<< registerParticipant tid p)
+        _ <- unwrap =<< closeRegistration ownerId tid
+        bracketId <- unwrap =<< generateBracket ownerId tid
+        let findMatchOf p ms = head (filter (\x -> matchCompetitorA x == p || matchCompetitorB x == p) ms)
+            playWinner p ms = do
+              let m = findMatchOf p ms
+              _ <- unwrap =<< startMatch ownerId (matchId m)
+              _ <- unwrap =<< recordMatchResult ownerId (matchId m) (Winner p)
+              pure ()
+        semis <- Repo.listMatchesForBracket bracketId
+        playWinner alice semis
+        let semi1 = findMatchOf alice semis
+        _ <- unwrap =<< correctMatchResult ownerId (matchId semi1) (Winner bob)
+        (_, nodes) <- Repo.getBracket bracketId
+        let finalNode = head (filter ((== 2) . nodeRound) nodes)
+        playWinner carol semis
+        afterAll <- Repo.listMatchesForBracket bracketId
+        let finalMatch = head (filter (\m -> matchBracketNode m == nodeId finalNode) afterAll)
+        pure ( [nodeSlotA finalNode, nodeSlotB finalNode]
+             , [matchCompetitorA finalMatch, matchCompetitorB finalMatch]
+             , alice, bob, carol )
+
+      case result of
+        Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right (slots, finalCompetitors, alice, bob, carol) -> do
+          (Filled bob `elem` slots) `shouldBe` True
+          (Filled alice `elem` slots) `shouldBe` False
+          finalCompetitors `shouldMatchList` [bob, carol]
+
+    it "correcting a semifinal with a third-place match moves both the final and the bronze match" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "corr-bronze-owner"
+        let participants@[alice,bob,carol,dave] =
+              [ Individual (Player (PlayerName n)) | n <- ["Alice","Bob","Carol","Dave"] ]
+        tid <- createTournament NewTournament
+          { newTournamentName            = TournamentName "Correction Bronze Cup"
+          , newTournamentOrganizer       = OrganizerName "Test Organizer"
+          , newTournamentOwner           = ownerId
+          , newTournamentFormat          = SingleElimination
+          , newTournamentVisibility      = Public
+          , newTournamentMaxParticipants = 4
+          , newTournamentThirdPlaceMatch = True
+          , newTournamentParticipantMode = IndividualOnly
+          }
+        forM_ participants $ \p -> case p of
+          Individual player -> Repo.savePlayer player
+          Squad team         -> Repo.saveTeam team
+        advanceToRegistrationOpen ownerId tid
+        forM_ participants (\p -> unwrap =<< registerParticipant tid p)
+        _ <- unwrap =<< closeRegistration ownerId tid
+        bracketId <- unwrap =<< generateBracket ownerId tid
+        let findMatchOf p ms = head (filter (\x -> matchCompetitorA x == p || matchCompetitorB x == p) ms)
+            playWinner p ms = do
+              let m = findMatchOf p ms
+              _ <- unwrap =<< startMatch ownerId (matchId m)
+              _ <- unwrap =<< recordMatchResult ownerId (matchId m) (Winner p)
+              pure ()
+        semis <- Repo.listMatchesForBracket bracketId
+        playWinner alice semis
+        playWinner carol semis
+        let semi1 = findMatchOf alice semis
+        _ <- unwrap =<< correctMatchResult ownerId (matchId semi1) (Winner bob)
+        (bracket, nodes) <- Repo.getBracket bracketId
+        afterFix <- Repo.listMatchesForBracket bracketId
+        let Just tpNodeId = bracketThirdPlaceNodeId bracket
+            finalNodeId = nodeId (head (filter (\n -> nodeRound n == 2 && nodeId n /= tpNodeId) nodes))
+            bronze = head (filter (\m -> matchBracketNode m == tpNodeId) afterFix)
+            finalM = head (filter (\m -> matchBracketNode m == finalNodeId) afterFix)
+        pure ( [matchCompetitorA finalM, matchCompetitorB finalM]
+             , [matchCompetitorA bronze, matchCompetitorB bronze]
+             , alice, bob, carol, dave )
+
+      case result of
+        Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right (finalCompetitors, bronzeCompetitors, alice, bob, carol, dave) -> do
+          finalCompetitors  `shouldMatchList` [bob, carol]
+          bronzeCompetitors `shouldMatchList` [alice, dave]
     it "bronze match does not materialize until both semis complete" $ do
       result <- runSQLiteM testDbPath $ do
         setupSchema
