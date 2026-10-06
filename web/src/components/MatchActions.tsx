@@ -45,6 +45,16 @@ export default function MatchActions({
   return (
     <div className="match-actions">
       <p className="match-players">{nameA} vs {nameB}</p>
+      {match.status === 'Completed' && match.outcome && (
+        <p className="muted">
+          {'winner' in match.outcome
+            ? `${match.outcome.winner === 'A' ? nameA : nameB} ${
+                match.outcome.type === 'Winner' ? 'won' : match.outcome.type === 'Forfeit' ? 'advanced (forfeit)' : 'advanced (disqualification)'
+              }`
+            : match.outcome.type}
+          {node.score ? ` (${node.score.a}-${node.score.b})` : ''}
+        </p>
+      )}
       {error && <p role="alert" className="form-error">{error}</p>}
       {match.status === 'Scheduled' && (
         <button onClick={handleStart} disabled={busy}>

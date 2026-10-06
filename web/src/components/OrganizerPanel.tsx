@@ -334,6 +334,21 @@ export default function OrganizerPanel({ tournament, bracket, participantCount, 
               ))
             )}
           </div>
+          {tournament.format !== 'RoundRobin' && (() => {
+            const done = bracket.nodes
+              .filter((n) => n.match?.status === 'Completed')
+              .sort((a, b) => a.round - b.round || a.nodeId - b.nodeId)
+            return done.length === 0 ? null : (
+              <details className="completed-matches">
+                <summary>Completed matches ({done.length}) - correct a result</summary>
+                <div className="matches-list">
+                  {done.map((n) => (
+                    <MatchActions key={n.nodeId} node={n} format={tournament.format} onDone={reload} />
+                  ))}
+                </div>
+              </details>
+            )
+          })()}
           <div className="action-row">
             {isBracketDecided(bracket) ? (
               <ActionButton label="Complete tournament" onRun={async () => { await completeTournament(id); await reload() }} />
