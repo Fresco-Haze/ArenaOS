@@ -963,6 +963,16 @@ main = do
           runTransition lock
             (\uid tid -> UTTP.updateTournamentThirdPlaceMatch uid tid tp) fromUpdateThirdPlaceMatch
 
+    get "/teams" $ do
+      mUser <- currentUser lock
+      case mUser of
+        Nothing -> sendError unauthenticated
+        Just _  -> do
+          result <- runUseCase lock Repo.listTeams
+          case result of
+            Left apiErr -> sendError apiErr
+            Right ts    -> json (object ["teams" .= map teamJson ts])
+
     post "/teams" $ do
       mUser <- currentUser lock
       raw   <- body

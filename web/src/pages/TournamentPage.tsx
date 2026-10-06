@@ -118,6 +118,7 @@ export default function TournamentPage({ id }: { id: string }) {
           tournament={t}
           bracket={bracket}
           participantCount={view.participants.length}
+          registered={view.participants.map(participantName)}
           reload={reload}
         />
       )}

@@ -145,3 +145,4 @@ export const Team = z.object({
 })
 export type Team = z.infer<typeof Team>
 export const CreateTeamResponse = Team
+export const TeamList = z.object({ teams: z.array(Team) })

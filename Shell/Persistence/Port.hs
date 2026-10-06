@@ -67,6 +67,7 @@ class Monad m => ParticipantRepository m where
     getTeam      :: TeamName -> m Team
     deleteTeam   :: TeamName -> m ()
     teamExists   :: TeamName -> m Bool
+    listTeams    :: m [Team]
 
     resolveParticipant :: Participant -> m ParticipantId
     getParticipant     :: ParticipantId -> m Participant

@@ -8,9 +8,9 @@ import { actionableMatches, isBracketDecided } from '../lib/bracket'
 import {
   publish, openRegistration, addParticipant, registerSquad, closeRegistration,
   generateBracket, startTournament, completeTournament, cancelTournament,
-  setThirdPlaceMatch,
+  setThirdPlaceMatch, listTeams,
 } from '../lib/tournamentActions'
-import type { BracketView, Tournament } from '../model'
+import type { BracketView, Team, Tournament } from '../model'
 
 function ActionButton({ label, busyLabel, onRun }: { label: string; busyLabel?: string; onRun: () => Promise<void> }) {
   const [busy, setBusy] = useState(false)
@@ -61,7 +61,7 @@ function cleanNames(raw: string): string[] {
   return out
 }
 
-function AddManyPlayersForm({ tournamentId, room, kind = 'player', onDone }: { tournamentId: number; room: number; kind?: 'player' | 'team'; onDone: () => Promise<void> }) {
+function AddManyPlayersForm({ tournamentId, room, kind = 'player', registered = [], onDone }: { tournamentId: number; room: number; kind?: 'player' | 'team'; registered?: string[]; onDone: () => Promise<void> }) {
   const squads = kind === 'team'
   const noun = squads ? 'team' : 'player'
   const [text, setText] = useState('')
@@ -69,6 +69,11 @@ function AddManyPlayersForm({ tournamentId, room, kind = 'player', onDone }: { t
   const [result, setResult] = useState<ImportResult | null>(null)
 
   const names = cleanNames(text)
+  const [teams, setTeams] = useState<Team[] | null>(null)
+  const [pickError, setPickError] = useState<string | null>(null)
+  const available = (teams ?? []).filter(
+    (t) => !registered.some((r) => r.toLowerCase() === t.name.toLowerCase()),
+  )
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -131,6 +136,46 @@ function AddManyPlayersForm({ tournamentId, room, kind = 'player', onDone }: { t
           }}
         />
       </label>
+      {squads && (
+        <details
+          onToggle={(e) => {
+            if (e.currentTarget.open && teams === null) {
+              listTeams()
+                .then((d) => setTeams(d.teams))
+                .catch((err: unknown) =>
+                  setPickError(err instanceof ApiError ? err.message : 'Could not reach the server'),
+                )
+            }
+          }}
+        >
+          <summary>Pick from existing teams</summary>
+          {pickError && <p role="alert" className="form-error">{pickError}</p>}
+          {teams === null && !pickError && <p className="muted">Loading teams</p>}
+          {teams !== null && teams.length === 0 && <p className="muted">No teams exist yet.</p>}
+          {teams !== null && teams.length > 0 && available.length === 0 && (
+            <p className="muted">All existing teams are already registered.</p>
+          )}
+          {available.length > 0 && (
+            <div className="match-actions-buttons">
+              {available.map((t) => {
+                const inBox = names.some((n) => n.toLowerCase() === t.name.toLowerCase())
+                return (
+                  <button
+                    key={t.name}
+                    type="button"
+                    disabled={inBox}
+                    onClick={() =>
+                      setText((prev) => (prev.trim() === '' ? t.name : prev.replace(/\s+$/, '') + '\n' + t.name))
+                    }
+                  >
+                    {t.name}
+                  </button>
+                )
+              })}
+            </div>
+          )}
+        </details>
+      )}
       {names.length > 1 && (
         <p className="muted">
           {names.length} {names.length === 1 ? 'name' : 'names'}
@@ -242,10 +287,11 @@ type Props = {
   tournament: Tournament
   bracket: BracketView | null
   participantCount: number
+  registered: string[]
   reload: () => Promise<void>
 }
 
-export default function OrganizerPanel({ tournament, bracket, participantCount, reload }: Props) {
+export default function OrganizerPanel({ tournament, bracket, participantCount, registered, reload }: Props) {
   const id = tournament.tournamentId
 
   return (
@@ -277,7 +323,7 @@ export default function OrganizerPanel({ tournament, bracket, participantCount, 
           {tournament.participantMode === 'IndividualOnly' && <AddManyPlayersForm tournamentId={id} room={tournament.maxParticipants - participantCount} onDone={reload} />}
           {tournament.participantMode === 'SquadOnly' && (
             <>
-              <AddManyPlayersForm tournamentId={id} room={tournament.maxParticipants - participantCount} kind="team" onDone={reload} />
+              <AddManyPlayersForm tournamentId={id} room={tournament.maxParticipants - participantCount} kind="team" registered={registered} onDone={reload} />
               <p className="muted">
                 Don't have a team yet? <Link to="/teams/new">Create one</Link>.
               </p>

@@ -1,5 +1,5 @@
 import { api, apiVoid } from '../api'
-import { Match, Tournament, RegistrationResult, BracketIdResult, CreateTournamentResponse, CreateTeamResponse } from '../model'
+import { Match, Tournament, RegistrationResult, BracketIdResult, CreateTournamentResponse, CreateTeamResponse, TeamList } from '../model'
 
 export function publish(id: number) {
   return apiVoid(`/tournaments/${id}/publish`, { method: 'POST' })
@@ -104,6 +104,10 @@ export function registerSquad(id: number, teamName: string) {
     method: 'POST',
     body: JSON.stringify({ type: 'Squad', teamName }),
   })
+}
+
+export function listTeams() {
+  return api('/teams', TeamList)
 }
 
 export function createTeam(input: { name: string; captain: string; members: string[] }) {

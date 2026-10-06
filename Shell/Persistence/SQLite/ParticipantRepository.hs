@@ -150,6 +150,12 @@ instance ParticipantRepository SQLiteM where
                   (StorageFailure
                     ("participants row for id " ++ show pid ++ " violates kind/player_id/team_id invariant"))
 
+    listTeams :: SQLiteM [Team]
+    listTeams = do
+      conn <- asks envConnection
+      rows <- liftIO (query conn "SELECT id FROM teams ORDER BY name COLLATE NOCASE" () :: IO [Only Int])
+      liftIO (mapM (\(Only i) -> getTeamById conn i) rows)
+
     teamExists :: TeamName -> SQLiteM Bool
     teamExists (TeamName tname) = do
         conn <- asks envConnection

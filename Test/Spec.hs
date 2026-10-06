@@ -106,6 +106,7 @@ import Application.UseCases.RecordEFootballResult
 import Domain.Scoreable (mkEFootballScore)
 import Shell.Persistence.SQLite.EFootballScoreRepository ()
 import qualified Application.UseCases.RecordEFootballResult as REF
+import qualified Domain.Participant as DPart
 import qualified Engine.BracketGeneration as BracketGeneration
 import qualified Engine.Seeding           as Seeding
 import Domain.Bracket (Bracket(..), BracketNode(..), BracketNodeId(..), BracketSide(..), MatchSlot(..),BracketId(..))
@@ -2962,6 +2963,21 @@ spec = before_ resetTestDb $ do
       case result of
         Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
         Right flags -> flags `shouldBe` (True, True, True, True, True)
+    it "listTeams returns every saved team, ordered by name ignoring case" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        let mk n ps = DPart.Team
+              { DPart.teamName    = DPart.TeamName n
+              , DPart.teamCaptain = DPart.Player (DPart.PlayerName (head ps))
+              , DPart.teamMembers = map (DPart.Player . DPart.PlayerName) ps }
+        forM_ [mk "zebras" ["z1","z2"], mk "Alphas" ["a1","a2"], mk "bears" ["b1","b2"]] $ \t -> do
+          mapM_ Repo.savePlayer (DPart.teamMembers t)
+          Repo.saveTeam t
+        ts <- Repo.listTeams
+        pure (map (\t -> let DPart.TeamName n = DPart.teamName t in n) ts)
+      case result of
+        Left err    -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right names -> names `shouldBe` ["Alphas", "bears", "zebras"]
     it "rejects correction on a Completed DoubleElim tournament with TournamentAlreadyCompleted, not the format error" $ do
       result <- runSQLiteM testDbPath $ do
         setupSchema
