@@ -405,7 +405,7 @@ checkGF1Correction currentMatchId _ oldOutcome newOutcome resetMatch =
 
 
 handleGF1Case
-  :: (MatchRepository m)
+  :: (MatchRepository m, BracketRepository m)
   => Match -> MatchOutcome -> Int -> [BracketNode] -> [Match] -> BracketNodeId
   -> m (Either CorrectMatchResultError Match)
 handleGF1Case match newOutcome size wbNodes allMatches resetNodeId =
@@ -423,5 +423,13 @@ handleGF1Case match newOutcome size wbNodes allMatches resetNodeId =
                Left err -> pure (Left err)
                Right maybeRetract -> do
                  mapM_ Repo.deleteMatch maybeRetract
+                 -- Record voids the reset node to (ByeSlot, ByeSlot) when no reset is
+                 -- needed, so retracting the reset must leave the node the same way.
+                 if oldOutcomeClass == ResetRequired && newOutcomeClass == Decisive
+                   then do
+                     (_, nodes) <- Repo.getBracket (matchBracket match)
+                     mapM_ (\n -> Repo.updateNodeSlots n { nodeSlotA = ByeSlot, nodeSlotB = ByeSlot })
+                           (find ((== resetNodeId) . nodeId) nodes)
+                   else pure ()
                  applySourceOnlyCorrection match newOutcome
          
