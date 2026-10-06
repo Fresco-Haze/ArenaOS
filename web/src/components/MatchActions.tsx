@@ -20,6 +20,8 @@ export default function MatchActions({
   const [error, setError] = useState<string | null>(null)
   const [scoreDialogOpen, setScoreDialogOpen] = useState(false)
   const [winnerDialogOpen, setWinnerDialogOpen] = useState(false)
+  const [correctScoreOpen, setCorrectScoreOpen] = useState(false)
+  const [correctWinnerOpen, setCorrectWinnerOpen] = useState(false)
 
   if (!match) return null
   const matchId = match.matchId
@@ -54,6 +56,36 @@ export default function MatchActions({
           <button onClick={() => setScoreDialogOpen(true)}>Record score</button>
           <button onClick={() => setWinnerDialogOpen(true)}>Declare result</button>
         </div>
+      )}
+      {match.status === 'Completed' && format !== 'RoundRobin' && (
+        <>
+          <div className="match-actions-buttons">
+            <button onClick={() => setCorrectScoreOpen(true)}>Correct score</button>
+            <button onClick={() => setCorrectWinnerOpen(true)}>Correct result</button>
+          </div>
+          <EFootballResultDialog
+            key={`correct-score-${node.score?.a ?? 'x'}-${node.score?.b ?? 'x'}`}
+            open={correctScoreOpen}
+            mode="correct"
+            initial={node.score ?? undefined}
+            matchId={matchId}
+            nameA={nameA}
+            nameB={nameB}
+            format={format}
+            onDone={onDone}
+            onClose={() => setCorrectScoreOpen(false)}
+          />
+          <WinnerDialog
+            open={correctWinnerOpen}
+            mode="correct"
+            matchId={matchId}
+            nameA={nameA}
+            nameB={nameB}
+            format={format}
+            onDone={onDone}
+            onClose={() => setCorrectWinnerOpen(false)}
+          />
+        </>
       )}
       <EFootballResultDialog
         open={scoreDialogOpen}

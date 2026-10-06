@@ -82,6 +82,23 @@ export function recordEFootballResult(matchId: number, scoreA: number, scoreB: n
   })
 }
 
+export function correctResult(
+  matchId: number,
+  outcome: { type: 'Winner' | 'Forfeit' | 'Disqualification'; winner: 'A' | 'B' } | { type: 'Draw' | 'NoContest' },
+) {
+  return api(`/matches/${matchId}/result`, Match, {
+    method: 'PUT',
+    body: JSON.stringify(outcome),
+  })
+}
+
+export function correctEFootballResult(matchId: number, scoreA: number, scoreB: number) {
+  return api(`/matches/${matchId}/efootball-result`, Match, {
+    method: 'PUT',
+    body: JSON.stringify({ scoreA, scoreB }),
+  })
+}
+
 export function registerSquad(id: number, teamName: string) {
   return api(`/tournaments/${id}/registrations`, RegistrationResult, {
     method: 'POST',

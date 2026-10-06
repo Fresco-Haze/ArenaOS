@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import ConfirmDialog from './ConfirmDialog'
-import { recordEFootballResult } from '../lib/tournamentActions'
+import { recordEFootballResult, correctEFootballResult } from '../lib/tournamentActions'
 import type { TournamentFormat } from '../model'
 
 type Props = {
@@ -9,6 +9,8 @@ type Props = {
   nameA: string
   nameB: string
   format: TournamentFormat
+  mode?: 'record' | 'correct'
+  initial?: { a: number; b: number }
   onDone: () => Promise<void>
   onClose: () => void
 }
@@ -39,17 +41,18 @@ function ScoreRow({ name, value, onChange }: { name: string; value: number; onCh
   )
 }
 
-export default function EFootballResultDialog({ open, matchId, nameA, nameB, format, onDone, onClose }: Props) {
-  const [scoreA, setScoreA] = useState(0)
-  const [scoreB, setScoreB] = useState(0)
+export default function EFootballResultDialog({ open, matchId, nameA, nameB, format, mode = 'record', initial, onDone, onClose }: Props) {
+  const correcting = mode === 'correct'
+  const [scoreA, setScoreA] = useState(initial?.a ?? 0)
+  const [scoreB, setScoreB] = useState(initial?.b ?? 0)
 
   function reset() {
-    setScoreA(0)
-    setScoreB(0)
+    setScoreA(initial?.a ?? 0)
+    setScoreB(initial?.b ?? 0)
   }
 
   async function handleSubmit() {
-    await recordEFootballResult(matchId, scoreA, scoreB)
+    await (correcting ? correctEFootballResult : recordEFootballResult)(matchId, scoreA, scoreB)
     await onDone()
     reset()
   }
@@ -57,8 +60,8 @@ export default function EFootballResultDialog({ open, matchId, nameA, nameB, for
   return (
     <ConfirmDialog
       open={open}
-      title="Record score"
-      confirmLabel="Submit score"
+      title={correcting ? 'Correct score' : 'Record score'}
+      confirmLabel={correcting ? 'Save correction' : 'Submit score'}
       onConfirm={handleSubmit}
       onClose={() => {
         reset()
@@ -69,6 +72,9 @@ export default function EFootballResultDialog({ open, matchId, nameA, nameB, for
         <ScoreRow name={nameA} value={scoreA} onChange={setScoreA} />
         <ScoreRow name={nameB} value={scoreB} onChange={setScoreB} />
       </div>
+      {correcting && (
+        <p className="muted">This replaces the recorded result and updates the rounds that depend on it.</p>
+      )}
       {format === 'RoundRobin' ? (
         <p className="muted">A draw is a valid result in round robin.</p>
       ) : (

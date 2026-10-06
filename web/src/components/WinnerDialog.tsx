@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import ConfirmDialog from './ConfirmDialog'
-import { recordResult } from '../lib/tournamentActions'
+import { recordResult, correctResult } from '../lib/tournamentActions'
 import type { TournamentFormat } from '../model'
 
 type Props = {
@@ -9,6 +9,7 @@ type Props = {
   nameA: string
   nameB: string
   format: TournamentFormat
+  mode?: 'record' | 'correct'
   onDone: () => Promise<void>
   onClose: () => void
 }
@@ -16,7 +17,9 @@ type Props = {
 type Kind = 'Winner' | 'Forfeit' | 'Disqualification'
 type Choice = 'A' | 'B' | 'Draw' | null
 
-export default function WinnerDialog({ open, matchId, nameA, nameB, format, onDone, onClose }: Props) {
+export default function WinnerDialog({ open, matchId, nameA, nameB, format, mode = 'record', onDone, onClose }: Props) {
+  const correcting = mode === 'correct'
+  const send = correcting ? correctResult : recordResult
   const [kind, setKind] = useState<Kind>('Winner')
   const [choice, setChoice] = useState<Choice>(null)
 
@@ -45,9 +48,9 @@ export default function WinnerDialog({ open, matchId, nameA, nameB, format, onDo
 
   async function handleSubmit() {
     if (choice === 'Draw') {
-      await recordResult(matchId, { type: 'Draw' })
+      await send(matchId, { type: 'Draw' })
     } else if (advancing !== null) {
-      await recordResult(matchId, { type: kind, winner: advancing })
+      await send(matchId, { type: kind, winner: advancing })
     } else {
       return
     }
@@ -61,8 +64,8 @@ export default function WinnerDialog({ open, matchId, nameA, nameB, format, onDo
   return (
     <ConfirmDialog
       open={open}
-      title="Declare result"
-      confirmLabel="Confirm result"
+      title={correcting ? 'Correct result' : 'Declare result'}
+      confirmLabel={correcting ? 'Save correction' : 'Confirm result'}
       confirmDisabled={choice === null}
       onConfirm={handleSubmit}
       onClose={() => {
@@ -135,7 +138,16 @@ export default function WinnerDialog({ open, matchId, nameA, nameB, format, onDo
       {advancingName && (
         <p>{kind === 'Winner' ? `${advancingName} wins.` : `${advancingName} advances.`}</p>
       )}
-      <p className="muted">Results can't be changed once recorded.</p>
+      {correcting ? (
+        <p className="muted">
+          This replaces the recorded result and updates the rounds that depend on it. It is refused once a
+          dependent match has started, or once the tournament is completed.
+        </p>
+      ) : (
+        <p className="muted">
+          A result can be corrected later, until a match that depends on it has started.
+        </p>
+      )}
     </ConfirmDialog>
   )
 }
