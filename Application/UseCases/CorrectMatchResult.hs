@@ -39,6 +39,7 @@ data CorrectMatchResultError
   | DownstreamMatchStarted MatchId
   | SourceMatchOutcomeInvalid MatchId
   | CorrectionIntegrityViolation MatchId
+  | CorrectedOutcomeNotAdvanceable MatchOutcome
   deriving (Eq, Show)
 
 
@@ -53,10 +54,20 @@ correctMatchResult currentUser mid newOutcome = withTxEither $ do
         _ -> case first InvalidLifecycle (requireOperationallyActive tournament) of
           Left err -> pure (Left err)
           Right () -> case tournamentFormat tournament of
-            SingleElimination -> correctSingleElimination match newOutcome
-            DoubleElimination -> correctDoubleElimination match newOutcome
+            SingleElimination -> guardAdvanceable newOutcome (correctSingleElimination match newOutcome)
+            DoubleElimination -> guardAdvanceable newOutcome (correctDoubleElimination match newOutcome)
             format             -> pure (Left (UnsupportedFormatForCorrection format))
 
+-- | Draw and NoContest carry no advancing participant, so correcting an
+-- elimination match to either would save it and leave the old winner in the
+-- next round. Record refuses these the same way (OutcomeNotAdvanceable).
+guardAdvanceable
+  :: Applicative m
+  => MatchOutcome -> m (Either CorrectMatchResultError a) -> m (Either CorrectMatchResultError a)
+guardAdvanceable outcome act =
+  case correctedParticipant outcome of
+    Nothing -> pure (Left (CorrectedOutcomeNotAdvanceable outcome))
+    Just _  -> act
 -- | Everything that was previously inline in correctMatchResult's
 -- SingleElimination branch, factored out unchanged so the dispatch
 -- above stays a plain three-way switch.
