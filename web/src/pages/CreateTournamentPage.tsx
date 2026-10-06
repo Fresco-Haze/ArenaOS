@@ -15,6 +15,22 @@ function fieldOf(err: ApiError): Field | null {
   return null
 }
 
+function matchCountLine(
+  format: 'SingleElimination' | 'DoubleElimination' | 'RoundRobin',
+  n: number,
+  unit: string,
+): string | null {
+  if (!Number.isInteger(n) || n < 2 || n > 512) return null
+  if (format === 'SingleElimination') {
+    if (n < 4) return null
+    return `With ${n} ${unit}: ${n} matches in total, including the third-place match.`
+  }
+  if (format === 'DoubleElimination') {
+    return `With ${n} ${unit}: ${2 * n - 2} to ${2 * n - 1} matches in total (one extra only if a reset match is needed).`
+  }
+  return `With ${n} ${unit}: ${(n * (n - 1)) / 2} matches in total.`
+}
+
 export default function CreateTournamentPage() {
   const { user } = useAuth()
   const navigate = useNavigate()
@@ -123,7 +139,7 @@ export default function CreateTournamentPage() {
           </label>
           <p className="muted">
             {format === 'DoubleElimination'
-              ? 'A first loss sends you to the losers bracket, so everyone plays at least twice.'
+              ? 'A first loss sends you to the losers bracket, so everyone plays at least twice. If the losers-bracket winner wins the grand final, one extra match settles it.'
               : format === 'RoundRobin'
               ? 'Everyone plays everyone once. Points decide the table: 3 for a win, 1 for a draw.'
               : 'One loss and you are out.'}
@@ -193,6 +209,11 @@ export default function CreateTournamentPage() {
             ? 'Double elimination decides the top four by itself.'
             : 'Round robin ranks everyone by points.'}
         </p>
+        {matchCountLine(format, Number(maxParticipants), participantMode === 'SquadOnly' ? 'teams' : 'players') && (
+          <p className="muted">
+            {matchCountLine(format, Number(maxParticipants), participantMode === 'SquadOnly' ? 'teams' : 'players')}
+          </p>
+        )}
 
         {error && <p role="alert" className="form-error">{error}</p>}
         <button type="submit" disabled={busy}>
