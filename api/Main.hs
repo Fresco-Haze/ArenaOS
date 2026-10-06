@@ -31,6 +31,8 @@ import Domain.Scoreable (EFootballScore, mkEFootballScore, ScoreError(..), unEFo
 import Engine.Standings (Standing(..), computeStandings)
 import Application.UseCases.RecordEFootballResult (recordEFootballResult, RecordEFootballResultError(..), correctEFootballResult, CorrectEFootballResultError(..))
 import qualified Application.UseCases.CorrectMatchResult as Correct
+import qualified Application.UseCases.SetMatchSchedule as Sched
+import Data.Time (UTCTime)
 import Engine.Error (EngineError(..))
 import Application.Internal.Authorization (AuthorizationError(..))
 import Application.Internal.LifecycleTransition (LifecycleError(..))
@@ -201,6 +203,11 @@ fromCorrect (Correct.CorrectionIntegrityViolation _) = internalError
 fromCorrectEFootball :: CorrectEFootballResultError -> ApiError
 fromCorrectEFootball (EFootballCorrectionFailed e) = fromCorrect e
 
+fromSetSchedule :: Sched.SetMatchScheduleError -> ApiError
+fromSetSchedule (Sched.Unauthorized a)     = fromAuthorization a
+fromSetSchedule (Sched.InvalidLifecycle l) = fromLifecycle l
+fromSetSchedule (Sched.InvalidMatch e)     = fromMatchError e
+
 
 
 -- ===== JSON out =====
@@ -353,6 +360,11 @@ fromGetBracket (GetB.Unauthorized a)    = fromAuthorization a
 fromGetBracket GetB.BracketNotGenerated =
   ApiError status404 "BRACKET_NOT_GENERATED"
     "No bracket has been generated for this tournament yet" (object [])
+
+data ScheduleReq = ScheduleReq (Maybe UTCTime)
+
+instance FromJSON ScheduleReq where
+  parseJSON = withObject "schedule" $ \o -> ScheduleReq <$> o .: "start"
 
 data EFootballResultReq = EFootballResultReq EFootballScore EFootballScore
 
@@ -793,6 +805,14 @@ main = do
       runAction lock Generate.generateBracket fromGenerate $ \bid -> do
         status status201
         json (object ["bracketId" .= unBracketId bid])
+
+    put "/matches/:id/schedule" $ do
+      raw <- body
+      case eitherDecode raw of
+        Left reason -> sendError (invalidBody reason)
+        Right (ScheduleReq start) ->
+          runMatchAction lock (\uid mid -> Sched.setMatchSchedule uid mid start) fromSetSchedule $ \m ->
+            json (matchJson m)
 
     post "/matches/:id/start" $
       runMatchAction lock Start.startMatch fromStart $ \m ->

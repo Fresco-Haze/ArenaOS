@@ -15,7 +15,7 @@ function statusText(node: BracketNode): string {
   if (node.match) {
     switch (node.match.status) {
       case 'Scheduled':
-        return 'Scheduled'
+        return node.match.scheduledStart ? `Scheduled for ${new Date(node.match.scheduledStart).toLocaleString()}` : 'Scheduled'
       case 'InProgress':
         return 'In progress'
       case 'Completed':

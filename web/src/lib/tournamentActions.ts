@@ -99,6 +99,13 @@ export function correctEFootballResult(matchId: number, scoreA: number, scoreB: 
   })
 }
 
+export function setSchedule(matchId: number, start: string | null) {
+  return api(`/matches/${matchId}/schedule`, Match, {
+    method: 'PUT',
+    body: JSON.stringify({ start }),
+  })
+}
+
 export function registerSquad(id: number, teamName: string) {
   return api(`/tournaments/${id}/registrations`, RegistrationResult, {
     method: 'POST',

@@ -3,8 +3,15 @@ import { ApiError } from '../api'
 import EFootballResultDialog from './EFootballResultDialog'
 import WinnerDialog from './WinnerDialog'
 import { participantName } from '../lib/participants'
-import { startMatch } from '../lib/tournamentActions'
+import { startMatch, setSchedule } from '../lib/tournamentActions'
 import type { BracketNode, TournamentFormat } from '../model'
+
+function toLocalInput(iso: string | null): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
 
 export default function MatchActions({
   node,
@@ -22,6 +29,7 @@ export default function MatchActions({
   const [winnerDialogOpen, setWinnerDialogOpen] = useState(false)
   const [correctScoreOpen, setCorrectScoreOpen] = useState(false)
   const [correctWinnerOpen, setCorrectWinnerOpen] = useState(false)
+  const [when, setWhen] = useState(toLocalInput(node.match?.scheduledStart ?? null))
 
   if (!match) return null
   const matchId = match.matchId
@@ -34,6 +42,20 @@ export default function MatchActions({
     setError(null)
     try {
       await startMatch(matchId)
+      await onDone()
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Could not reach the server')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handleSchedule(clear: boolean) {
+    setBusy(true)
+    setError(null)
+    try {
+      await setSchedule(matchId, clear || when === '' ? null : new Date(when).toISOString())
+      if (clear) setWhen('')
       await onDone()
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'Could not reach the server')
@@ -57,9 +79,30 @@ export default function MatchActions({
       )}
       {error && <p role="alert" className="form-error">{error}</p>}
       {match.status === 'Scheduled' && (
-        <button onClick={handleStart} disabled={busy}>
-          {busy ? 'Starting' : 'Start match'}
-        </button>
+        <>
+          <button onClick={handleStart} disabled={busy}>
+            {busy ? 'Starting' : 'Start match'}
+          </button>
+          {match.scheduledStart && (
+            <p className="muted">Starts {new Date(match.scheduledStart).toLocaleString()}</p>
+          )}
+          <div className="match-actions-buttons">
+            <input
+              type="datetime-local"
+              value={when}
+              onChange={(e) => setWhen(e.target.value)}
+              aria-label="Match start time"
+            />
+            <button onClick={() => void handleSchedule(false)} disabled={busy || when === ''}>
+              Set time
+            </button>
+            {match.scheduledStart && (
+              <button onClick={() => void handleSchedule(true)} disabled={busy}>
+                Clear time
+              </button>
+            )}
+          </div>
+        </>
       )}
       {match.status === 'InProgress' && (
         <div className="match-actions-buttons">
