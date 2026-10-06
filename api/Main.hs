@@ -29,7 +29,8 @@ import Domain.Match (Match(..), MatchId(..), MatchOutcome(..))
 import Domain.MatchError (MatchError(..))
 import Domain.Scoreable (EFootballScore, mkEFootballScore, ScoreError(..), unEFootballScore)
 import Engine.Standings (Standing(..), computeStandings)
-import Application.UseCases.RecordEFootballResult (recordEFootballResult, RecordEFootballResultError(..))
+import Application.UseCases.RecordEFootballResult (recordEFootballResult, RecordEFootballResultError(..), correctEFootballResult, CorrectEFootballResultError(..))
+import qualified Application.UseCases.CorrectMatchResult as Correct
 import Engine.Error (EngineError(..))
 import Application.Internal.Authorization (AuthorizationError(..))
 import Application.Internal.LifecycleTransition (LifecycleError(..))
@@ -168,6 +169,38 @@ fromRecord (Record.InvalidMatch e)     = fromMatchError e
 fromRecordEFootball :: RecordEFootballResultError -> ApiError
 fromRecordEFootball (MatchResultError e) = fromRecord e
 
+fromCorrect :: Correct.CorrectMatchResultError -> ApiError
+fromCorrect (Correct.Unauthorized a)     = fromAuthorization a
+fromCorrect (Correct.InvalidLifecycle l) = fromLifecycle l
+fromCorrect Correct.TournamentAlreadyCompleted =
+  ApiError status409 "TOURNAMENT_ALREADY_COMPLETED"
+    "The tournament is completed; reopen it before correcting results" (object [])
+fromCorrect (Correct.UnsupportedFormatForCorrection f) =
+  ApiError status409 "CORRECTION_UNSUPPORTED_FORMAT"
+    "Results cannot be corrected in this tournament format"
+    (object ["format" .= show f])
+fromCorrect (Correct.SourceMatchNotCompleted s) =
+  ApiError status409 "MATCH_NOT_COMPLETED" "Only a completed match can be corrected"
+    (object ["current" .= show s])
+fromCorrect (Correct.CorrectedParticipantNotInMatch _) =
+  ApiError status400 "PARTICIPANT_NOT_IN_MATCH"
+    "The corrected winner is not a competitor in this match" (object [])
+fromCorrect (Correct.DownstreamMatchStarted mid) =
+  ApiError status409 "DOWNSTREAM_MATCH_STARTED"
+    "A match that depends on this result has already started"
+    (object ["matchId" .= unMatchId mid])
+fromCorrect (Correct.SourceMatchOutcomeInvalid mid) =
+  ApiError status409 "MATCH_OUTCOME_INVALID"
+    "The match's stored outcome cannot be corrected"
+    (object ["matchId" .= unMatchId mid])
+fromCorrect (Correct.CorrectedOutcomeNotAdvanceable _) =
+  ApiError status409 "OUTCOME_NOT_ADVANCEABLE" "This outcome cannot advance the bracket"
+    (object [])
+fromCorrect (Correct.CorrectionIntegrityViolation _) = internalError
+
+fromCorrectEFootball :: CorrectEFootballResultError -> ApiError
+fromCorrectEFootball (EFootballCorrectionFailed e) = fromCorrect e
+
 
 
 -- ===== JSON out =====
@@ -265,6 +298,12 @@ recordViaApi :: UserId -> MatchId -> OutcomeReq
 recordViaApi uid mid req = do
   m <- Repo.getMatch mid
   Record.recordMatchResult uid mid (toOutcome m req)
+
+correctViaApi :: UserId -> MatchId -> OutcomeReq
+              -> SQLiteM (Either Correct.CorrectMatchResultError Match)
+correctViaApi uid mid req = do
+  m <- Repo.getMatch mid
+  Correct.correctMatchResult uid mid (toOutcome m req)
 
 slotJson :: MatchSlot -> Value
 slotJson (Filled p) =
@@ -766,6 +805,24 @@ main = do
         Right req   ->
           runMatchAction lock (\uid mid -> recordViaApi uid mid req) fromRecord $ \m ->
             json (matchJson m)
+
+    put "/matches/:id/result" $ do
+      raw <- body
+      case eitherDecode raw of
+        Left reason -> sendError (invalidBody reason)
+        Right req   ->
+          runMatchAction lock (\uid mid -> correctViaApi uid mid req) fromCorrect $ \m ->
+            json (matchJson m)
+
+    put "/matches/:id/efootball-result" $ do
+      raw <- body
+      case eitherDecode raw of
+        Left reason -> sendError (invalidBody reason)
+        Right (EFootballResultReq scoreA scoreB) ->
+          runMatchAction lock
+            (\uid mid -> correctEFootballResult uid mid scoreA scoreB)
+            fromCorrectEFootball
+            $ \m -> json (matchJson m)
 
     post "/matches/:id/efootball-result" $ do
       raw <- body
