@@ -1,6 +1,8 @@
 module Application.UseCases.RecordEFootballResult
   ( recordEFootballResult
   , RecordEFootballResultError(..)
+  , correctEFootballResult
+  , CorrectEFootballResultError(..)
   ) where
 
 --import Data.Bifunctor (first)
@@ -24,6 +26,10 @@ import qualified Shell.Persistence.Port as Repo
 import Application.UseCases.RecordMatchResult
   ( recordMatchResultInTx
   , RecordMatchResultError
+  )
+import Application.UseCases.CorrectMatchResult
+  ( correctMatchResultInTx
+  , CorrectMatchResultError
   )
 
 data RecordEFootballResultError
@@ -53,6 +59,37 @@ recordEFootballResult currentUser mid scoreA scoreB =
       Right updatedMatch -> do
         Repo.saveEFootballScore mid scoreA scoreB
         pure (Right updatedMatch)
+
+data CorrectEFootballResultError
+  = EFootballCorrectionFailed CorrectMatchResultError
+  deriving (Eq, Show)
+
+-- | Corrects a match's result by supplying new goals. The outcome is derived
+-- from the goals (as in recordEFootballResult), the correction runs through
+-- correctMatchResultInTx, and the new score is written only if it succeeded.
+-- A correction that changes the winner has already dropped the stale score by
+-- then; one that keeps the winner is simply overwritten here.
+correctEFootballResult
+  :: ( EFootballScoreRepository m
+     , MatchRepository m
+     , BracketRepository m
+     , TournamentRepository m
+     , Transactional m
+     )
+  => UserId
+  -> MatchId
+  -> EFootballScore
+  -> EFootballScore
+  -> m (Either CorrectEFootballResultError Match)
+correctEFootballResult currentUser mid scoreA scoreB =
+  withTxEither $ do
+    match <- Repo.getMatch mid
+    r <- correctMatchResultInTx currentUser mid (deriveOutcome match scoreA scoreB)
+    case r of
+      Left err -> pure (Left (EFootballCorrectionFailed err))
+      Right updated -> do
+        Repo.saveEFootballScore mid scoreA scoreB
+        pure (Right updated)
 
 -- | Translates a score comparison into the generic MatchOutcome vocabulary,
 -- using the already-fetched Match to resolve "first"/"second" into the

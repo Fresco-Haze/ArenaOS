@@ -105,6 +105,7 @@ import Application.UseCases.RecordEFootballResult
   (recordEFootballResult, RecordEFootballResultError(..))
 import Domain.Scoreable (mkEFootballScore)
 import Shell.Persistence.SQLite.EFootballScoreRepository ()
+import qualified Application.UseCases.RecordEFootballResult as REF
 import qualified Engine.BracketGeneration as BracketGeneration
 import qualified Engine.Seeding           as Seeding
 import Domain.Bracket (Bracket(..), BracketNode(..), BracketNodeId(..), BracketSide(..), MatchSlot(..),BracketId(..))
@@ -2909,6 +2910,58 @@ spec = before_ resetTestDb $ do
       case result of
         Left err     -> expectationFailure ("runSQLiteM failed: " ++ show err)
         Right stored -> stored `shouldBe` Nothing   -- 3-1 would now contradict the winner
+    it "correctEFootballResult replaces the score, overwrites it when the winner holds, and refuses a tied correction" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "ef-correct-goals-owner"
+        let participants =
+              [ Individual (Player (PlayerName n)) | n <- ["Alice","Bob","Carol","Dave"] ]
+            sc n = either (error "bad score") id (mkEFootballScore n)
+        tid <- createTournament NewTournament
+          { newTournamentName            = TournamentName "EF Correct Goals Cup"
+          , newTournamentOrganizer       = OrganizerName "Test Organizer"
+          , newTournamentOwner           = ownerId
+          , newTournamentFormat          = SingleElimination
+          , newTournamentVisibility      = Public
+          , newTournamentMaxParticipants = 4
+          , newTournamentThirdPlaceMatch = False
+          , newTournamentParticipantMode = IndividualOnly
+          }
+        forM_ participants $ \p -> case p of
+          Individual player -> Repo.savePlayer player
+          Squad team         -> Repo.saveTeam team
+        advanceToRegistrationOpen ownerId tid
+        forM_ participants (\p -> unwrap =<< registerParticipant tid p)
+        _ <- unwrap =<< closeRegistration ownerId tid
+        bracketId <- unwrap =<< generateBracket ownerId tid
+
+        r1 <- Repo.listMatchesForBracket bracketId
+        let m1 = head r1
+            m2 = r1 !! 1
+        forM_ [m1, m2] $ \m -> do
+          _ <- unwrap =<< startMatch ownerId (matchId m)
+          _ <- unwrap =<< recordEFootballResult ownerId (matchId m) (sc 3) (sc 1)
+          pure ()
+
+        -- 1. winner flips, goals supplied: score replaced
+        flipped <- unwrap =<< REF.correctEFootballResult ownerId (matchId m1) (sc 0) (sc 2)
+        s1 <- Repo.getEFootballScore (matchId m1)
+        -- 2. winner holds, goals change: score overwritten
+        _ <- unwrap =<< REF.correctEFootballResult ownerId (matchId m2) (sc 5) (sc 0)
+        s2 <- Repo.getEFootballScore (matchId m2)
+        -- 3. tied goals on an elimination match: refused, stored score untouched
+        tied <- REF.correctEFootballResult ownerId (matchId m1) (sc 2) (sc 2)
+        s1again <- Repo.getEFootballScore (matchId m1)
+
+        pure ( matchOutcome flipped == Just (Winner (matchCompetitorB m1))
+             , s1 == Just (sc 0, sc 2)
+             , s2 == Just (sc 5, sc 0)
+             , fmap (const ()) tied == Left (REF.EFootballCorrectionFailed (CMR.CorrectedOutcomeNotAdvanceable Draw))
+             , s1again == Just (sc 0, sc 2) )
+
+      case result of
+        Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right flags -> flags `shouldBe` (True, True, True, True, True)
     it "rejects correction on a Completed DoubleElim tournament with TournamentAlreadyCompleted, not the format error" $ do
       result <- runSQLiteM testDbPath $ do
         setupSchema
