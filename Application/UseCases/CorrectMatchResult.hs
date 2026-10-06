@@ -1,5 +1,6 @@
 module Application.UseCases.CorrectMatchResult
   ( correctMatchResult
+  , correctMatchResultInTx
   , CorrectMatchResultError(..)
   ) where
 
@@ -14,7 +15,7 @@ import Domain.Participant (Participant)
 import Domain.Ids (UserId)
 
 import Shell.Persistence.Port
-  ( MatchRepository, BracketRepository, TournamentRepository, Transactional(..) )
+  ( MatchRepository, BracketRepository, TournamentRepository, EFootballScoreRepository, Transactional(..) )
 import qualified Shell.Persistence.Port as Repo
 
 import Engine.BracketGeneration (buildTopology, findParent)  -- findParent needs exporting
@@ -43,7 +44,10 @@ data CorrectMatchResultError
   deriving (Eq, Show)
 
 
-correctMatchResult currentUser mid newOutcome = withTxEither $ do
+correctMatchResult currentUser mid newOutcome =
+  withTxEither (correctMatchResultInTx currentUser mid newOutcome)
+
+correctMatchResultInTx currentUser mid newOutcome = do
   match      <- Repo.getMatch mid
   tournament <- Repo.getTournament (matchTournament match)
   case first Unauthorized (requireTournamentOwner currentUser tournament) of
@@ -54,9 +58,25 @@ correctMatchResult currentUser mid newOutcome = withTxEither $ do
         _ -> case first InvalidLifecycle (requireOperationallyActive tournament) of
           Left err -> pure (Left err)
           Right () -> case tournamentFormat tournament of
-            SingleElimination -> guardAdvanceable newOutcome (correctSingleElimination match newOutcome)
-            DoubleElimination -> guardAdvanceable newOutcome (correctDoubleElimination match newOutcome)
+            SingleElimination -> dropStaleScore match newOutcome (guardAdvanceable newOutcome (correctSingleElimination match newOutcome))
+            DoubleElimination -> dropStaleScore match newOutcome (guardAdvanceable newOutcome (correctDoubleElimination match newOutcome))
             format             -> pure (Left (UnsupportedFormatForCorrection format))
+
+-- | A stored eFootball score describes the old result. If the correction changed
+-- the winner it now contradicts the match, so drop it. A correction that
+-- supplies goals writes its own score afterwards (correctEFootballResult).
+dropStaleScore
+  :: EFootballScoreRepository m
+  => Match -> MatchOutcome
+  -> m (Either CorrectMatchResultError Match)
+  -> m (Either CorrectMatchResultError Match)
+dropStaleScore match newOutcome act = do
+  r <- act
+  case r of
+    Right _ | (matchOutcome match >>= correctedParticipant) /= correctedParticipant newOutcome ->
+      Repo.deleteEFootballScore (matchId match)
+    _ -> pure ()
+  pure r
 
 -- | Draw and NoContest carry no advancing participant, so correcting an
 -- elimination match to either would save it and leave the old winner in the

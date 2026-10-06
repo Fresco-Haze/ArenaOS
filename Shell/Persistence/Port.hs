@@ -207,4 +207,5 @@ class Monad m => AuditLogRepository m where
 class Monad m => EFootballScoreRepository m where
   saveEFootballScore :: MatchId -> EFootballScore -> EFootballScore -> m ()
   getEFootballScore   :: MatchId -> m (Maybe (EFootballScore, EFootballScore))
+  deleteEFootballScore :: MatchId -> m ()
 

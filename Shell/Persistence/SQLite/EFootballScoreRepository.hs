@@ -28,6 +28,13 @@ instance EFootballScoreRepository SQLiteM where
       \  competitor_b_score = excluded.competitor_b_score"
       (midInt, unEFootballScore scoreA, unEFootballScore scoreB)
 
+  deleteEFootballScore :: MatchId -> SQLiteM ()
+  deleteEFootballScore (MatchId midInt) = do
+    conn <- asks envConnection
+    liftIO $ execute conn
+      "DELETE FROM efootball_scores WHERE match_id = ?"
+      (Only midInt)
+
   getEFootballScore :: MatchId -> SQLiteM (Maybe (EFootballScore, EFootballScore))
   getEFootballScore (MatchId midInt) = do
     conn <- asks envConnection
