@@ -7,6 +7,7 @@ import { participantName } from '../lib/participants'
 import { formatLabel, stateLabel } from '../model'
 
 import Bracket from '../components/Bracket'
+import PlayerLookup from '../components/PlayerLookup'
 import OrganizerPanel from '../components/OrganizerPanel'
 
 export default function TournamentPage({ id }: { id: string }) {
@@ -91,6 +92,14 @@ export default function TournamentPage({ id }: { id: string }) {
          </ul>
         )}
       </section>
+
+      {bracket && t.state !== 'Cancelled' && (
+        <PlayerLookup
+          bracket={bracket}
+          participants={view.participants}
+          squads={t.participantMode === 'SquadOnly'}
+        />
+      )}
 
       <section className="section">
         <h2>Bracket</h2>

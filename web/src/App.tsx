@@ -17,6 +17,7 @@ function Header() {
       <nav className="nav">
         {user ? (
           <>
+            <Link to="/me">My tournaments</Link>
             <span className="muted">{user.username}</span>
             <button onClick={logout}>Sign out</button>
           </>
