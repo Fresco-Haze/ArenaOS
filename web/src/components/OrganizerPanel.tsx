@@ -61,7 +61,9 @@ function cleanNames(raw: string): string[] {
   return out
 }
 
-function AddManyPlayersForm({ tournamentId, room, onDone }: { tournamentId: number; room: number; onDone: () => Promise<void> }) {
+function AddManyPlayersForm({ tournamentId, room, kind = 'player', onDone }: { tournamentId: number; room: number; kind?: 'player' | 'team'; onDone: () => Promise<void> }) {
+  const squads = kind === 'team'
+  const noun = squads ? 'team' : 'player'
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<ImportResult | null>(null)
@@ -81,13 +83,16 @@ function AddManyPlayersForm({ tournamentId, room, onDone }: { tournamentId: numb
 
     for (let i = 0; i < names.length; i++) {
       try {
-        await addParticipant(tournamentId, names[i])
+        await (squads ? registerSquad : addParticipant)(tournamentId, names[i])
         added++
       } catch (err) {
         if (err instanceof ApiError && err.code === 'ALREADY_REGISTERED') {
           alreadyIn.push(names[i])
-        } else if (err instanceof ApiError && err.code === 'VALIDATION_FAILED') {
-          rejected.push({ name: names[i], why: err.message })
+        } else if (err instanceof ApiError && (err.code === 'VALIDATION_FAILED' || (squads && err.code === 'NOT_FOUND'))) {
+          rejected.push({
+            name: names[i],
+            why: squads && err.code === 'NOT_FOUND' ? 'No team with that name. Create it first.' : err.message,
+          })
         } else {
           // Full, registration closed, session expired, server down:
           // more calls would only fail the same way.
@@ -112,12 +117,12 @@ function AddManyPlayersForm({ tournamentId, room, onDone }: { tournamentId: numb
   return (
     <form onSubmit={handleSubmit} className="inline-form bulk-add">
       <label>
-        Player names
+        {squads ? 'Team names' : 'Player names'}
         <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
           rows={Math.min(Math.max(text.split(/\r?\n/).length, 1), 8)}
-          placeholder="Type a name, or paste a list (one per line)"
+          placeholder={squads ? 'Type a team name, or paste a list (one per line)' : 'Type a name, or paste a list (one per line)'}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault()
@@ -133,7 +138,7 @@ function AddManyPlayersForm({ tournamentId, room, onDone }: { tournamentId: numb
         </p>
       )}
       <button type="submit" disabled={busy || names.length === 0}>
-        {busy ? 'Adding' : names.length > 1 ? 'Add ' + names.length + ' players' : 'Add player'}
+        {busy ? 'Adding' : names.length > 1 ? `Add ${names.length} ${noun}s` : `Add ${noun}`}
       </button>
       {result && (
         <div role="status">
@@ -154,41 +159,6 @@ function AddManyPlayersForm({ tournamentId, room, onDone }: { tournamentId: numb
     </form>
   )
 }
-function RegisterSquadForm({ tournamentId, onDone }: { tournamentId: number; onDone: () => Promise<void> }) {
-  const [teamName, setTeamName] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault()
-    setBusy(true)
-    setError(null)
-    try {
-      await registerSquad(tournamentId, teamName)
-      setTeamName('')
-      await onDone()
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Could not reach the server')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <form onSubmit={handleSubmit} className="inline-form">
-      <label>
-        Team name
-        <input value={teamName} onChange={(e) => setTeamName(e.target.value)} required />
-      </label>
-      <p className="muted">
-        Don't have a team yet? <Link to="/teams/new">Create one</Link>.
-      </p>
-      {error && <p role="alert" className="form-error">{error}</p>}
-      <button type="submit" disabled={busy}>{busy ? 'Registering' : 'Register team'}</button>
-    </form>
-  )
-}
-
 function CancelAction({ tournamentId, onDone }: { tournamentId: number; onDone: () => Promise<void> }) {
   const [open, setOpen] = useState(false)
   const [reason, setReason] = useState('')
@@ -305,7 +275,14 @@ export default function OrganizerPanel({ tournament, bracket, participantCount, 
       {tournament.state === 'RegistrationOpen' && (
         <>
           {tournament.participantMode === 'IndividualOnly' && <AddManyPlayersForm tournamentId={id} room={tournament.maxParticipants - participantCount} onDone={reload} />}
-          {tournament.participantMode === 'SquadOnly' && <RegisterSquadForm tournamentId={id} onDone={reload} />}
+          {tournament.participantMode === 'SquadOnly' && (
+            <>
+              <AddManyPlayersForm tournamentId={id} room={tournament.maxParticipants - participantCount} kind="team" onDone={reload} />
+              <p className="muted">
+                Don't have a team yet? <Link to="/teams/new">Create one</Link>.
+              </p>
+            </>
+          )}
           <div className="action-row">
             <CloseRegistrationAction tournamentId={id} participantCount={participantCount} unit={tournament.participantMode === 'SquadOnly' ? 'teams' : 'players'} onDone={reload} />
             <CancelAction tournamentId={id} onDone={reload} />
