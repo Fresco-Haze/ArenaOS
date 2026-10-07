@@ -68,6 +68,27 @@ export function createTournament(input: {
   })
 }
 
+export function updateName(id: number, name: string) {
+  return apiVoid(`/tournaments/${id}/name`, {
+    method: 'PUT',
+    body: JSON.stringify({ name }),
+  })
+}
+
+export function updateVisibility(id: number, visibility: 'Public' | 'Private') {
+  return apiVoid(`/tournaments/${id}/visibility`, {
+    method: 'PUT',
+    body: JSON.stringify({ visibility }),
+  })
+}
+
+export function updateMaxParticipants(id: number, maxParticipants: number) {
+  return apiVoid(`/tournaments/${id}/max-participants`, {
+    method: 'PUT',
+    body: JSON.stringify({ maxParticipants }),
+  })
+}
+
 export function setThirdPlaceMatch(id: number, enabled: boolean) {
   return apiVoid(`/tournaments/${id}/third-place-match`, {
     method: 'POST',

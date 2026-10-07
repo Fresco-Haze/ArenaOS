@@ -72,6 +72,9 @@ import qualified Application.UseCases.CancelTournament as Cancel
 import Domain.TournamentError (TournamentError(..))
 import qualified Application.UseCases.ListPublicTournaments as ListPublic
 import qualified Application.UseCases.UpdateTournamentThirdPlaceMatch as UTTP
+import qualified Application.UseCases.UpdateTournamentName as UTN
+import qualified Application.UseCases.UpdateTournamentMaxParticipants as UTM
+import qualified Application.UseCases.UpdateTournamentVisibility as UTV
 import Shell.Persistence.SQLite.Connection (SQLiteM, SQLiteEnv(envConnection), runSQLiteM)
 import Shell.Persistence.SQLite.Schema (initializeSchema)
 import Control.Monad.Reader (ask)
@@ -587,6 +590,43 @@ fromUpdateThirdPlaceMatch UTTP.BracketAlreadyGenerated =
     "The third-place setting can't change once the bracket exists" (object [])
 
 
+data NameReq = NameReq String
+
+instance FromJSON NameReq where
+  parseJSON = withObject "name" $ \o -> NameReq <$> o .: "name"
+
+data VisibilityReq = VisibilityReq Visibility
+
+instance FromJSON VisibilityReq where
+  parseJSON = withObject "visibility" $ \o -> do
+    v <- o .: "visibility"
+    case (v :: Text) of
+      "Public"  -> pure (VisibilityReq Public)
+      "Private" -> pure (VisibilityReq Private)
+      _ -> fail "visibility must be Public or Private"
+
+data MaxReq = MaxReq Int
+
+instance FromJSON MaxReq where
+  parseJSON = withObject "max" $ \o -> MaxReq <$> o .: "maxParticipants"
+
+fromUpdateName :: UTN.UpdateTournamentNameError -> ApiError
+fromUpdateName (UTN.Unauthorized a)      = fromAuthorization a
+fromUpdateName (UTN.InvalidLifecycle l)  = fromLifecycle l
+fromUpdateName (UTN.InvalidTournament v) = fromValidation v
+
+fromUpdateVisibility :: UTV.UpdateTournamentVisibilityError -> ApiError
+fromUpdateVisibility (UTV.Unauthorized a)     = fromAuthorization a
+fromUpdateVisibility (UTV.InvalidLifecycle l) = fromLifecycle l
+
+fromUpdateMax :: UTM.UpdateTournamentMaxParticipantsError -> ApiError
+fromUpdateMax (UTM.Unauthorized a)      = fromAuthorization a
+fromUpdateMax (UTM.InvalidLifecycle l)  = fromLifecycle l
+fromUpdateMax (UTM.InvalidTournament v) = fromValidation v
+fromUpdateMax UTM.BelowRegistrationCount =
+  ApiError status409 "BELOW_REGISTRATION_COUNT"
+    "More players or teams are already registered than that" (object [])
+
 data Env = Env
   { envLock   :: MVar ()
   , envTokens :: IORef (Map.Map Text UserId)
@@ -974,6 +1014,30 @@ main = do
           case result of
             Left apiErr -> sendError apiErr
             Right ts    -> json (object ["tournaments" .= map tournamentJson ts])
+
+    put "/tournaments/:id/name" $ do
+      raw <- body
+      case eitherDecode raw of
+        Left reason -> sendError (invalidBody reason)
+        Right (NameReq n) ->
+          runTransition lock
+            (\uid tid -> UTN.updateTournamentName uid tid (TournamentName n)) fromUpdateName
+
+    put "/tournaments/:id/visibility" $ do
+      raw <- body
+      case eitherDecode raw of
+        Left reason -> sendError (invalidBody reason)
+        Right (VisibilityReq v) ->
+          runTransition lock
+            (\uid tid -> UTV.updateTournamentVisibility uid tid v) fromUpdateVisibility
+
+    put "/tournaments/:id/max-participants" $ do
+      raw <- body
+      case eitherDecode raw of
+        Left reason -> sendError (invalidBody reason)
+        Right (MaxReq n) ->
+          runTransition lock
+            (\uid tid -> UTM.updateTournamentMaxParticipants uid tid n) fromUpdateMax
 
     post "/tournaments/:id/third-place-match" $ do
       raw <- body
