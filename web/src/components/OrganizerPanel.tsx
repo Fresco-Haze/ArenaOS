@@ -8,7 +8,7 @@ import { actionableMatches, isBracketDecided } from '../lib/bracket'
 import {
   publish, openRegistration, addParticipant, registerSquad, closeRegistration,
   generateBracket, startTournament, completeTournament, cancelTournament,
-  setThirdPlaceMatch, listTeams,
+  setThirdPlaceMatch, listTeams, updateName, updateVisibility, updateMaxParticipants,
 } from '../lib/tournamentActions'
 import type { BracketView, Team, Tournament } from '../model'
 
@@ -283,6 +283,92 @@ function ThirdPlaceToggle({ tournament, onDone }: { tournament: Tournament; onDo
   )
 }
 
+function EditDetails({ tournament, registeredCount, onDone }: {
+  tournament: Tournament
+  registeredCount: number
+  onDone: () => Promise<void>
+}) {
+  const canEditMax = ['Draft', 'Published', 'RegistrationOpen'].includes(tournament.state)
+  const [name, setName] = useState(tournament.name)
+  const [visibility, setVisibility] = useState<'Public' | 'Private'>(tournament.visibility)
+  const [max, setMax] = useState(String(tournament.maxParticipants))
+  const [busy, setBusy] = useState(false)
+  const [problems, setProblems] = useState<string[]>([])
+  const [saved, setSaved] = useState(false)
+
+  const changed =
+    name.trim() !== tournament.name ||
+    visibility !== tournament.visibility ||
+    (canEditMax && Number(max) !== tournament.maxParticipants)
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault()
+    setBusy(true)
+    setProblems([])
+    setSaved(false)
+    const found: string[] = []
+    async function attempt(label: string, run: () => Promise<void>) {
+      try {
+        await run()
+      } catch (err) {
+        found.push(`${label}: ${err instanceof ApiError ? err.message : 'Could not reach the server'}`)
+      }
+    }
+    if (name.trim() !== tournament.name) {
+      await attempt('Name', () => updateName(tournament.tournamentId, name.trim()))
+    }
+    if (visibility !== tournament.visibility) {
+      await attempt('Visibility', () => updateVisibility(tournament.tournamentId, visibility))
+    }
+    if (canEditMax && Number(max) !== tournament.maxParticipants) {
+      if (!Number.isInteger(Number(max))) found.push('Maximum: enter a whole number')
+      else await attempt('Maximum', () => updateMaxParticipants(tournament.tournamentId, Number(max)))
+    }
+    setProblems(found)
+    setSaved(found.length === 0)
+    try {
+      await onDone()
+    } catch {
+      // the page shows its own refresh error
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <details className="edit-details">
+      <summary>Edit details</summary>
+      <form onSubmit={handleSubmit} className="inline-form bulk-add">
+        <label>
+          Name
+          <input value={name} onChange={(e) => setName(e.target.value)} />
+        </label>
+        <label>
+          Visibility
+          <select value={visibility} onChange={(e) => setVisibility(e.target.value as 'Public' | 'Private')}>
+            <option value="Public">Public</option>
+            <option value="Private">Private</option>
+          </select>
+        </label>
+        {canEditMax && (
+          <>
+            <label>
+              Maximum {tournament.participantMode === 'SquadOnly' ? 'teams' : 'players'}
+              <input type="number" min={2} value={max} onChange={(e) => setMax(e.target.value)} />
+            </label>
+            <p className="muted">Can't go below the {registeredCount} already registered.</p>
+          </>
+        )}
+        {problems.map((p) => (
+          <p key={p} role="alert" className="form-error">{p}</p>
+        ))}
+        {saved && <p role="status">Saved.</p>}
+        <button type="submit" disabled={busy || !changed}>{busy ? 'Saving' : 'Save changes'}</button>
+      </form>
+    </details>
+  )
+}
+
 type Props = {
   tournament: Tournament
   bracket: BracketView | null
@@ -303,6 +389,10 @@ export default function OrganizerPanel({ tournament, bracket, participantCount, 
           (tournament.state === 'RegistrationClosed' && !tournament.bracketId)) && (
           <ThirdPlaceToggle tournament={tournament} onDone={reload} />
        )}
+
+      {['Draft', 'Published', 'RegistrationOpen', 'RegistrationClosed'].includes(tournament.state) && (
+        <EditDetails tournament={tournament} registeredCount={participantCount} onDone={reload} />
+      )}
 
       {tournament.state === 'Draft' && (
         <div className="action-row">
