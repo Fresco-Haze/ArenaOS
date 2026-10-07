@@ -9,6 +9,7 @@ import {
   publish, openRegistration, addParticipant, registerSquad, closeRegistration,
   generateBracket, startTournament, completeTournament, cancelTournament,
   setThirdPlaceMatch, listTeams, updateName, updateVisibility, updateMaxParticipants,
+  pauseTournament, resumeTournament, reopenTournament,
 } from '../lib/tournamentActions'
 import type { BracketView, Team, Tournament } from '../model'
 
@@ -204,6 +205,38 @@ function AddManyPlayersForm({ tournamentId, room, kind = 'player', registered = 
     </form>
   )
 }
+function ReopenAction({ tournamentId, onDone }: { tournamentId: number; onDone: () => Promise<void> }) {
+  const [open, setOpen] = useState(false)
+  const [reason, setReason] = useState('')
+
+  return (
+    <>
+      <button onClick={() => setOpen(true)}>Reopen tournament</button>
+      <ConfirmDialog
+        open={open}
+        title="Reopen tournament"
+        confirmLabel="Reopen tournament"
+        confirmDisabled={reason.trim() === ''}
+        onConfirm={async () => {
+          await reopenTournament(tournamentId, reason.trim())
+          setReason('')
+          await onDone()
+        }}
+        onClose={() => setOpen(false)}
+      >
+        <p>
+          Reopening puts the tournament back in progress so results can be corrected. The reason is kept in
+          its history.
+        </p>
+        <label>
+          Reason
+          <textarea value={reason} onChange={(e) => setReason(e.target.value)} required />
+        </label>
+      </ConfirmDialog>
+    </>
+  )
+}
+
 function CancelAction({ tournamentId, onDone }: { tournamentId: number; onDone: () => Promise<void> }) {
   const [open, setOpen] = useState(false)
   const [reason, setReason] = useState('')
@@ -474,12 +507,29 @@ export default function OrganizerPanel({ tournament, bracket, participantCount, 
                     : 'Complete becomes available once the final is decided.'}
               </p>
             )}
+            <ActionButton label="Pause tournament" onRun={async () => { await pauseTournament(id); await reload() }} />
             <CancelAction tournamentId={id} onDone={reload} />
           </div>
         </>
       )}
 
-      {(tournament.state === 'Paused' || tournament.state === 'Completed' || tournament.state === 'Cancelled') && (
+      {tournament.state === 'Paused' && (
+        <>
+          <p className="muted">The tournament is paused. Results can't be recorded until you resume it.</p>
+          <div className="action-row">
+            <ActionButton label="Resume tournament" onRun={async () => { await resumeTournament(id); await reload() }} />
+            <CancelAction tournamentId={id} onDone={reload} />
+          </div>
+        </>
+      )}
+
+      {tournament.state === 'Completed' && (
+        <div className="action-row">
+          <ReopenAction tournamentId={id} onDone={reload} />
+        </div>
+      )}
+
+      {tournament.state === 'Cancelled' && (
         <p className="muted">No further actions are available.</p>
       )}
     </section>
