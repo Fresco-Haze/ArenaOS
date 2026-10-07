@@ -75,6 +75,9 @@ import qualified Application.UseCases.UpdateTournamentThirdPlaceMatch as UTTP
 import qualified Application.UseCases.UpdateTournamentName as UTN
 import qualified Application.UseCases.UpdateTournamentMaxParticipants as UTM
 import qualified Application.UseCases.UpdateTournamentVisibility as UTV
+import qualified Application.UseCases.PauseTournament as PauseT
+import qualified Application.UseCases.ResumeTournament as ResumeT
+import qualified Application.UseCases.ReopenTournament as ReopenT
 import Shell.Persistence.SQLite.Connection (SQLiteM, SQLiteEnv(envConnection), runSQLiteM)
 import Shell.Persistence.SQLite.Schema (initializeSchema)
 import Control.Monad.Reader (ask)
@@ -627,6 +630,26 @@ fromUpdateMax UTM.BelowRegistrationCount =
   ApiError status409 "BELOW_REGISTRATION_COUNT"
     "More players or teams are already registered than that" (object [])
 
+data ReopenReq = ReopenReq String
+
+instance FromJSON ReopenReq where
+  parseJSON = withObject "reopen" $ \o -> ReopenReq <$> o .: "reason"
+
+fromPause :: PauseT.PauseTournamentError -> ApiError
+fromPause (PauseT.Unauthorized a)     = fromAuthorization a
+fromPause (PauseT.InvalidLifecycle l) = fromLifecycle l
+
+fromResume :: ResumeT.ResumeTournamentError -> ApiError
+fromResume (ResumeT.Unauthorized a)     = fromAuthorization a
+fromResume (ResumeT.InvalidLifecycle l) = fromLifecycle l
+
+fromReopen :: ReopenT.ReopenTournamentError -> ApiError
+fromReopen (ReopenT.Unauthorized a)     = fromAuthorization a
+fromReopen (ReopenT.InvalidLifecycle l) = fromLifecycle l
+fromReopen ReopenT.EmptyReopeningReason =
+  ApiError status400 "VALIDATION_FAILED" "A reason is required to reopen a tournament"
+    (object ["field" .= ("reason" :: Text)])
+
 data Env = Env
   { envLock   :: MVar ()
   , envTokens :: IORef (Map.Map Text UserId)
@@ -1038,6 +1061,20 @@ main = do
         Right (MaxReq n) ->
           runTransition lock
             (\uid tid -> UTM.updateTournamentMaxParticipants uid tid n) fromUpdateMax
+
+    post "/tournaments/:id/pause" $
+      runTransition lock PauseT.pauseTournament fromPause
+
+    post "/tournaments/:id/resume" $
+      runTransition lock ResumeT.resumeTournament fromResume
+
+    post "/tournaments/:id/reopen" $ do
+      raw <- body
+      case eitherDecode raw of
+        Left reason -> sendError (invalidBody reason)
+        Right (ReopenReq r) ->
+          runTransition lock
+            (\uid tid -> ReopenT.reopenTournament uid tid r) fromReopen
 
     post "/tournaments/:id/third-place-match" $ do
       raw <- body

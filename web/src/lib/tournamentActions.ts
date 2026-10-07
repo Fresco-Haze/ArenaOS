@@ -89,6 +89,21 @@ export function updateMaxParticipants(id: number, maxParticipants: number) {
   })
 }
 
+export function pauseTournament(id: number) {
+  return apiVoid(`/tournaments/${id}/pause`, { method: 'POST' })
+}
+
+export function resumeTournament(id: number) {
+  return apiVoid(`/tournaments/${id}/resume`, { method: 'POST' })
+}
+
+export function reopenTournament(id: number, reason: string) {
+  return apiVoid(`/tournaments/${id}/reopen`, {
+    method: 'POST',
+    body: JSON.stringify({ reason }),
+  })
+}
+
 export function setThirdPlaceMatch(id: number, enabled: boolean) {
   return apiVoid(`/tournaments/${id}/third-place-match`, {
     method: 'POST',
