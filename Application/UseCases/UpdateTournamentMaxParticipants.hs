@@ -12,11 +12,13 @@ import qualified Shell.Persistence.Port as Repo
 
 import Application.Internal.Authorization (AuthorizationError, requireTournamentOwner)
 import Application.Internal.LifecycleTransition (LifecycleError, requireTournamentStateNotIn)
+import Engine.TournamentValidation (TournamentValidationError, validateMaxParticipants)
 
 data UpdateTournamentMaxParticipantsError
     = Unauthorized AuthorizationError
     | InvalidLifecycle LifecycleError
     | BelowRegistrationCount
+    | InvalidTournament TournamentValidationError
     deriving (Eq, Show)
 
 updateTournamentMaxParticipants
@@ -32,7 +34,9 @@ updateTournamentMaxParticipants currentUser tid newMax = do
         Right () ->
             case requireTournamentStateNotIn [InProgress, Completed, Cancelled] tournament of
                 Left err -> pure (Left (InvalidLifecycle err))
-                Right () -> do
+                Right () -> case validateMaxParticipants newMax of
+                  Left err -> pure (Left (InvalidTournament err))
+                  Right () -> do
                     registrations <- Repo.listRegistrations tid
                     if newMax < length registrations
                         then pure (Left BelowRegistrationCount)

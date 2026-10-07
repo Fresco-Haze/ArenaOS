@@ -1,6 +1,8 @@
 module Engine.TournamentValidation
   ( TournamentValidationError(..)
   , validateTournamentFields
+  , validateTournamentName
+  , validateMaxParticipants
   , ParticipantValidationError(..)
   , validateParticipant
   , validateThirdPlaceMatch
@@ -27,6 +29,16 @@ validateTournamentFields (TournamentName name) (OrganizerName org) maxP
   | isBlank org  = Left EmptyOrganizer
   | maxP < 2     = Left (MaxParticipantsTooLow maxP)
   | otherwise    = Right ()
+
+validateTournamentName :: TournamentName -> Either TournamentValidationError ()
+validateTournamentName (TournamentName name)
+  | isBlank name = Left EmptyName
+  | otherwise    = Right ()
+
+validateMaxParticipants :: Int -> Either TournamentValidationError ()
+validateMaxParticipants maxP
+  | maxP < 2  = Left (MaxParticipantsTooLow maxP)
+  | otherwise = Right ()
 
 validateThirdPlaceMatch
   :: TournamentFormat -> Bool -> Either TournamentValidationError ()

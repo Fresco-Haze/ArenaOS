@@ -106,6 +106,8 @@ import Application.UseCases.RecordEFootballResult
 import Domain.Scoreable (mkEFootballScore)
 import Shell.Persistence.SQLite.EFootballScoreRepository ()
 import qualified Application.UseCases.RecordEFootballResult as REF
+import qualified Application.UseCases.UpdateTournamentName as UTN
+import qualified Application.UseCases.UpdateTournamentMaxParticipants as UTM
 import qualified Domain.Participant as DPart
 import qualified Engine.BracketGeneration as BracketGeneration
 import qualified Engine.Seeding           as Seeding
@@ -2978,6 +2980,55 @@ spec = before_ resetTestDb $ do
       case result of
         Left err    -> expectationFailure ("runSQLiteM failed: " ++ show err)
         Right names -> names `shouldBe` ["Alphas", "bears", "zebras"]
+    it "updateTournamentName rejects a blank name and leaves the tournament unchanged" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "upd-name-owner"
+        tid <- createTournament NewTournament
+          { newTournamentName            = TournamentName "Original Cup"
+          , newTournamentOrganizer       = OrganizerName "Test Organizer"
+          , newTournamentOwner           = ownerId
+          , newTournamentFormat          = SingleElimination
+          , newTournamentVisibility      = Public
+          , newTournamentMaxParticipants = 8
+          , newTournamentThirdPlaceMatch = False
+          , newTournamentParticipantMode = IndividualOnly
+          }
+        before <- Repo.getTournament tid
+        r      <- UTN.updateTournamentName ownerId tid (TournamentName "   ")
+        after  <- Repo.getTournament tid
+        pure (r, before, after)
+      case result of
+        Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right (r, before, after) -> do
+          r     `shouldSatisfy` either (const True) (const False)
+          after `shouldBe` before
+
+    it "updateTournamentMaxParticipants rejects a maximum below 2 and leaves the tournament unchanged" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "upd-max-owner"
+        tid <- createTournament NewTournament
+          { newTournamentName            = TournamentName "Max Cup"
+          , newTournamentOrganizer       = OrganizerName "Test Organizer"
+          , newTournamentOwner           = ownerId
+          , newTournamentFormat          = SingleElimination
+          , newTournamentVisibility      = Public
+          , newTournamentMaxParticipants = 8
+          , newTournamentThirdPlaceMatch = False
+          , newTournamentParticipantMode = IndividualOnly
+          }
+        before <- Repo.getTournament tid
+        r0     <- UTM.updateTournamentMaxParticipants ownerId tid 0
+        r1     <- UTM.updateTournamentMaxParticipants ownerId tid (-5)
+        after  <- Repo.getTournament tid
+        pure (r0, r1, before, after)
+      case result of
+        Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right (r0, r1, before, after) -> do
+          r0    `shouldSatisfy` either (const True) (const False)
+          r1    `shouldSatisfy` either (const True) (const False)
+          after `shouldBe` before
     it "rejects correction on a Completed DoubleElim tournament with TournamentAlreadyCompleted, not the format error" $ do
       result <- runSQLiteM testDbPath $ do
         setupSchema
