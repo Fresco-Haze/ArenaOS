@@ -677,3 +677,9 @@ button:hover:not(:disabled),
 }
 .title-row h1 { margin: 0; }
 .match-status .badge { margin-right: var(--space-1); }
+
+.danger-zone {
+  margin-top: var(--space-8);
+  padding-top: var(--space-4);
+  border-top: 1px dashed var(--line);
+}

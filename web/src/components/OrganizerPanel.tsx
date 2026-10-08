@@ -13,7 +13,7 @@ import {
 } from '../lib/tournamentActions'
 import type { BracketView, Team, Tournament } from '../model'
 
-function ActionButton({ label, busyLabel, onRun }: { label: string; busyLabel?: string; onRun: () => Promise<void> }) {
+function ActionButton({ label, busyLabel, onRun, primary }: { label: string; busyLabel?: string; primary?: boolean; onRun: () => Promise<void> }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -31,7 +31,7 @@ function ActionButton({ label, busyLabel, onRun }: { label: string; busyLabel?: 
 
   return (
     <div className="action-item">
-      <button onClick={handle} disabled={busy}>{busy ? (busyLabel ?? 'Working') : label}</button>
+      <button className={primary ? 'btn-primary' : undefined} onClick={handle} disabled={busy}>{busy ? (busyLabel ?? 'Working') : label}</button>
       {error && <p role="alert" className="form-error">{error}</p>}
     </div>
   )
@@ -183,7 +183,7 @@ function AddManyPlayersForm({ tournamentId, room, kind = 'player', registered = 
           {names.length > room && ` - room for ${Math.max(room, 0)} more, the rest will stay in the box`}
         </p>
       )}
-      <button type="submit" className="btn-primary" disabled={busy || names.length === 0}>
+      <button type="submit" disabled={busy || names.length === 0}>
         {busy ? 'Adding' : names.length > 1 ? `Add ${names.length} ${noun}s` : `Add ${noun}`}
       </button>
       {result && (
@@ -269,7 +269,7 @@ function CloseRegistrationAction({ tournamentId, participantCount, unit, onDone 
   const [open, setOpen] = useState(false)
   return (
     <>
-      <button onClick={() => setOpen(true)}>Close registration</button>
+      <button className="btn-primary" onClick={() => setOpen(true)}>Close registration</button>
       <ConfirmDialog
         open={open}
         title="Close registration"
@@ -429,15 +429,13 @@ export default function OrganizerPanel({ tournament, bracket, participantCount, 
 
       {tournament.state === 'Draft' && (
         <div className="action-row">
-          <ActionButton label="Publish" onRun={async () => { await publish(id); await reload() }} />
-          <CancelAction tournamentId={id} onDone={reload} />
+          <ActionButton primary label="Publish" onRun={async () => { await publish(id); await reload() }} />
         </div>
       )}
 
       {tournament.state === 'Published' && (
         <div className="action-row">
-          <ActionButton label="Open registration" onRun={async () => { await openRegistration(id); await reload() }} />
-          <CancelAction tournamentId={id} onDone={reload} />
+          <ActionButton primary label="Open registration" onRun={async () => { await openRegistration(id); await reload() }} />
         </div>
       )}
 
@@ -454,7 +452,6 @@ export default function OrganizerPanel({ tournament, bracket, participantCount, 
           )}
           <div className="action-row">
             <CloseRegistrationAction tournamentId={id} participantCount={participantCount} unit={tournament.participantMode === 'SquadOnly' ? 'teams' : 'players'} onDone={reload} />
-            <CancelAction tournamentId={id} onDone={reload} />
           </div>
         </>
       )}
@@ -462,10 +459,9 @@ export default function OrganizerPanel({ tournament, bracket, participantCount, 
       {tournament.state === 'RegistrationClosed' && (
         <div className="action-row">
           {!tournament.bracketId && (
-            <ActionButton label="Generate bracket" onRun={async () => { await generateBracket(id); await reload() }} />
+            <ActionButton primary label="Generate bracket" onRun={async () => { await generateBracket(id); await reload() }} />
           )}
-          <ActionButton label="Start tournament" onRun={async () => { await startTournament(id); await reload() }} />
-          <CancelAction tournamentId={id} onDone={reload} />
+          <ActionButton primary={!!tournament.bracketId} label="Start tournament" onRun={async () => { await startTournament(id); await reload() }} />
         </div>
       )}
 
@@ -497,7 +493,7 @@ export default function OrganizerPanel({ tournament, bracket, participantCount, 
           })()}
           <div className="action-row">
             {isBracketDecided(bracket) ? (
-              <ActionButton label="Complete tournament" onRun={async () => { await completeTournament(id); await reload() }} />
+              <ActionButton primary label="Complete tournament" onRun={async () => { await completeTournament(id); await reload() }} />
             ) : (
               <p className="muted">
                 {bracket.thirdPlaceNodeId !== null
@@ -508,7 +504,6 @@ export default function OrganizerPanel({ tournament, bracket, participantCount, 
               </p>
             )}
             <ActionButton label="Pause tournament" onRun={async () => { await pauseTournament(id); await reload() }} />
-            <CancelAction tournamentId={id} onDone={reload} />
           </div>
         </>
       )}
@@ -517,8 +512,7 @@ export default function OrganizerPanel({ tournament, bracket, participantCount, 
         <>
           <p className="muted">The tournament is paused. Results can't be recorded until you resume it.</p>
           <div className="action-row">
-            <ActionButton label="Resume tournament" onRun={async () => { await resumeTournament(id); await reload() }} />
-            <CancelAction tournamentId={id} onDone={reload} />
+            <ActionButton primary label="Resume tournament" onRun={async () => { await resumeTournament(id); await reload() }} />
           </div>
         </>
       )}
@@ -532,6 +526,10 @@ export default function OrganizerPanel({ tournament, bracket, participantCount, 
       {tournament.state === 'Cancelled' && (
         <p className="muted">No further actions are available.</p>
       )}
-    </section>
+      {!['Completed', 'Cancelled'].includes(tournament.state) && (
+        <div className="danger-zone">
+          <CancelAction tournamentId={id} onDone={reload} />
+        </div>
+      )}    </section>
   )
 }
