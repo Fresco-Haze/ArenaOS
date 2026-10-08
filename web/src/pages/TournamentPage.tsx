@@ -84,12 +84,12 @@ export default function TournamentPage({ id }: { id: string }) {
             {t.participantMode === 'SquadOnly' ? 'No teams have registered yet.' : 'No players have registered yet.'}
           </p>
         ) : (
-        <ul className="plain-list">
+        <ul className="participants">
            {view.participants.map((p, i) => (
              <li key={i}>
-               {participantName(p)}
+                <span className="participant-name">{participantName(p)}</span>
                {p.type === 'Squad' && (
-                 <span className="muted"> — {p.team.members.join(', ')}</span>
+                 <span className="participant-members">{p.team.members.join(', ')}</span>
                )}
              </li>
            ))}
