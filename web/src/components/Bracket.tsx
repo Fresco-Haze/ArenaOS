@@ -1,3 +1,4 @@
+import { matchBadge } from '../badges'
 import type { BracketNode, BracketView } from '../model'
 import { buildNodeLabels, champion, groupByRound, roundName, slotLabel, splitThirdPlace } from '../lib/bracket'
 import { buildDoubleElimLabels, doubleElimChampion, placements, sectionRoundNames, splitDoubleElim } from '../lib/bracket'
@@ -28,6 +29,19 @@ function statusText(node: BracketNode): string {
   return 'Waiting for competitors'
 }
 
+function MatchStatus({ node }: { node: BracketNode }) {
+  const text = statusText(node)
+  const m = /^(Scheduled|Completed)( for .+| \(.+)$/.exec(text)
+  const label = m ? m[1] : text
+  const detail = m ? m[2] : ''
+  const tone = (node.match && matchBadge[node.match.status]) || 'badge-neutral'
+  return (
+    <>
+      <span className={'badge ' + tone}>{label}</span>
+      <span>{detail}</span>
+    </>
+  )
+}
 function SlotRow({ label, isWinner, score }: { label: string; isWinner: boolean; score?: number }) {
   return (
     <div className={isWinner ? 'slot slot-winner' : 'slot'}>
@@ -46,7 +60,7 @@ function NodeCard({ node, nodeLabels }: { node: BracketNode; nodeLabels: Map<num
     <div className="match-card">
       <SlotRow label={slotLabel(node.slotA, nodeLabels)} isWinner={winSide === 'A'} score={node.score?.a} />
       <SlotRow label={slotLabel(node.slotB, nodeLabels)} isWinner={winSide === 'B'} score={node.score?.b} />
-      <p className="match-status">{statusText(node)}</p>
+      <p className="match-status"><MatchStatus node={node} /></p>
     </div>
   )
 }

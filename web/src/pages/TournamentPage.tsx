@@ -1,3 +1,4 @@
+import { stateBadge } from '../badges'
 import { Link } from 'react-router'
 
 import { useAuth } from '../auth/context'
@@ -59,10 +60,13 @@ export default function TournamentPage({ id }: { id: string }) {
 
   return (
     <>
-      <h1>{t.name}</h1>
+      <div className="title-row">
+        <h1>{t.name}</h1>
+        <span className={'badge ' + stateBadge[t.state]}>{stateLabel[t.state]}</span>
+      </div>
 
       <p className="meta">
-        {stateLabel[t.state]} · {formatLabel[t.format]} · up to{' '}
+        {formatLabel[t.format]} · up to{' '}
         {t.maxParticipants} {t.participantMode === 'SquadOnly' ? 'teams' : 'players'}
       </p>
 
