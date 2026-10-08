@@ -80,7 +80,7 @@ export default function MatchActions({
       {error && <p role="alert" className="form-error">{error}</p>}
       {match.status === 'Scheduled' && (
         <>
-          <button onClick={handleStart} disabled={busy}>
+          <button className="btn-primary" onClick={handleStart} disabled={busy}>
             {busy ? 'Starting' : 'Start match'}
           </button>
           {match.scheduledStart && (

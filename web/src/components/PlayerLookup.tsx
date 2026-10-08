@@ -19,7 +19,7 @@ export default function PlayerLookup({
   return (
     <section className="section" aria-label="Find your match">
       <h2>Find your match</h2>
-      <label>
+      <label className="stack-label">
         {squads ? 'Your name or team name' : 'Your name'}
         <input
           value={query}

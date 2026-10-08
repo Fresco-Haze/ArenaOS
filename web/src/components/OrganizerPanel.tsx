@@ -183,7 +183,7 @@ function AddManyPlayersForm({ tournamentId, room, kind = 'player', registered = 
           {names.length > room && ` - room for ${Math.max(room, 0)} more, the rest will stay in the box`}
         </p>
       )}
-      <button type="submit" disabled={busy || names.length === 0}>
+      <button type="submit" className="btn-primary" disabled={busy || names.length === 0}>
         {busy ? 'Adding' : names.length > 1 ? `Add ${names.length} ${noun}s` : `Add ${noun}`}
       </button>
       {result && (
@@ -243,11 +243,11 @@ function CancelAction({ tournamentId, onDone }: { tournamentId: number; onDone: 
 
   return (
     <>
-      <button onClick={() => setOpen(true)}>Cancel tournament</button>
+      <button className="btn-danger" onClick={() => setOpen(true)}>Cancel tournament</button>
       <ConfirmDialog
         open={open}
         title="Cancel tournament"
-        confirmLabel="Cancel tournament"
+        confirmLabel="Cancel tournament" danger
         onConfirm={async () => {
           await cancelTournament(tournamentId, reason)
           setReason('')
@@ -396,7 +396,7 @@ function EditDetails({ tournament, registeredCount, onDone }: {
           <p key={p} role="alert" className="form-error">{p}</p>
         ))}
         {saved && <p role="status">Saved.</p>}
-        <button type="submit" disabled={busy || !changed}>{busy ? 'Saving' : 'Save changes'}</button>
+        <button type="submit" className="btn-primary" disabled={busy || !changed}>{busy ? 'Saving' : 'Save changes'}</button>
       </form>
     </details>
   )

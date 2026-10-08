@@ -9,10 +9,10 @@ type Props = {
   onConfirm: () => Promise<void>
   onClose: () => void
   children?: ReactNode
-  confirmDisabled?: boolean
+  confirmDisabled?: boolean; danger?: boolean
 }
 
-export default function ConfirmDialog({ open, title, confirmLabel, onConfirm, onClose, children, confirmDisabled }: Props) {
+export default function ConfirmDialog({ open, title, confirmLabel, onConfirm, onClose, children, confirmDisabled, danger }: Props) {
   const ref = useRef<HTMLDialogElement>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -53,7 +53,7 @@ export default function ConfirmDialog({ open, title, confirmLabel, onConfirm, on
       {error && <p role="alert" className="form-error">{error}</p>}
       <div className="dialog-actions">
         <button onClick={onClose} disabled={busy}>Cancel</button>
-        <button onClick={handleConfirm} disabled={busy || confirmDisabled}>
+        <button className={danger ? 'btn-danger' : 'btn-primary'} onClick={handleConfirm} disabled={busy || confirmDisabled}>
           {busy ? 'Working' : confirmLabel}
         </button>
       </div>

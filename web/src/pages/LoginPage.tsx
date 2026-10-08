@@ -58,7 +58,7 @@ export default function LoginPage() {
           />
         </label>
         {error && <p role="alert" className="form-error">{error}</p>}
-        <button type="submit" disabled={busy}>
+        <button type="submit" className="btn-primary" disabled={busy}>
           {busy ? 'Signing in' : 'Sign in'}
         </button>
       </form>

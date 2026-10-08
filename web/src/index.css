@@ -1,4 +1,23 @@
 :root {
+  --radius: 6px;
+  --radius-lg: 8px;
+  --font-sm: 0.875rem;
+  --font-base: 1rem;
+  --font-lg: 1.125rem;
+  --font-xl: 1.5rem;
+  --on-accent: #ffffff;
+  --success: #1e7a3c;
+  --warning: #8a5a00;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --on-accent: #0b0b0b;
+    --success: #7ddc9a;
+    --warning: #ffc857;
+  }
+}
+:root {
   --bg: #ffffff;
   --surface: #f6f6f4;
   --text: #1a1a1a;
@@ -38,7 +57,7 @@ body {
 a { color: var(--accent); }
 
 .page {
-  max-width: 720px;
+  max-width: var(--page-width);
   margin: 0 auto;
   padding: var(--space-6) var(--space-4);
 }
@@ -70,7 +89,7 @@ h2 { font-size: 1.125rem; margin: 0 0 var(--space-1); }
 
 .card {
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius);
   padding: var(--space-4);
   background: var(--surface);
 }
@@ -81,7 +100,7 @@ button {
   font: inherit;
   padding: var(--space-2) var(--space-4);
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--surface);
   color: var(--text);
   cursor: pointer;
@@ -133,7 +152,7 @@ input {
   font: inherit;
   padding: var(--space-2) var(--space-3);
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--bg);
   color: var(--text);
 }
@@ -155,7 +174,7 @@ button:disabled {
   margin: 0 0 var(--space-4);
   padding: var(--space-3) var(--space-4);
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--surface);
 }
 
@@ -210,7 +229,7 @@ button:disabled {
 
 .match-card {
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius);
   padding: var(--space-3);
   background: var(--surface);
 }
@@ -261,7 +280,7 @@ button:disabled {
 }
 .dialog {
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   padding: var(--space-4);
   background: var(--surface);
   color: var(--text);
@@ -284,7 +303,7 @@ textarea {
   font: inherit;
   padding: var(--space-2) var(--space-3);
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--bg);
   color: var(--text);
   width: 100%;
@@ -332,7 +351,7 @@ textarea {
 
 .match-actions {
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius);
   padding: var(--space-3);
   background: var(--surface);
 }
@@ -364,7 +383,7 @@ textarea {
   display: inline-block;
   padding: var(--space-2) var(--space-4);
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--surface);
   color: var(--text);
   text-decoration: none;
@@ -380,7 +399,7 @@ textarea {
   margin: 0 0 var(--space-4);
   padding: var(--space-3) var(--space-4);
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--surface);
   color: var(--text);
 }
@@ -440,7 +459,7 @@ textarea {
   margin: var(--space-3) 0 0;
   padding: var(--space-3);
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius);
 }
 
 .dialog fieldset label {
@@ -480,7 +499,7 @@ textarea {
   margin: 0;
   padding: var(--space-2) var(--space-3);
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius);
 }
 
 .form fieldset label {
@@ -551,3 +570,85 @@ textarea {
 
 /* wrap button rows (team picker, player lookup) */
 .match-actions-buttons { flex-wrap: wrap; }
+
+/* mobile pass (390px): fixes only what breaks or is awkward */
+body { overflow-wrap: break-word; }
+
+.dialog {
+  max-height: 90vh;
+  max-height: 90dvh;
+  overflow-y: auto;
+}
+
+input, select, textarea { max-width: 100%; }
+
+select {
+  font: inherit;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+}
+
+@media (max-width: 600px) {
+  .site-header { flex-wrap: wrap; gap: var(--space-2) var(--space-4); }
+  .nav { flex-wrap: wrap; gap: var(--space-2) var(--space-3); }
+  .notice, .toolbar, .page-header-row { flex-wrap: wrap; }
+
+  button,
+  .button-link,
+  select,
+  input:not([type='radio']):not([type='checkbox']) { min-height: 2.75rem; }
+
+  .score-stepper button { width: 2.75rem; height: 2.75rem; }
+  .score-row { flex-wrap: wrap; }
+  .score-name { min-width: 0; }
+
+  .form fieldset label,
+  .dialog fieldset label { padding: var(--space-2) 0; }
+  input[type='radio'], input[type='checkbox'] { width: 1.25rem; height: 1.25rem; }
+
+  summary { padding: var(--space-2) 0; }
+  .dialog-actions button { flex: 1; }
+}
+
+.stack-label { display: grid; gap: var(--space-1); }
+
+/* mobile pass 2: date input row, form paragraph gaps */
+.form > p { margin: 0; }
+
+@media (max-width: 600px) {
+  .match-actions-buttons input[type='datetime-local'] {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+}
+/* global shell: width, header, buttons */
+:root { --page-width: 960px; }
+
+.brand { font-size: var(--font-lg); letter-spacing: -0.01em; }
+
+.nav a {
+  color: var(--muted);
+  text-decoration: none;
+}
+.nav a:hover { color: var(--text); text-decoration: underline; }
+
+button:hover:not(:disabled),
+.button-link:hover { border-color: var(--accent); }
+
+.btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+}
+.btn-primary:hover:not(:disabled) { filter: brightness(1.1); }
+
+.btn-danger {
+  color: var(--danger);
+  border-color: var(--danger);
+  background: transparent;
+}
+.btn-danger:hover:not(:disabled) { background: var(--danger); color: var(--bg); }
