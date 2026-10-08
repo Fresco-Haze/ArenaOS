@@ -86,7 +86,7 @@ export default function MatchActions({
           {match.scheduledStart && (
             <p className="muted">Starts {new Date(match.scheduledStart).toLocaleString()}</p>
           )}
-          <div className="match-actions-buttons">
+          <details className="schedule-details"><summary>Set start time</summary><div className="match-actions-buttons">
             <input
               type="datetime-local"
               value={when}
@@ -101,13 +101,13 @@ export default function MatchActions({
                 Clear time
               </button>
             )}
-          </div>
+          </div></details>
         </>
       )}
       {match.status === 'InProgress' && (
         <div className="match-actions-buttons">
+          <button className="btn-primary" onClick={() => setWinnerDialogOpen(true)}>Declare result</button>
           <button onClick={() => setScoreDialogOpen(true)}>Record score</button>
-          <button onClick={() => setWinnerDialogOpen(true)}>Declare result</button>
         </div>
       )}
       {match.status === 'Completed' && format !== 'RoundRobin' && (

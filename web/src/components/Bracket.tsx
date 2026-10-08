@@ -71,8 +71,8 @@ function Standings({ bracket }: { bracket: BracketView }) {
   return (
     <div className="standings">
       <h3 className="bracket-section-heading">Final standings</h3>
-      {list.map((p) => (
-        <div key={p.place} className="standing-row">
+      {list.map((p, i) => (
+        <div key={p.place} className={i === 0 ? 'standing-row standing-first' : 'standing-row'}>
           <span className="standing-place">{p.place}</span>
           <span>{p.names.join(', ')}</span>
         </div>

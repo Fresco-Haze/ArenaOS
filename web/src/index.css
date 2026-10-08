@@ -729,3 +729,30 @@ button:hover:not(:disabled),
   color: var(--muted);
   font-size: var(--font-sm);
 }
+/* final standings */
+.standings {
+  display: grid;
+  gap: var(--space-2);
+  max-width: 28rem;
+}
+.standing-row {
+  align-items: center;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.standing-first {
+  border-color: var(--accent);
+  font-size: var(--font-lg);
+  font-weight: 700;
+}
+.standing-first .standing-place { color: var(--accent); }
+/* match scheduling toggle */
+.schedule-details { margin-top: var(--space-2); }
+.schedule-details summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: var(--font-sm);
+}
+.schedule-details .match-actions-buttons { margin-top: var(--space-2); }
