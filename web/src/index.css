@@ -23,7 +23,7 @@
   --text: #1a1a1a;
   --muted: #5c5c57;
   --line: #d9d9d4;
-  --accent: #0b5cad;
+  --accent: #7c3aed;
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -41,7 +41,7 @@
     --text: #ececea;
     --muted: #a3a39d;
     --line: #3a3a37;
-    --accent: #6db1ff;
+    --accent: #a78bfa;
   }
 }
 
@@ -849,3 +849,25 @@ button:hover:not(:disabled),
 /* wordmark spacing: override older tracked-out rule */
 .logo .logo-text { letter-spacing: -0.01em; }
 .logo-glyph { margin-right: -0.04em; }
+/* palette: charcoal + slate, cobalt for primary actions, ice blue for live/focus */
+:root {
+  --accent: #2563eb;
+  --brand: #2563eb;
+  --brand-solid: #2563eb;
+  --brand-2: #0ea5e9;
+  --info: #0369a1;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #09090b;
+    --surface: #18181b;
+    --line: #27272a;
+    --text: #fafafa;
+    --muted: #a1a1aa;
+    --accent: #38bdf8;
+    --brand: #2563eb;
+    --brand-solid: #2563eb;
+    --brand-2: #38bdf8;
+    --info: #38bdf8;
+  }
+}
