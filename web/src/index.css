@@ -878,3 +878,61 @@ button:hover:not(:disabled),
 h1, h2, h3 { font-family: var(--font-heading); }
 h1 { font-size: 2rem; font-weight: 700; line-height: 1.15; }
 h2, h3 { font-weight: 600; }
+/* tournament card */
+.tournament-card { transition: border-color 0.12s ease; }
+.tournament-card:hover { border-color: var(--brand); }
+.card-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-3);
+}
+.card-title-row h2 { margin: 0; min-width: 0; }
+.card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-4);
+  margin: var(--space-2) 0 0;
+  color: var(--muted);
+  font-size: 0.9375rem;
+}
+.card-meta-item { display: inline-flex; align-items: center; gap: var(--space-2); }
+.meta-icon {
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.tournament-card .meta { margin-top: var(--space-2); }
+/* tournament card */
+.tournament-card { transition: border-color 0.12s ease; }
+.tournament-card:hover { border-color: var(--brand); }
+.card-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-3);
+}
+.card-title-row h2 { margin: 0; min-width: 0; }
+.card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-4);
+  margin: var(--space-2) 0 0;
+  color: var(--muted);
+  font-size: 0.9375rem;
+}
+.card-meta-item { display: inline-flex; align-items: center; gap: var(--space-2); }
+.meta-icon {
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.tournament-card .meta { margin-top: var(--space-2); }

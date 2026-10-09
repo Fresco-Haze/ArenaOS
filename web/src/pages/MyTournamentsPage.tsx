@@ -1,7 +1,8 @@
+import TournamentCard from '../components/TournamentCard'
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router'
 import { api, ApiError } from '../api'
-import { TournamentList, formatLabel, stateLabel } from '../model'
+import { TournamentList, } from '../model'
 import type { Tournament } from '../model'
 
 export default function MyTournamentsPage() {
@@ -51,14 +52,7 @@ export default function MyTournamentsPage() {
       ) : (
         <ul className="cards">
           {items.map((t) => (
-            <li key={t.tournamentId} className="card">
-              <h2>
-                <Link to={`/tournaments/${t.tournamentId}`}>{t.name}</Link>
-              </h2>
-              <p className="meta">
-                {stateLabel[t.state]} · {formatLabel[t.format]} · up to {t.maxParticipants} {t.participantMode === 'SquadOnly' ? 'teams' : 'players'}
-              </p>
-            </li>
+            <TournamentCard key={t.tournamentId} tournament={t} />
           ))}
         </ul>
       )}
