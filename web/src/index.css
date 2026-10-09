@@ -769,8 +769,83 @@ button:hover:not(:disabled),
   stroke-linecap: round;
   stroke-linejoin: round;
 }
-.logo-mark circle { fill: var(--accent); }
+.logo-mark circle { fill: none; stroke: var(--accent); stroke-width: 2.5; }
 .logo-text { font-weight: 700; letter-spacing: -0.01em; }
-@media (max-width: 320px) {
-  .logo-text { display: none; }
+
+/* custom A in the wordmark */
+.logo-a {
+  display: inline-block;
+  height: 0.78em;
+  width: 0.65em;
+  margin-right: 0.04em;
+  overflow: visible;
 }
+.logo-a path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 3.2;
+  stroke-miterlimit: 10;
+  stroke-linejoin: miter;
+}
+/* A with two crossing bars (overrides earlier .logo-a) */
+.logo-a {
+  height: 0.72em;
+  width: 0.72em;
+  margin-right: 0.03em;
+}
+.logo-a path {
+  stroke-width: 3.4;
+  stroke-linecap: butt;
+}
+/* ArenaOS A mark */
+:root { --brand: #8b2cf5; }
+@media (prefers-color-scheme: dark) {
+  :root { --brand: #b06bff; }
+}
+.logo-glyph .logo-a-shape { fill: currentColor; }
+.logo-glyph .logo-slashes { fill: none; stroke: var(--brand); stroke-width: 5; }
+.logo-text { letter-spacing: 0.1em; font-weight: 800; }
+/* A is the first letter of the wordmark */
+.brand { font-size: 1.3rem; }
+.logo {
+  display: inline-block;
+  white-space: nowrap;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  line-height: 1;
+}
+.logo-glyph {
+  width: 0.82em;
+  height: 0.82em;
+  vertical-align: -0.077em;
+  margin-right: 0.06em;
+  overflow: visible;
+}
+.logo-text { display: inline; }
+/* ArenaOS wordmark: custom A + rena + OS */
+:root { --brand: #7c3aed; --brand-2: #9b4dff; }
+@media (prefers-color-scheme: dark) {
+  :root { --brand: #8b5cf6; --brand-2: #b07cff; }
+}
+.brand { font-size: 1.5rem; }
+.logo {
+  display: inline-block;
+  white-space: nowrap;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  line-height: 1;
+}
+.logo-glyph {
+  width: 1.03em;
+  height: 0.85em;
+  vertical-align: -0.077em;
+  margin-right: -0.02em;
+  overflow: visible;
+}
+.logo-glyph .logo-a-shape { fill: currentColor; stroke: none; }
+.logo-glyph .logo-blade-1 { fill: var(--brand-2); stroke: none; }
+.logo-glyph .logo-blade-2 { fill: var(--brand); stroke: none; }
+.logo-os { color: var(--brand); }
+/* wordmark spacing: override older tracked-out rule */
+.logo .logo-text { letter-spacing: -0.01em; }
+.logo-glyph { margin-right: -0.04em; }
