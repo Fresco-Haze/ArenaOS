@@ -8,12 +8,13 @@ import ProtectedRoute from './components/ProtectedRoute'
 import MyTournamentsPage from './pages/MyTournamentsPage'
 import CreateTournamentPage from './pages/CreateTournamentPage'
 import CreateTeamPage from './pages/CreateTeamPage'
+import Logo from './components/Logo'
 
 function Header() {
   const { user, logout } = useAuth()
   return (
     <header className="site-header">
-      <Link to="/" className="brand">ArenaOS</Link>
+      <Link to="/" className="brand" aria-label="ArenaOS home"><Logo /></Link>
       <nav className="nav">
         {user ? (
           <>
