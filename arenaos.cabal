@@ -134,6 +134,7 @@ test-suite arenaos-test
                     , mtl
                     , text
                     , time
+                    , containers
     default-language: Haskell2010
 
 executable arenaos-api

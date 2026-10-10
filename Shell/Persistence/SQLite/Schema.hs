@@ -203,4 +203,15 @@ statements =
   , "CREATE INDEX IF NOT EXISTS idx_nodes_bracket             ON bracket_nodes(bracket_id)"
   , "CREATE INDEX IF NOT EXISTS idx_team_members_team         ON team_members(team_id)"
   , "CREATE UNIQUE INDEX IF NOT EXISTS idx_teams_name_nocase ON teams(name COLLATE NOCASE)"
+  , "CREATE TABLE IF NOT EXISTS bracket_links ( \
+    \  node_id        INTEGER PRIMARY KEY REFERENCES bracket_nodes(id), \
+    \  bracket_id     INTEGER NOT NULL REFERENCES brackets(id), \
+    \  winner_node_id INTEGER REFERENCES bracket_nodes(id), \
+    \  winner_slot    TEXT CHECK (winner_slot IN ('A', 'B')), \
+    \  loser_node_id  INTEGER REFERENCES bracket_nodes(id), \
+    \  loser_slot     TEXT CHECK (loser_slot IN ('A', 'B')), \
+    \  CHECK ((winner_node_id IS NULL) = (winner_slot IS NULL)), \
+    \  CHECK ((loser_node_id IS NULL) = (loser_slot IS NULL)) \
+    \)"
+  , "CREATE INDEX IF NOT EXISTS idx_links_bracket ON bracket_links(bracket_id)"
   ]

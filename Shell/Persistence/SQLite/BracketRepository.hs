@@ -8,6 +8,7 @@ import Control.Monad (forM_, foldM, when)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Reader (asks)
 import Data.Int (Int64)
+import Data.List (sort)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text, unpack)
@@ -22,6 +23,7 @@ import Shell.Persistence.SQLite.Error (PersistenceError(..))
 import Shell.Persistence.SQLite.ParticipantRepository ()
 import Shell.Persistence.SQLite.Common (lookupParticipantId)
 import Domain.Ids(BracketNodeId(..), BracketId(..))
+import Domain.BracketLinks (BracketLinks, NodeDestination(..), NodeLinks(..), SlotPosition(..))
 
 
 instance BracketRepository SQLiteM where
@@ -48,6 +50,7 @@ instance BracketRepository SQLiteM where
             "UPDATE brackets SET tournament_id = ? WHERE id = ?"
             (tid, bid)
 
+        liftIO $ execute conn "DELETE FROM bracket_links WHERE bracket_id = ?" (Only bid)
         liftIO $ execute conn
             "DELETE FROM bracket_nodes WHERE bracket_id = ?"
             (Only bid)
@@ -133,6 +136,7 @@ instance BracketRepository SQLiteM where
     deleteBracket :: BracketId -> SQLiteM ()
     deleteBracket (BracketId bid) = withTxM $ do
         conn <- asks envConnection
+        liftIO $ execute conn "DELETE FROM bracket_links WHERE bracket_id = ?" (Only bid)
         liftIO $ execute conn "DELETE FROM bracket_nodes WHERE bracket_id = ?" (Only bid)
         liftIO $ execute conn "DELETE FROM brackets WHERE id = ?" (Only bid)
         n <- liftIO $ changes conn
@@ -155,6 +159,59 @@ instance BracketRepository SQLiteM where
       when (n == 0) $
         liftIO $ throwIO (NotFound ("Bracket node not found in storage: " ++ show nid))
 
+
+    -- Persist the link set of a just-saved bracket. Links are keyed by DOMAIN
+    -- node ids (as generated); idMap is the map saveBracket returned (domain id ->
+    -- stored id). Everything is validated before the first insert, so a rejected
+    -- save writes nothing. No transaction of its own: the caller owns it.
+    saveBracketLinks :: BracketId -> Map BracketNodeId BracketNodeId -> BracketLinks -> SQLiteM ()
+    saveBracketLinks (BracketId bid) idMap links = do
+        conn <- asks envConnection
+        -- 1. coverage, in domain ids: every mapped node is named exactly once
+        let linkIds = sort (map fst links)
+        when (or (zipWith (==) linkIds (drop 1 linkIds))) $
+            failStorage "bracket links list a node more than once"
+        when (linkIds /= Map.keys idMap) $
+            failStorage "bracket links do not cover exactly the saved nodes"
+        -- 2. ownership, in stored ids: the map's values must be exactly the rows
+        --    stored under this bracket (no extras, no strays, no shared ids)
+        owned <- liftIO (query conn
+            "SELECT id FROM bracket_nodes WHERE bracket_id = ? ORDER BY id"
+            (Only bid) :: IO [Only Int64])
+        when (sort (map storedId (Map.elems idMap)) /= [ i | Only i <- owned ]) $
+            failStorage "the id map is not exactly the set of nodes stored for this bracket"
+        -- 3. translation: every source and destination goes through the map
+        rows <- case mapM (linkRow idMap) links of
+            Left why -> failStorage why
+            Right rs -> pure rs
+        liftIO $ forM_ rows $ \(nodeSid, wNode, wSlot, lNode, lSlot) ->
+            execute conn
+                "INSERT INTO bracket_links \
+                \  (node_id, bracket_id, winner_node_id, winner_slot, loser_node_id, loser_slot) \
+                \VALUES (?, ?, ?, ?, ?, ?)"
+                (nodeSid, bid, wNode, wSlot, lNode, lSlot)
+
+    -- Nothing when no link rows exist. Otherwise the rows must cover exactly this
+    -- bracket's nodes, every destination must be one of them, and every slot must
+    -- decode; anything else is a StorageFailure, never a partial answer.
+    getBracketLinks :: BracketId -> SQLiteM (Maybe BracketLinks)
+    getBracketLinks (BracketId bid) = do
+        conn <- asks envConnection
+        rows <- liftIO (query conn
+            "SELECT node_id, winner_node_id, winner_slot, loser_node_id, loser_slot \
+            \FROM bracket_links WHERE bracket_id = ? ORDER BY node_id"
+            (Only bid) :: IO [LinkRow])
+        case rows of
+            [] -> pure Nothing
+            _  -> do
+                nodeRows <- liftIO (query conn
+                    "SELECT id FROM bracket_nodes WHERE bracket_id = ? ORDER BY id"
+                    (Only bid) :: IO [Only Int64])
+                let nodeIds = [ i | Only i <- nodeRows ]
+                when (nodeIds /= [ i | (i, _, _, _, _) <- rows ]) $
+                    failStorage "bracket links do not cover exactly the bracket's nodes"
+                links <- liftIO (mapM (hydrateLinks nodeIds) rows)
+                pure (Just links)
 
 -- Private helpers -----------------------------------------------------------
 
@@ -214,3 +271,53 @@ textToSide other     = liftIO $ throwIO $ StorageFailure ("Unknown bracket stage
 bracketSideToString :: BracketSide -> Text
 bracketSideToString Winners = "Winners"
 bracketSideToString Losers  = "Losers"
+
+-- Bracket links helpers -----------------------------------------------------
+
+failStorage :: String -> SQLiteM a
+failStorage msg = liftIO (throwIO (StorageFailure msg))
+
+storedId :: BracketNodeId -> Int64
+storedId (BracketNodeId n) = fromIntegral n
+
+type LinkRow = (Int64, Maybe Int64, Maybe Text, Maybe Int64, Maybe Text)
+
+encodeSlotPosition :: SlotPosition -> Text
+encodeSlotPosition SlotA = "A"
+encodeSlotPosition SlotB = "B"
+
+decodeSlotPosition :: Text -> IO SlotPosition
+decodeSlotPosition "A"   = pure SlotA
+decodeSlotPosition "B"   = pure SlotB
+decodeSlotPosition other = throwIO (StorageFailure ("Unknown link slot in storage: " ++ show other))
+
+linkRow :: Map BracketNodeId BracketNodeId -> (BracketNodeId, NodeLinks) -> Either String LinkRow
+linkRow idMap (src, NodeLinks w l) = do
+    s  <- toStored "source" src
+    wd <- traverse toDest w
+    ld <- traverse toDest l
+    pure (s, fst <$> wd, snd <$> wd, fst <$> ld, snd <$> ld)
+  where
+    toStored :: String -> BracketNodeId -> Either String Int64
+    toStored what nid = case Map.lookup nid idMap of
+        Just sid -> Right (storedId sid)
+        Nothing  -> Left ("bracket link " ++ what ++ " " ++ show nid ++ " is not a saved node")
+    toDest :: NodeDestination -> Either String (Int64, Text)
+    toDest (NodeDestination n pos) = do
+        sid <- toStored "destination" n
+        pure (sid, encodeSlotPosition pos)
+
+hydrateLinks :: [Int64] -> LinkRow -> IO (BracketNodeId, NodeLinks)
+hydrateLinks nodeIds (nid, wNode, wSlot, lNode, lSlot) = do
+    w <- hydrateDest "winner" wNode wSlot
+    l <- hydrateDest "loser" lNode lSlot
+    pure (BracketNodeId (fromIntegral nid), NodeLinks w l)
+  where
+    hydrateDest :: String -> Maybe Int64 -> Maybe Text -> IO (Maybe NodeDestination)
+    hydrateDest _ Nothing Nothing = pure Nothing
+    hydrateDest what (Just d) (Just s)
+        | d `elem` nodeIds = do
+            pos <- decodeSlotPosition s
+            pure (Just (NodeDestination (BracketNodeId (fromIntegral d)) pos))
+        | otherwise = throwIO (StorageFailure ("link " ++ what ++ " destination " ++ show d ++ " is not a node of this bracket"))
+    hydrateDest what _ _ = throwIO (StorageFailure ("link " ++ what ++ " destination is half-set in storage"))

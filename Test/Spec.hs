@@ -164,6 +164,8 @@ import qualified Engine.BracketLinks as BLEng
 import qualified Engine.ByeResolution as BLBye
 import qualified Engine.Correction.DoubleEliminationLineage as BLLD
 import qualified Engine.Seeding as BLSeed
+import qualified Data.Map.Strict as BLMap
+import qualified Database.SQLite.Simple as BLSql
 
 
 data TestTxError = TestTxError deriving (Eq, Show)
@@ -271,6 +273,7 @@ spec :: Spec
 spec = before_ resetTestDb $ do
 
   bracketLinksSpec
+  bracketLinksStoreSpec
   describe "Tournament Lifecycle (4-participant golden scenario)" $
     it "runs the full pipeline from creation to completion" $ do
       result <- runSQLiteM testDbPath $ do
@@ -7053,3 +7056,179 @@ bracketLinksSpec = describe "Engine.BracketLinks.deriveLinks" $ do
     mapM_ (blDeSpec True) [4, 8, 16]
     mapM_ (blDeSpec False) [5, 6, 7]
     blErrorSpec
+
+-- ---------------------------------------------------------------------
+-- Bracket links (step 2): persistence. Stored node ids are deliberately
+-- offset from domain ids by saving a throwaway bracket first.
+-- ---------------------------------------------------------------------
+
+bsTournament :: Text -> SQLiteM TournamentId
+bsTournament label = do
+  ownerId <- createTestUser label
+  Repo.createTournament NewTournament
+    { newTournamentName            = TournamentName "bs links"
+    , newTournamentOrganizer       = OrganizerName "Test Organizer"
+    , newTournamentOwner           = ownerId
+    , newTournamentFormat          = SingleElimination
+    , newTournamentVisibility      = Public
+    , newTournamentMaxParticipants = 8
+    , newTournamentThirdPlaceMatch = False
+    , newTournamentParticipantMode = IndividualOnly
+    }
+
+bsTemplate :: [BLBr.BracketNode]
+bsTemplate = BLGen.buildTopology 8
+
+bsLinks :: BLLin.BracketLinks
+bsLinks = blDerive bsTemplate
+
+bsBracket :: TournamentId -> BLIds.BracketId -> BLBr.Bracket
+bsBracket tid bid = BLBr.Bracket
+  { BLBr.bracketId = bid
+  , BLBr.bracketTournament = tid
+  , BLBr.bracketGF1NodeId = Nothing
+  , BLBr.bracketResetNodeId = Nothing
+  , BLBr.bracketThirdPlaceNodeId = Nothing
+  }
+
+bsSave :: TournamentId -> SQLiteM (BLIds.BracketId, BLMap.Map BLIds.BracketNodeId BLIds.BracketNodeId)
+bsSave tid = do
+  bid <- Repo.createBracket tid
+  idMap <- Repo.saveBracket (bsBracket tid bid) bsTemplate
+  pure (bid, idMap)
+
+-- domain-keyed links translated into stored ids, ordered by stored id
+bsTranslate :: BLMap.Map BLIds.BracketNodeId BLIds.BracketNodeId -> BLLin.BracketLinks -> BLLin.BracketLinks
+bsTranslate idMap links = BLList.sortOn fst
+  [ (at k, BLLin.NodeLinks (dest <$> BLLin.linkWinnerTo l) (dest <$> BLLin.linkLoserTo l)) | (k, l) <- links ]
+  where
+    at k = idMap BLMap.! k
+    dest d = d { BLLin.destNode = at (BLLin.destNode d) }
+
+bsExpectStorageFailure :: Show a => Either PersistenceError a -> Expectation
+bsExpectStorageFailure (Left (StorageFailure _)) = pure ()
+bsExpectStorageFailure other = expectationFailure ("expected StorageFailure, got: " ++ show other)
+
+bsExpectNothing :: Show a => Either PersistenceError (Maybe a) -> Expectation
+bsExpectNothing (Right Nothing) = pure ()
+bsExpectNothing other = expectationFailure ("expected Right Nothing, got: " ++ show other)
+
+bsUnknownDest :: BLLin.BracketLinks
+bsUnknownDest =
+  [ (k, if k == blId 1 then l { BLLin.linkWinnerTo = Just (BLLin.NodeDestination (blId 99) BLLin.SlotA) } else l)
+  | (k, l) <- bsLinks ]
+
+bsDuplicate :: BLLin.BracketLinks
+bsDuplicate = take (length bsLinks - 1) bsLinks ++ take 1 bsLinks
+
+bsRejectsSpec :: String -> BLLin.BracketLinks -> Spec
+bsRejectsSpec label bad =
+  it ("saving links that " ++ label ++ " is rejected and writes nothing") $ do
+    setup <- runSQLiteM testDbPath $ do
+      setupSchema
+      tid <- bsTournament "bs-owner"
+      bsSave tid
+    case setup of
+      Left err -> expectationFailure (show err)
+      Right (bid, idMap) -> do
+        rejected <- runSQLiteM testDbPath (Repo.saveBracketLinks bid idMap bad)
+        bsExpectStorageFailure rejected
+        after <- runSQLiteM testDbPath (Repo.getBracketLinks bid)
+        bsExpectNothing after
+
+bracketLinksStoreSpec :: Spec
+bracketLinksStoreSpec = describe "BracketRepository bracket links (offset ids)" $ do
+  it "round trip with offset ids: links are keyed by stored ids and agree with the stored pointers" $ do
+    result <- runSQLiteM testDbPath $ do
+      setupSchema
+      throwawayTid <- bsTournament "bs-owner-1"
+      targetTid <- bsTournament "bs-owner-2"
+      (throwawayBid, _) <- bsSave throwawayTid
+      (bid, idMap) <- bsSave targetTid
+      Repo.saveBracketLinks bid idMap bsLinks
+      stored <- Repo.getBracketLinks bid
+      throwawayLinks <- Repo.getBracketLinks throwawayBid
+      (_, nodes) <- Repo.getBracket bid
+      pure (idMap, stored, throwawayLinks, nodes)
+    case result of
+      Left err -> expectationFailure (show err)
+      Right (idMap, stored, throwawayLinks, nodes) -> do
+        [ k | (k, v) <- BLMap.toList idMap, k == v ] `shouldBe` []
+        throwawayLinks `shouldBe` Nothing
+        stored `shouldBe` Just (bsTranslate idMap bsLinks)
+        fmap (blConsistent nodes) stored `shouldBe` Just True
+        fmap (map fst) stored `shouldBe` Just (BLList.sort (map BLBr.nodeId nodes))
+
+  it "a bracket with no stored links reads as unavailable" $ do
+    result <- runSQLiteM testDbPath $ do
+      setupSchema
+      tid <- bsTournament "bs-owner"
+      (bid, _) <- bsSave tid
+      Repo.getBracketLinks bid
+    bsExpectNothing result
+
+  it "a missing link row makes the read fail instead of returning a partial set" $ do
+    result <- runSQLiteM testDbPath $ do
+      setupSchema
+      tid <- bsTournament "bs-owner"
+      (bid, idMap) <- bsSave tid
+      Repo.saveBracketLinks bid idMap bsLinks
+      env <- ask
+      liftIO $ execute (envConnection env) "DELETE FROM bracket_links WHERE node_id = ?"
+        (Only (BLIds.unBracketNodeId (idMap BLMap.! blId 1)))
+      Repo.getBracketLinks bid
+    bsExpectStorageFailure result
+
+  it "a slot that is not A or B in storage fails the read" $ do
+    result <- runSQLiteM testDbPath $ do
+      setupSchema
+      tid <- bsTournament "bs-owner"
+      (bid, idMap) <- bsSave tid
+      Repo.saveBracketLinks bid idMap bsLinks
+      env <- ask
+      let conn = envConnection env
+      liftIO $ BLSql.execute_ conn "PRAGMA ignore_check_constraints = ON"
+      liftIO $ execute conn "UPDATE bracket_links SET winner_slot = 'Z' WHERE node_id = ?"
+        (Only (BLIds.unBracketNodeId (idMap BLMap.! blId 1)))
+      liftIO $ BLSql.execute_ conn "PRAGMA ignore_check_constraints = OFF"
+      Repo.getBracketLinks bid
+    bsExpectStorageFailure result
+
+  it "a destination that belongs to another bracket fails the read" $ do
+    result <- runSQLiteM testDbPath $ do
+      setupSchema
+      tid <- bsTournament "bs-owner"
+      (_, otherMap) <- bsSave tid
+      (bid, idMap) <- bsSave tid
+      Repo.saveBracketLinks bid idMap bsLinks
+      env <- ask
+      liftIO $ execute (envConnection env)
+        "UPDATE bracket_links SET winner_node_id = ?, winner_slot = 'A' WHERE node_id = ?"
+        ( BLIds.unBracketNodeId (otherMap BLMap.! blId 1)
+        , BLIds.unBracketNodeId (idMap BLMap.! blId 1) )
+      Repo.getBracketLinks bid
+    bsExpectStorageFailure result
+
+  bsRejectsSpec "miss a node" (drop 1 bsLinks)
+  bsRejectsSpec "name a destination that was never saved" bsUnknownDest
+  bsRejectsSpec "list a node twice" bsDuplicate
+
+  it "deleting a bracket deletes its links" $ do
+    result <- runSQLiteM testDbPath $ do
+      setupSchema
+      tid <- bsTournament "bs-owner"
+      (bid, idMap) <- bsSave tid
+      Repo.saveBracketLinks bid idMap bsLinks
+      Repo.deleteBracket bid
+      Repo.getBracketLinks bid
+    bsExpectNothing result
+
+  it "saving a bracket's nodes again clears the links that pointed at the old ones" $ do
+    result <- runSQLiteM testDbPath $ do
+      setupSchema
+      tid <- bsTournament "bs-owner"
+      (bid, idMap) <- bsSave tid
+      Repo.saveBracketLinks bid idMap bsLinks
+      _ <- Repo.saveBracket (bsBracket tid bid) bsTemplate
+      Repo.getBracketLinks bid
+    bsExpectNothing result

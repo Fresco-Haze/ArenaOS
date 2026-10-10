@@ -44,6 +44,7 @@ import Domain.Tournament (Tournament, TournamentId, TournamentName, OrganizerNam
  , ParticipantMode)
 import Domain.Registration (Registration, RegistrationId)
 import Domain.Bracket (Bracket, BracketId, BracketNode, BracketNodeId)
+import Domain.BracketLinks (BracketLinks)
 import Domain.Match (Match, MatchId)
 import Domain.User (User(..), Username(..), Email(..), PasswordHash(..), AccountStatus(..))
 import Domain.Ids ( UserId(..))
@@ -146,6 +147,13 @@ class Monad m => BracketRepository m where
     getBracket    :: BracketId -> m (Bracket, [BracketNode])
     updateNodeSlots :: BracketNode -> m ()
     deleteBracket :: BracketId -> m ()
+    -- Persist the link set of a just-saved bracket. Links are keyed by DOMAIN
+    -- node ids (as generated); the Map is the one saveBracket returned
+    -- (domain id -> stored id), and every id is translated through it.
+    saveBracketLinks :: BracketId -> Map BracketNodeId BracketNodeId -> BracketLinks -> m ()
+    -- Nothing = no links stored (unavailable). Just = a complete, verified set
+    -- keyed by STORED node ids (the ids the API exposes), ordered by stored id.
+    getBracketLinks :: BracketId -> m (Maybe BracketLinks)
 
 data NewMatch = NewMatch
     { newMatchTournament  :: TournamentId
