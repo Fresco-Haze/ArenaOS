@@ -22,6 +22,8 @@ library
                       Engine.Error
                       Engine.Validation
                       Engine.BracketGeneration
+                      Engine.BracketLinks
+                      Domain.BracketLinks
                       Engine.Seeding
                       Engine.ByeResolution
                       Engine.Advancement

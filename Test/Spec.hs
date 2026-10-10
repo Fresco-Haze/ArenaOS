@@ -154,6 +154,16 @@ import Application.Internal.Authorization (AuthorizationError(..), requireAdmini
 import qualified Application.UseCases.ListPublicTournaments as LP
 import Application.UseCases.UpdateTournamentThirdPlaceMatch (updateTournamentThirdPlaceMatch, UpdateTournamentThirdPlaceMatchError(..))
 import qualified Application.UseCases.UpdateTournamentThirdPlaceMatch as UTTP
+import qualified Control.Monad as BLM
+import qualified Data.List as BLList
+import qualified Domain.Bracket as BLBr
+import qualified Domain.BracketLinks as BLLin
+import qualified Domain.Ids as BLIds
+import qualified Engine.BracketGeneration as BLGen
+import qualified Engine.BracketLinks as BLEng
+import qualified Engine.ByeResolution as BLBye
+import qualified Engine.Correction.DoubleEliminationLineage as BLLD
+import qualified Engine.Seeding as BLSeed
 
 
 data TestTxError = TestTxError deriving (Eq, Show)
@@ -260,6 +270,7 @@ main = do
 spec :: Spec
 spec = before_ resetTestDb $ do
 
+  bracketLinksSpec
   describe "Tournament Lifecycle (4-participant golden scenario)" $
     it "runs the full pipeline from creation to completion" $ do
       result <- runSQLiteM testDbPath $ do
@@ -6778,3 +6789,267 @@ spec = before_ resetTestDb $ do
           flagAfter `shouldBe` True
 
 
+
+-- ---------------------------------------------------------------------
+-- Bracket links (step 1): pure derivation only, nothing persisted.
+-- ---------------------------------------------------------------------
+
+blId :: Int -> BLIds.BracketNodeId
+blId = BLIds.BracketNodeId
+
+blN :: Int -> BLBr.MatchSlot -> BLBr.MatchSlot -> Int -> BLBr.BracketNode
+blN i a b r = BLBr.BracketNode (blId i) a b r BLBr.Winners
+
+blDest :: Int -> BLLin.SlotPosition -> BLLin.NodeDestination
+blDest i pos = BLLin.NodeDestination (blId i) pos
+
+blTag :: String -> Int -> String
+blTag what players = what ++ ", " ++ show players ++ " players: "
+
+blPlayers n = [ Individual (Player (PlayerName ("bl" ++ show i))) | i <- [1 .. n :: Int] ]
+
+blSe :: Int -> [BLBr.BracketNode]
+blSe players = BLGen.buildTopology (BLGen.bracketSize players)
+
+blDerive :: [BLBr.BracketNode] -> BLLin.BracketLinks
+blDerive nodes = case BLEng.deriveLinks nodes of
+    Right links -> links
+    Left err    -> error ("deriveLinks failed: " ++ show err)
+
+blLinksOf :: BLLin.BracketLinks -> BLBr.BracketNode -> BLLin.NodeLinks
+blLinksOf links n = case BLLin.lookupLinks (BLBr.nodeId n) links of
+    Just l  -> l
+    Nothing -> error ("no links entry for node " ++ show (BLBr.nodeId n))
+
+blWinnerNode :: BLLin.BracketLinks -> BLBr.BracketNode -> Maybe BLIds.BracketNodeId
+blWinnerNode links n = BLLin.destNode <$> BLLin.linkWinnerTo (blLinksOf links n)
+
+blLoserNode :: BLLin.BracketLinks -> BLBr.BracketNode -> Maybe BLIds.BracketNodeId
+blLoserNode links n = BLLin.destNode <$> BLLin.linkLoserTo (blLinksOf links n)
+
+blNodeById :: BLIds.BracketNodeId -> [BLBr.BracketNode] -> BLBr.BracketNode
+blNodeById i nodes = case filter ((== i) . BLBr.nodeId) nodes of
+    (n : _) -> n
+    []      -> error ("no node " ++ show i)
+
+blSlotAt :: BLLin.SlotPosition -> BLBr.BracketNode -> BLBr.MatchSlot
+blSlotAt BLLin.SlotA = BLBr.nodeSlotA
+blSlotAt BLLin.SlotB = BLBr.nodeSlotB
+
+blIsPointer :: BLBr.MatchSlot -> Bool
+blIsPointer (BLBr.AwaitingWinnerOf _) = True
+blIsPointer (BLBr.AwaitingLoserOf _)  = True
+blIsPointer _                         = False
+
+-- Every destination must be backed by a real pointer (right node, right slot,
+-- right pointer kind), and every pointer in the graph must be accounted for.
+blConsistent :: [BLBr.BracketNode] -> BLLin.BracketLinks -> Bool
+blConsistent nodes links = backed && length dests == pointerCount
+  where
+    dests =
+        [ (isWinner, src, d)
+        | (src, l) <- links
+        , (isWinner, Just d) <- [(True, BLLin.linkWinnerTo l), (False, BLLin.linkLoserTo l)]
+        ]
+    slotOf d = fmap (blSlotAt (BLLin.destSlot d)) (lookup (BLLin.destNode d) [ (BLBr.nodeId n, n) | n <- nodes ])
+    expected isWinner src = if isWinner then BLBr.AwaitingWinnerOf src else BLBr.AwaitingLoserOf src
+    backed = all (\(w, src, d) -> slotOf d == Just (expected w src)) dests
+    pointerCount = length [ () | n <- nodes, s <- [BLBr.nodeSlotA n, BLBr.nodeSlotB n], blIsPointer s ]
+
+blFinalOf :: [BLBr.BracketNode] -> BLBr.BracketNode
+blFinalOf = foldr1 (\a b -> if BLBr.nodeRound a >= BLBr.nodeRound b then a else b)
+
+blMaxRound :: [BLBr.BracketNode] -> Int
+blMaxRound nodes = maximum (map BLBr.nodeRound nodes)
+
+blThird :: Int -> ([BLBr.BracketNode], BLIds.BracketNodeId)
+blThird players = case BLGen.addThirdPlaceMatch (blSe players) of
+    (nodes, Just tp) -> (nodes, tp)
+    (_, Nothing)     -> error "no third-place node was added"
+
+-- loser destinations, ordered slot A first, then slot B
+blLoserDests :: [BLBr.BracketNode] -> [BLLin.NodeDestination]
+blLoserDests nodes =
+    [ d
+    | pos <- [BLLin.SlotA, BLLin.SlotB]
+    , n <- nodes
+    , Just d <- [BLLin.linkLoserTo (blLinksOf links n)]
+    , BLLin.destSlot d == pos
+    ]
+  where links = blDerive nodes
+
+blLoserSourceIds :: [BLBr.BracketNode] -> [Int]
+blLoserSourceIds nodes =
+    BLList.sort [ BLIds.unBracketNodeId (BLBr.nodeId n) | n <- nodes, BLLin.linkLoserTo (blLinksOf links n) /= Nothing ]
+  where links = blDerive nodes
+
+blSemiIds :: [BLBr.BracketNode] -> [Int]
+blSemiIds nodes =
+    BLList.sort [ BLIds.unBracketNodeId (BLBr.nodeId n) | n <- nodes, BLBr.nodeRound n == blMaxRound nodes - 1 ]
+
+-- double elimination as generated: seeded winners bracket, then losers bracket, grand final, reset
+blDe :: Int -> ([BLBr.BracketNode], [BLBr.BracketNode], BLIds.BracketNodeId, BLIds.BracketNodeId)
+blDe players = (wb, wb ++ other, gf1, reset)
+  where
+    size = BLGen.bracketSize players
+    wb = BLSeed.seedParticipants (blPlayers players) (BLGen.buildTopology size)
+    (other, gf1, reset) = BLGen.buildDoubleEliminationTopology wb size
+
+blSeSpec :: Int -> Spec
+blSeSpec players = do
+    it (blTag "single elimination" players ++ "every destination is backed by a real pointer and every pointer is accounted for") $
+        blConsistent topo links `shouldBe` True
+    it (blTag "single elimination" players ++ "exactly one node (the final) has no winner destination") $
+        length [ () | n <- topo, blWinnerNode links n == Nothing ] `shouldBe` 1
+    it (blTag "single elimination" players ++ "no node has a loser destination") $
+        length [ () | n <- topo, BLLin.linkLoserTo (blLinksOf links n) /= Nothing ] `shouldBe` 0
+    it (blTag "single elimination" players ++ "winner destination equals findParent on the template") $
+        [ BLBr.nodeId n | n <- topo, blWinnerNode links n /= BLGen.findParent (BLBr.nodeId n) topo ] `shouldBe` []
+  where
+    topo  = blSe players
+    links = blDerive topo
+
+blSeRound1Spec :: Int -> Spec
+blSeRound1Spec players =
+    it (blTag "single elimination" players ++ "every round-1 node has a winner destination") $
+        [ BLBr.nodeId n | n <- topo, BLBr.nodeRound n == 1, blWinnerNode links n == Nothing ] `shouldBe` []
+  where
+    topo  = blSe players
+    links = blDerive topo
+
+-- The caller must derive from the graph before bye resolution. Derived from the
+-- seeded graph every node but the final has a winner destination; derived after
+-- bye resolution has consumed pointers, links are missing.
+blPrePostSpec :: Int -> Spec
+blPrePostSpec players = do
+    it (blTag "single elimination, seeded, before bye resolution" players ++ "only the final lacks a winner destination") $
+        length [ () | n <- seeded, blWinnerNode preLinks n == Nothing ] `shouldBe` 1
+    it (blTag "single elimination, after bye resolution" players ++ "links are lost, which is why the pre-resolution graph is required") $
+        length [ () | n <- resolved, blWinnerNode postLinks n == Nothing ] `shouldSatisfy` (> 1)
+  where
+    seeded    = BLSeed.seedParticipants (blPlayers players) (blSe players)
+    resolved  = BLBye.resolveAutomaticAdvancements seeded
+    preLinks  = blDerive seeded
+    postLinks = blDerive resolved
+
+blThirdSpec :: Int -> Spec
+blThirdSpec players = do
+    it (blTag "with third place" players ++ "every destination is backed by a real pointer and every pointer is accounted for") $
+        blConsistent nodes links `shouldBe` True
+    it (blTag "with third place" players ++ "loser destinations are the third-place node, slot A then slot B") $
+        blLoserDests nodes `shouldBe` [BLLin.NodeDestination tp BLLin.SlotA, BLLin.NodeDestination tp BLLin.SlotB]
+    it (blTag "with third place" players ++ "only the two semifinals have a loser destination") $
+        blLoserSourceIds nodes `shouldBe` blSemiIds nodes
+    it (blTag "with third place" players ++ "semifinal winners do not go to the third-place node") $
+        [ BLBr.nodeId n | n <- nodes, BLBr.nodeRound n == blMaxRound nodes - 1, blWinnerNode links n == Just tp ] `shouldBe` []
+    it (blTag "with third place" players ++ "the third-place node has no destinations") $
+        blLinksOf links (blNodeById tp nodes) `shouldBe` BLLin.NodeLinks Nothing Nothing
+    it (blTag "with third place" players ++ "exactly the final and the third-place node have no winner destination") $
+        length [ () | n <- nodes, blWinnerNode links n == Nothing ] `shouldBe` 2
+  where
+    (nodes, tp) = blThird players
+    links = blDerive nodes
+
+-- full = bracket size equals player count (no byes). The lineage oracles are
+-- one-directional: wherever the existing helper resolves a destination, the
+-- derived link must agree; where the helper declines, nothing is asserted.
+blDeSpec :: Bool -> Int -> Spec
+blDeSpec full players = do
+    it (tag ++ "every destination is backed by a real pointer and every pointer is accounted for") $
+        blConsistent allNodes links `shouldBe` True
+    it (tag ++ "grand final winner and loser feed the reset match, slots A and B") $
+        blLinksOf links (blNodeById gf1 allNodes)
+            `shouldBe` BLLin.NodeLinks (Just (BLLin.NodeDestination reset BLLin.SlotA)) (Just (BLLin.NodeDestination reset BLLin.SlotB))
+    it (tag ++ "the reset match has no destinations") $
+        blLinksOf links (blNodeById reset allNodes) `shouldBe` BLLin.NodeLinks Nothing Nothing
+    it (tag ++ "the winners-bracket final feeds the grand final, slot A") $
+        BLLin.linkWinnerTo (blLinksOf links wbFinal) `shouldBe` Just (BLLin.NodeDestination gf1 BLLin.SlotA)
+    it (tag ++ "the losers-bracket final feeds the grand final, slot B") $
+        BLLin.linkWinnerTo (blLinksOf links lbFinal) `shouldBe` Just (BLLin.NodeDestination gf1 BLLin.SlotB)
+    it (tag ++ "no losers-bracket node has a loser destination") $
+        length [ () | n <- lbNodes, BLLin.linkLoserTo (blLinksOf links n) /= Nothing ] `shouldBe` 0
+    it (tag ++ "winners-bracket winner destinations agree with resolveWBWinnerTarget wherever it resolves") $
+        [ BLBr.nodeId n
+        | n <- wb
+        , Just t <- [BLLD.resolveWBWinnerTarget size (BLBr.nodeId n)]
+        , blWinnerNode links n /= Just t ] `shouldBe` []
+    it (tag ++ "winners-bracket loser destinations agree with resolveWBLoserTarget wherever it resolves") $
+        [ BLBr.nodeId n
+        | n <- wb
+        , Right t <- [BLLD.resolveWBLoserTarget wb size (BLBr.nodeId n)]
+        , blLoserNode links n /= Just t ] `shouldBe` []
+    it (tag ++ "losers-bracket winner destinations agree with resolveLBTarget wherever it resolves") $
+        [ BLBr.nodeId n
+        | n <- lbNodes
+        , Just t <- [BLLD.resolveLBTarget wb size (BLBr.nodeId n)]
+        , blWinnerNode links n /= Just t ] `shouldBe` []
+    BLM.when full $ do
+        it (tag ++ "only the reset match lacks a winner destination") $
+            [ BLBr.nodeId n | n <- allNodes, blWinnerNode links n == Nothing ] `shouldBe` [reset]
+        it (tag ++ "every winners-bracket node has a loser destination") $
+            [ BLBr.nodeId n | n <- wb, blLoserNode links n == Nothing ] `shouldBe` []
+  where
+    tag = blTag (if full then "full double elimination" else "double elimination with byes") players
+    size = BLGen.bracketSize players
+    (wb, allNodes, gf1, reset) = blDe players
+    links = blDerive allNodes
+    wbFinal = blFinalOf wb
+    lbNodes = filter ((== BLBr.Losers) . BLBr.nodeStage) allNodes
+    lbFinal = last lbNodes
+
+blErrorSpec :: Spec
+blErrorSpec = do
+    it "an empty node list yields no links" $
+        BLEng.deriveLinks [] `shouldBe` Right []
+    it "a pointer to a node that is not in the graph is rejected" $
+        BLEng.deriveLinks [blN 1 (BLBr.AwaitingWinnerOf (blId 99)) BLBr.ByeSlot 2]
+            `shouldBe` Left (BLEng.DanglingPointer (blId 1) (blId 99))
+    it "two nodes claiming the winner of the same node are rejected" $
+        BLEng.deriveLinks
+            [ blN 1 BLBr.ByeSlot BLBr.ByeSlot 1
+            , blN 2 (BLBr.AwaitingWinnerOf (blId 1)) BLBr.ByeSlot 2
+            , blN 3 (BLBr.AwaitingWinnerOf (blId 1)) BLBr.ByeSlot 2
+            ]
+            `shouldBe` Left (BLEng.ConflictingWinnerDestination (blId 1) (blDest 2 BLLin.SlotA) (blDest 3 BLLin.SlotA))
+    it "two nodes claiming the loser of the same node are rejected" $
+        BLEng.deriveLinks
+            [ blN 1 BLBr.ByeSlot BLBr.ByeSlot 1
+            , blN 2 (BLBr.AwaitingLoserOf (blId 1)) BLBr.ByeSlot 2
+            , blN 3 BLBr.ByeSlot (BLBr.AwaitingLoserOf (blId 1)) 2
+            ]
+            `shouldBe` Left (BLEng.ConflictingLoserDestination (blId 1) (blDest 2 BLLin.SlotA) (blDest 3 BLLin.SlotB))
+    it "duplicate node ids are rejected" $
+        BLEng.deriveLinks [blN 1 BLBr.ByeSlot BLBr.ByeSlot 1, blN 1 BLBr.ByeSlot BLBr.ByeSlot 1]
+            `shouldBe` Left (BLEng.DuplicateNodeId (blId 1))
+    it "winner and loser destinations of the same node are independent and may coexist" $
+        BLEng.deriveLinks
+            [ blN 1 BLBr.ByeSlot BLBr.ByeSlot 1
+            , blN 2 (BLBr.AwaitingWinnerOf (blId 1)) BLBr.ByeSlot 2
+            , blN 3 (BLBr.AwaitingLoserOf (blId 1)) BLBr.ByeSlot 2
+            ]
+            `shouldBe` Right
+                [ (blId 1, BLLin.NodeLinks (Just (blDest 2 BLLin.SlotA)) (Just (blDest 3 BLLin.SlotA)))
+                , (blId 2, BLLin.NodeLinks Nothing Nothing)
+                , (blId 3, BLLin.NodeLinks Nothing Nothing)
+                ]
+    it "a pointer already replaced (as bye resolution does) contributes no link" $
+        BLEng.deriveLinks
+            [ blN 1 BLBr.ByeSlot BLBr.ByeSlot 1
+            , blN 2 BLBr.ByeSlot BLBr.ByeSlot 1
+            , blN 3 (BLBr.AwaitingWinnerOf (blId 1)) BLBr.ByeSlot 2
+            ]
+            `shouldBe` Right
+                [ (blId 1, BLLin.NodeLinks (Just (blDest 3 BLLin.SlotA)) Nothing)
+                , (blId 2, BLLin.NodeLinks Nothing Nothing)
+                , (blId 3, BLLin.NodeLinks Nothing Nothing)
+                ]
+
+bracketLinksSpec :: Spec
+bracketLinksSpec = describe "Engine.BracketLinks.deriveLinks" $ do
+    mapM_ blSeSpec [2, 3, 4, 5, 8, 20]
+    mapM_ blSeRound1Spec [3, 4, 5, 8, 20]
+    mapM_ blPrePostSpec [3, 5, 6, 7, 20]
+    mapM_ blThirdSpec [4, 8, 20]
+    mapM_ (blDeSpec True) [4, 8, 16]
+    mapM_ (blDeSpec False) [5, 6, 7]
+    blErrorSpec
