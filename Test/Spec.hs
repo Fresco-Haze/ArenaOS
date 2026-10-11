@@ -274,6 +274,8 @@ spec = before_ resetTestDb $ do
 
   bracketLinksSpec
   bracketLinksStoreSpec
+  correctionNodeIdSpec
+  bracketLinksGenerationSpec
   describe "Tournament Lifecycle (4-participant golden scenario)" $
     it "runs the full pipeline from creation to completion" $ do
       result <- runSQLiteM testDbPath $ do
@@ -7232,3 +7234,377 @@ bracketLinksStoreSpec = describe "BracketRepository bracket links (offset ids)" 
       _ <- Repo.saveBracket (bsBracket tid bid) bsTemplate
       Repo.getBracketLinks bid
     bsExpectNothing result
+
+-- ---------------------------------------------------------------------
+-- Correction on brackets whose stored node ids are offset from the
+-- template ids (buildTopology numbers nodes from 1). Each scenario runs
+-- twice: a control on a clean database, and one after a throwaway
+-- bracket has used up node ids.
+-- ---------------------------------------------------------------------
+
+-- A throwaway bracket in its own tournament: uses up 7 node ids.
+crBurnIds :: SQLiteM ()
+crBurnIds = do
+  tid <- bsTournament "cr-burn"
+  _ <- bsSave tid
+  pure ()
+
+crSetup :: Bool -> Text -> Int -> SQLiteM (UserId, BLIds.BracketId)
+crSetup burn label n = do
+  BLM.when burn crBurnIds
+  ownerId <- createTestUser label
+  let participants =
+        [ Individual (Player (PlayerName ("P" ++ show i))) | i <- [1 .. n] ]
+  tid <- createTournament NewTournament
+    { newTournamentName = TournamentName "Correction node-id cup"
+    , newTournamentOrganizer = OrganizerName "Test Organizer"
+    , newTournamentOwner = ownerId, newTournamentFormat = SingleElimination
+    , newTournamentVisibility = Public, newTournamentMaxParticipants = n
+    , newTournamentThirdPlaceMatch = False, newTournamentParticipantMode = IndividualOnly }
+  forM_ participants $ \p -> case p of
+    Individual player -> Repo.savePlayer player
+    Squad team         -> Repo.saveTeam team
+  advanceToRegistrationOpen ownerId tid
+  forM_ participants (\p -> unwrap =<< registerParticipant tid p)
+  _ <- unwrap =<< closeRegistration ownerId tid
+  bracketId <- unwrap =<< generateBracket ownerId tid
+  (_, nodes) <- Repo.getBracket bracketId
+  -- the premise of every example here: stored ids are first-insert (they start at 1) or offset
+  liftIO $ (minimum [ BLIds.unBracketNodeId (BLBr.nodeId nd) | nd <- nodes ] == 1) `shouldBe` not burn
+  pure (ownerId, bracketId)
+
+-- Both semifinals played, the final started: correcting a semifinal must be rejected.
+crGuardSpec :: String -> Bool -> Spec
+crGuardSpec title burn =
+  it title $ do
+    result <- runSQLiteM testDbPath $ do
+      setupSchema
+      (ownerId, bracketId) <- crSetup burn "cr-guard-owner" 4
+      r1 <- Repo.listMatchesForBracket bracketId
+      let [ma, mb] = r1
+      _ <- unwrap =<< startMatch ownerId (matchId ma)
+      _ <- unwrap =<< recordMatchResult ownerId (matchId ma) (Winner (matchCompetitorA ma))
+      _ <- unwrap =<< startMatch ownerId (matchId mb)
+      _ <- unwrap =<< recordMatchResult ownerId (matchId mb) (Winner (matchCompetitorA mb))
+      allM <- Repo.listMatchesForBracket bracketId
+      let finalM = head [ m | m <- allM, matchBracketNode m `notElem` map matchBracketNode r1 ]
+      _ <- unwrap =<< startMatch ownerId (matchId finalM)
+      outcome <- correctMatchResult ownerId (matchId ma) (Winner (matchCompetitorB ma))
+      pure (matchId finalM, either Just (const Nothing) outcome)
+    case result of
+      Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
+      Right (finalId, rejected) ->
+        rejected `shouldBe` Just (DownstreamMatchStarted finalId)
+
+-- One match played, the next one still Scheduled: the correction must reach
+-- the next node's slot and the next match.
+crRepairSpec :: String -> Bool -> Spec
+crRepairSpec title burn =
+  it title $ do
+    result <- runSQLiteM testDbPath $ do
+      setupSchema
+      (ownerId, bracketId) <- crSetup burn "cr-repair-owner" 5
+      (_, nodesBefore) <- Repo.getBracket bracketId
+      let round1NodeIds = map BLBr.nodeId (filter ((== 1) . BLBr.nodeRound) nodesBefore)
+      allMatchesAtGen <- Repo.listMatchesForBracket bracketId
+      let m1 = head (filter (\m -> matchBracketNode m `elem` round1NodeIds) allMatchesAtGen)
+          m1Winner = matchCompetitorA m1
+          m1Loser  = matchCompetitorB m1
+          -- found from the PRE-PLAY stored pointer, independent of findParent
+          downstreamNodeId =
+            case find (\nd -> BLBr.nodeSlotA nd == BLBr.AwaitingWinnerOf (matchBracketNode m1)
+                           || BLBr.nodeSlotB nd == BLBr.AwaitingWinnerOf (matchBracketNode m1)) nodesBefore of
+              Just nd -> BLBr.nodeId nd
+              Nothing -> error "test setup invariant violated: m1 has no parent node"
+      _ <- unwrap =<< startMatch ownerId (matchId m1)
+      _ <- unwrap =<< recordMatchResult ownerId (matchId m1) (Winner m1Winner)
+      afterM1 <- Repo.listMatchesForBracket bracketId
+      let down0 = head (filter (\m -> matchBracketNode m == downstreamNodeId) afterM1)
+          setupOk = matchCompetitorA down0 == m1Winner || matchCompetitorB down0 == m1Winner
+      corrected <- unwrap =<< correctMatchResult ownerId (matchId m1) (Winner m1Loser)
+      afterMatches <- Repo.listMatchesForBracket bracketId
+      (_, nodesAfter) <- Repo.getBracket bracketId
+      let downstream = head (filter (\m -> matchBracketNode m == downstreamNodeId) afterMatches)
+          downstreamNode = head (filter ((== downstreamNodeId) . BLBr.nodeId) nodesAfter)
+      pure (setupOk, corrected, downstream, downstreamNode, m1Winner, m1Loser)
+    case result of
+      Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
+      Right (setupOk, corrected, downstream, downstreamNode, m1Winner, m1Loser) -> do
+        setupOk `shouldBe` True
+        matchOutcome corrected `shouldBe` Just (Winner m1Loser)
+        (matchCompetitorA downstream == m1Winner || matchCompetitorB downstream == m1Winner) `shouldBe` False
+        (matchCompetitorA downstream == m1Loser || matchCompetitorB downstream == m1Loser) `shouldBe` True
+        (BLBr.nodeSlotA downstreamNode == BLBr.Filled m1Winner || BLBr.nodeSlotB downstreamNode == BLBr.Filled m1Winner) `shouldBe` False
+        (BLBr.nodeSlotA downstreamNode == BLBr.Filled m1Loser || BLBr.nodeSlotB downstreamNode == BLBr.Filled m1Loser) `shouldBe` True
+
+correctionNodeIdSpec :: Spec
+correctionNodeIdSpec = describe "NodeIdSpace: CorrectMatchResult (Single Elim)" $ do
+  crGuardSpec  "guard, control (first-insert ids): rejects with DownstreamMatchStarted once the next match has started" False
+  crGuardSpec  "guard, offset ids: rejects with DownstreamMatchStarted once the next match has started" True
+  crRepairSpec "repair, control (first-insert ids): the next match and node take the corrected winner" False
+  crRepairSpec "repair, offset ids: the next match and node take the corrected winner" True
+  crLegacySpec
+  crCorruptSpec
+
+-- ---------------------------------------------------------------------
+-- Bracket links (step 3): generateBracket writes the links in its own
+-- transaction. Checked on first-insert and on offset stored ids.
+-- ---------------------------------------------------------------------
+
+-- Uses up 21 stored node ids with three throwaway brackets (one owner each, so
+-- usernames stay unique): more than any domain id these sizes produce.
+lgBurn :: SQLiteM ()
+lgBurn = forM_ ["lg-burn-1", "lg-burn-2", "lg-burn-3"] $ \label -> do
+  tid <- bsTournament label
+  _ <- bsSave tid
+  pure ()
+
+-- (no type signature on purpose: it mentions TournamentFormat, whose import I have not seen)
+lgGenerate burn fmt third label n = do
+  BLM.when burn lgBurn
+  ownerId <- createTestUser label
+  let participants =
+        [ Individual (Player (PlayerName ("P" ++ show i))) | i <- [1 .. n] ]
+  tid <- createTournament NewTournament
+    { newTournamentName = TournamentName "Links generation cup"
+    , newTournamentOrganizer = OrganizerName "Test Organizer"
+    , newTournamentOwner = ownerId, newTournamentFormat = fmt
+    , newTournamentVisibility = Public, newTournamentMaxParticipants = n
+    , newTournamentThirdPlaceMatch = third, newTournamentParticipantMode = IndividualOnly }
+  forM_ participants $ \p -> case p of
+    Individual player -> Repo.savePlayer player
+    Squad team         -> Repo.saveTeam team
+  advanceToRegistrationOpen ownerId tid
+  forM_ participants (\p -> unwrap =<< registerParticipant tid p)
+  _ <- unwrap =<< closeRegistration ownerId tid
+  bracketId <- unwrap =<< generateBracket ownerId tid
+  (_, nodes) <- Repo.getBracket bracketId
+  let storedIds = [ BLIds.unBracketNodeId (BLBr.nodeId nd) | nd <- nodes ]
+  -- the premise of every example here: stored ids start at 1 (control) or are offset past 21
+  liftIO $ (if burn then minimum storedIds > 21 else minimum storedIds == 1) `shouldBe` True
+  pure (ownerId, bracketId)
+
+lgPointer :: BLBr.MatchSlot -> Maybe (Bool, BLIds.BracketNodeId)
+lgPointer (BLBr.AwaitingWinnerOf s) = Just (True, s)
+lgPointer (BLBr.AwaitingLoserOf s)  = Just (False, s)
+lgPointer _                         = Nothing
+
+lgPointerCount :: [BLBr.BracketNode] -> Int
+lgPointerCount nodes =
+  length [ () | n <- nodes, s <- [BLBr.nodeSlotA n, BLBr.nodeSlotB n], isJust (lgPointer s) ]
+
+-- every pointer that survives bye resolution is backed by a link to the right node and slot
+lgPointersAgree :: [BLBr.BracketNode] -> BLLin.BracketLinks -> Bool
+lgPointersAgree nodes links = all agrees
+  [ (BLBr.nodeId n, pos, ptr)
+  | n <- nodes
+  , (pos, slot) <- [(BLLin.SlotA, BLBr.nodeSlotA n), (BLLin.SlotB, BLBr.nodeSlotB n)]
+  , Just ptr <- [lgPointer slot]
+  ]
+  where
+    agrees (holder, pos, (isWinner, src)) =
+      case lookup src links of
+        Nothing -> False
+        Just l  -> (if isWinner then BLLin.linkWinnerTo l else BLLin.linkLoserTo l)
+                     == Just (BLLin.NodeDestination holder pos)
+
+lgCommon :: [BLBr.BracketNode] -> BLLin.BracketLinks -> [(String, Bool)]
+lgCommon nodes links =
+  [ ("stored node ids are unique", length ids == length (BLList.nub ids))
+  , ("exactly one link row per node, no duplicate sources", length keys == length (BLList.nub keys))
+  , ("link rows cover exactly the stored nodes", BLList.sort keys == BLList.sort ids)
+  , ("every surviving pointer is backed by a link to the right node and slot", lgPointersAgree nodes links)
+  ]
+  where
+    ids  = map BLBr.nodeId nodes
+    keys = map fst links
+
+-- winner links of a single-elimination tree: one root in the top round, each destination one
+-- round up, and every slot of every node above round 1 fed exactly once
+lgWinnerShape :: [BLBr.BracketNode] -> BLLin.BracketLinks -> Bool
+lgWinnerShape nodes links =
+    length roots == 1
+    && all ((== maxRound) . BLBr.nodeRound) roots
+    && all stepsUp winnerDests
+    && all (\n -> feeds n BLLin.SlotA == 1 && feeds n BLLin.SlotB == 1) upper
+    && length winnerDests == 2 * length upper
+  where
+    winnerOf n = BLLin.linkWinnerTo =<< lookup (BLBr.nodeId n) links
+    winnerDests = [ (n, d) | n <- nodes, Just d <- [winnerOf n] ]
+    maxRound = maximum (map BLBr.nodeRound nodes)
+    roots = [ n | n <- nodes, winnerOf n == Nothing ]
+    upper = [ n | n <- nodes, BLBr.nodeRound n >= 2 ]
+    roundOf i = BLBr.nodeRound <$> lookup i [ (BLBr.nodeId n, n) | n <- nodes ]
+    stepsUp (n, d) = roundOf (BLLin.destNode d) == Just (BLBr.nodeRound n + 1)
+    feeds n pos = length [ () | (_, d) <- winnerDests, BLLin.destNode d == BLBr.nodeId n, BLLin.destSlot d == pos ]
+
+lgNoLosers :: BLLin.BracketLinks -> Bool
+lgNoLosers links = all (\(_, l) -> BLLin.linkLoserTo l == Nothing) links
+
+lgWithoutThird :: BLBr.Bracket -> [BLBr.BracketNode] -> [BLBr.BracketNode]
+lgWithoutThird b nodes = [ n | n <- nodes, Just (BLBr.nodeId n) /= BLBr.bracketThirdPlaceNodeId b ]
+
+-- the third-place node comes from the stored bracket header
+lgThirdOk :: BLBr.Bracket -> [BLBr.BracketNode] -> BLLin.BracketLinks -> Bool
+lgThirdOk bracket nodes links = case BLBr.bracketThirdPlaceNodeId bracket of
+    Nothing -> False
+    Just tp ->
+      let maxRound = maximum (map BLBr.nodeRound nodes)
+          semis = [ BLBr.nodeId n | n <- nodes, BLBr.nodeRound n == maxRound - 1 ]
+          losers = [ (nid, d) | (nid, l) <- links, Just d <- [BLLin.linkLoserTo l] ]
+          slots = map (BLLin.destSlot . snd) losers
+      in BLList.sort (map fst losers) == BLList.sort semis
+         && all ((== tp) . BLLin.destNode . snd) losers
+         && length slots == 2 && BLLin.SlotA `elem` slots && BLLin.SlotB `elem` slots
+         && lookup tp links == Just (BLLin.NodeLinks Nothing Nothing)
+
+-- grand final and reset come from the stored bracket header
+lgDeOk :: BLBr.Bracket -> [BLBr.BracketNode] -> BLLin.BracketLinks -> Bool
+lgDeOk bracket nodes links =
+  case (BLBr.bracketGF1NodeId bracket, BLBr.bracketResetNodeId bracket) of
+    (Just gf1, Just reset) ->
+      let gf1Round = maybe 0 BLBr.nodeRound (lookup gf1 [ (BLBr.nodeId n, n) | n <- nodes ])
+          wbFinals = [ BLBr.nodeId n | n <- nodes, BLBr.nodeStage n == BLBr.Winners, BLBr.nodeRound n == gf1Round - 1 ]
+          lbMax    = maximum (0 : [ BLBr.nodeRound n | n <- nodes, BLBr.nodeStage n == BLBr.Losers ])
+          lbFinals = [ BLBr.nodeId n | n <- nodes, BLBr.nodeStage n == BLBr.Losers, BLBr.nodeRound n == lbMax ]
+          winnerTo i = BLLin.linkWinnerTo =<< lookup i links
+      in case (wbFinals, lbFinals) of
+           ([wbF], [lbF]) ->
+                winnerTo wbF == Just (BLLin.NodeDestination gf1 BLLin.SlotA)
+             && winnerTo lbF == Just (BLLin.NodeDestination gf1 BLLin.SlotB)
+             && lookup gf1 links == Just (BLLin.NodeLinks (Just (BLLin.NodeDestination reset BLLin.SlotA)) (Just (BLLin.NodeDestination reset BLLin.SlotB)))
+             && lookup reset links == Just (BLLin.NodeLinks Nothing Nothing)
+           _ -> False
+    _ -> False
+
+-- 4 players play 6 matches; a round robin has no pointers, so every row is all-null
+lgRrOk :: [BLBr.BracketNode] -> BLLin.BracketLinks -> Bool
+lgRrOk nodes links =
+  length nodes == 6 && length links == 6 && all ((== BLLin.NodeLinks Nothing Nothing) . snd) links
+
+lgPlainSe, lgThirdChecks, lgDeChecks, lgRrChecks :: BLBr.Bracket -> [BLBr.BracketNode] -> BLLin.BracketLinks -> [(String, Bool)]
+lgPlainSe _ ns ls =
+  [ ("winner links form a binary tree, every slot fed exactly once", lgWinnerShape ns ls)
+  , ("no node has a loser destination", lgNoLosers ls) ]
+lgThirdChecks b ns ls =
+  [ ("main tree (third-place node excluded): winner links form a binary tree", lgWinnerShape (lgWithoutThird b ns) ls)
+  , ("third-place routing agrees with the stored header", lgThirdOk b ns ls) ]
+lgDeChecks b ns ls = [ ("double elimination routing agrees with the stored header", lgDeOk b ns ls) ]
+lgRrChecks _ ns ls = [ ("round robin: 6 nodes, 6 all-null rows", lgRrOk ns ls) ]
+
+lgCase title burn fmt third n extra =
+  it title $ do
+    result <- runSQLiteM testDbPath $ do
+      setupSchema
+      (_, bid) <- lgGenerate burn fmt third "lg-owner" n
+      (b, nodes) <- Repo.getBracket bid
+      ls <- Repo.getBracketLinks bid
+      pure (b, nodes, ls)
+    case result of
+      Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
+      Right (_, _, Nothing) -> expectationFailure "generateBracket stored no links"
+      Right (b, nodes, Just links) ->
+        forM_ (lgCommon nodes links ++ extra b nodes links) $ \(name, ok) ->
+          (name, ok) `shouldBe` (name, True)
+
+lgStabilitySpec :: Spec
+lgStabilitySpec = it "links are unchanged after a match is played, and the match really was completed" $ do
+    result <- runSQLiteM testDbPath $ do
+      setupSchema
+      (ownerId, bid) <- lgGenerate True SingleElimination False "lg-stab-owner" 5
+      (_, nodesBefore) <- Repo.getBracket bid
+      before <- Repo.getBracketLinks bid
+      ms <- Repo.listMatchesForBracket bid
+      let round1 = [ BLBr.nodeId n | n <- nodesBefore, BLBr.nodeRound n == 1 ]
+          m1 = head [ m | m <- ms, matchBracketNode m `elem` round1 ]
+      _ <- unwrap =<< startMatch ownerId (matchId m1)
+      _ <- unwrap =<< recordMatchResult ownerId (matchId m1) (Winner (matchCompetitorA m1))
+      done <- Repo.getMatch (matchId m1)
+      (_, nodesAfter) <- Repo.getBracket bid
+      after <- Repo.getBracketLinks bid
+      pure (before, after, done, matchCompetitorA m1, lgPointerCount nodesBefore, lgPointerCount nodesAfter)
+    case result of
+      Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
+      Right (before, after, done, winner, pointersBefore, pointersAfter) -> do
+        Match.matchStatus done `shouldBe` Match.Completed
+        matchOutcome done `shouldBe` Just (Winner winner)
+        pointersAfter `shouldSatisfy` (< pointersBefore)
+        before `shouldSatisfy` isJust
+        after `shouldBe` before
+
+bracketLinksGenerationSpec :: Spec
+bracketLinksGenerationSpec = describe "generateBracket writes bracket links" $ do
+  lgCase "single elimination, 5 players, first-insert ids" False SingleElimination False 5 lgPlainSe
+  lgCase "single elimination, 5 players, offset ids" True SingleElimination False 5 lgPlainSe
+  lgCase "single elimination, 8 players, offset ids" True SingleElimination False 8 lgPlainSe
+  lgCase "single elimination with third place, 8 players, first-insert ids" False SingleElimination True 8 lgThirdChecks
+  lgCase "single elimination with third place, 8 players, offset ids" True SingleElimination True 8 lgThirdChecks
+  lgCase "double elimination, 4 players, offset ids" True DoubleElimination False 4 lgDeChecks
+  lgCase "double elimination, 6 players (byes), offset ids" True DoubleElimination False 6 lgDeChecks
+  lgCase "round robin, 4 players, offset ids" True RoundRobin False 4 lgRrChecks
+  lgStabilitySpec
+
+-- ---------------------------------------------------------------------
+-- Legacy and corrupt link data must fail closed: nothing written, nothing changed.
+-- Three separate runs: set up and break the links, attempt the correction, read back
+-- (a thrown StorageFailure aborts a run, so the read-back cannot share it).
+-- ---------------------------------------------------------------------
+
+crSnapshot bracketId downNodeId srcMatchId = do
+  src <- Repo.getMatch srcMatchId
+  ms <- Repo.listMatchesForBracket bracketId
+  (_, nodes) <- Repo.getBracket bracketId
+  pure ( src
+       , [ m | m <- ms, matchBracketNode m == downNodeId ]
+       , [ n | n <- nodes, BLBr.nodeId n == downNodeId ] )
+
+crDropAllLinks :: BLIds.BracketId -> a -> SQLiteM ()
+crDropAllLinks bracketId _ = do
+  env <- ask
+  liftIO $ execute (envConnection env) "DELETE FROM bracket_links WHERE bracket_id = ?" (Only (BLIds.unBracketId bracketId))
+
+crDropOneLink :: a -> BLIds.BracketNodeId -> SQLiteM ()
+crDropOneLink _ srcNode = do
+  env <- ask
+  liftIO $ execute (envConnection env) "DELETE FROM bracket_links WHERE node_id = ?" (Only (BLIds.unBracketNodeId srcNode))
+
+crBrokenSpec title breakLinks expectAttempt =
+  it title $ do
+    prepared <- runSQLiteM testDbPath $ do
+      setupSchema
+      (ownerId, bracketId) <- crSetup True "cr-broken-owner" 5
+      (_, nodesBefore) <- Repo.getBracket bracketId
+      let round1NodeIds = map BLBr.nodeId (filter ((== 1) . BLBr.nodeRound) nodesBefore)
+      matchesAtGen <- Repo.listMatchesForBracket bracketId
+      let m1 = head (filter (\m -> matchBracketNode m `elem` round1NodeIds) matchesAtGen)
+          downNodeId =
+            case find (\nd -> BLBr.nodeSlotA nd == BLBr.AwaitingWinnerOf (matchBracketNode m1)
+                           || BLBr.nodeSlotB nd == BLBr.AwaitingWinnerOf (matchBracketNode m1)) nodesBefore of
+              Just nd -> BLBr.nodeId nd
+              Nothing -> error "test setup invariant violated: m1 has no parent node"
+      _ <- unwrap =<< startMatch ownerId (matchId m1)
+      _ <- unwrap =<< recordMatchResult ownerId (matchId m1) (Winner (matchCompetitorA m1))
+      breakLinks bracketId (matchBracketNode m1)
+      snapshot <- crSnapshot bracketId downNodeId (matchId m1)
+      pure (ownerId, bracketId, m1, downNodeId, snapshot)
+    case prepared of
+      Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
+      Right (ownerId, bracketId, m1, downNodeId, before) -> do
+        attempt <- runSQLiteM testDbPath (correctMatchResult ownerId (matchId m1) (Winner (matchCompetitorB m1)))
+        expectAttempt attempt
+        after <- runSQLiteM testDbPath (crSnapshot bracketId downNodeId (matchId m1))
+        case after of
+          Left err   -> expectationFailure ("read-back failed: " ++ show err)
+          Right snap -> snap `shouldBe` before
+
+crLegacySpec = crBrokenSpec
+  "legacy bracket without links: correction is rejected with BracketLinksUnavailable and nothing changes"
+  crDropAllLinks
+  (\attempt -> case attempt of
+      Right (Left BracketLinksUnavailable) -> pure ()
+      other -> expectationFailure ("expected Right (Left BracketLinksUnavailable), got: " ++ show other))
+
+crCorruptSpec = crBrokenSpec
+  "corrupt links (one row missing): correction fails with StorageFailure and nothing changes"
+  crDropOneLink
+  bsExpectStorageFailure

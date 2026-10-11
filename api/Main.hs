@@ -152,6 +152,7 @@ fromGenerate (Generate.BracketAlreadyExists b) =
     (object ["bracketId" .= unBracketId b])
 fromGenerate (Generate.UnsupportedFormat _)   = internalError
 fromGenerate (Generate.InvalidBracket e)      = fromEngine e
+fromGenerate (Generate.LinkDerivationFailed _) = internalError
 
 fromMatchError :: MatchError -> ApiError
 fromMatchError (MatchNotScheduled s) =
@@ -205,6 +206,10 @@ fromCorrect (Correct.CorrectedOutcomeNotAdvanceable _) =
   ApiError status409 "OUTCOME_NOT_ADVANCEABLE" "This outcome cannot advance the bracket"
     (object [])
 fromCorrect (Correct.CorrectionIntegrityViolation _) = internalError
+fromCorrect Correct.BracketLinksUnavailable =
+  ApiError status409 "BRACKET_LINKS_UNAVAILABLE"
+    "This tournament's bracket was generated before result correction was supported, so its results cannot be corrected"
+    (object [])
 
 fromCorrectEFootball :: CorrectEFootballResultError -> ApiError
 fromCorrectEFootball (EFootballCorrectionFailed e) = fromCorrect e

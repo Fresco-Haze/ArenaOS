@@ -23,6 +23,7 @@ import Application.Internal.Authorization (AuthorizationError, requireTournament
 import qualified Domain.Tournament
 import Data.Maybe (catMaybes, listToMaybe)
 import Domain.Bracket (BracketNode(..), BracketNodeId, Bracket(..), BracketSide(..), MatchSlot(..))
+import Domain.BracketLinks (BracketLinks, NodeDestination(..), NodeLinks(..))
 import Engine.Correction.DoubleEliminationLineage
   ( resolveWBWinnerTarget, resolveWBLoserTarget, resolveLBTarget
   , LineageError(..), GF1Outcome(..), classifyGF1Outcome
@@ -41,6 +42,7 @@ data CorrectMatchResultError
   | SourceMatchOutcomeInvalid MatchId
   | CorrectionIntegrityViolation MatchId
   | CorrectedOutcomeNotAdvanceable MatchOutcome
+  | BracketLinksUnavailable
   deriving (Eq, Show)
 
 
@@ -58,7 +60,7 @@ correctMatchResultInTx currentUser mid newOutcome = do
         _ -> case first InvalidLifecycle (requireOperationallyActive tournament) of
           Left err -> pure (Left err)
           Right () -> case tournamentFormat tournament of
-            SingleElimination -> dropStaleScore match newOutcome (guardAdvanceable newOutcome (correctSingleElimination match newOutcome))
+            SingleElimination -> dropStaleScore match newOutcome (guardAdvanceable newOutcome (correctSingleEliminationLinked match newOutcome))
             DoubleElimination -> dropStaleScore match newOutcome (guardAdvanceable newOutcome (correctDoubleElimination match newOutcome))
             format             -> pure (Left (UnsupportedFormatForCorrection format))
 
@@ -88,13 +90,45 @@ guardAdvanceable outcome act =
   case correctedParticipant outcome of
     Nothing -> pure (Left (CorrectedOutcomeNotAdvanceable outcome))
     Just _  -> act
+-- | Downstream path of a corrected node, followed through the STORED winner links,
+-- so every id is a stored id (the ids matches and nodes carry). No links at all means
+-- the bracket predates link storage: refuse, never fall back to template ids.
+-- The step budget (the node count) stops a corrupt cyclic chain.
+linkedDownstreamPath
+  :: MatchId -> BracketNodeId -> [BracketNode] -> Maybe BracketLinks
+  -> Either CorrectMatchResultError [BracketNodeId]
+linkedDownstreamPath mid start nodes mLinks =
+  case mLinks of
+    Nothing    -> Left BracketLinksUnavailable
+    Just links -> walk (length nodes) start links
+  where
+    walk budget nid links =
+      case lookup nid links of
+        Nothing -> Left (CorrectionIntegrityViolation mid)
+        Just l  -> case linkWinnerTo l of
+          Nothing -> Right []
+          Just d
+            | budget <= 0 -> Left (CorrectionIntegrityViolation mid)
+            | otherwise   -> (destNode d :) <$> walk (budget - 1) (destNode d) links
+
+-- | Reads and validates everything before any write happens.
+correctSingleEliminationLinked
+  :: (MatchRepository m, BracketRepository m)
+  => Match -> MatchOutcome -> m (Either CorrectMatchResultError Match)
+correctSingleEliminationLinked match newOutcome = do
+  (_, nodes) <- Repo.getBracket (matchBracket match)
+  mLinks <- Repo.getBracketLinks (matchBracket match)
+  case linkedDownstreamPath (matchId match) (matchBracketNode match) nodes mLinks of
+    Left err   -> pure (Left err)
+    Right path -> correctSingleElimination path match newOutcome
+
 -- | Everything that was previously inline in correctMatchResult's
 -- SingleElimination branch, factored out unchanged so the dispatch
 -- above stays a plain three-way switch.
 correctSingleElimination
   :: (MatchRepository m, BracketRepository m)
-  => Match -> MatchOutcome -> m (Either CorrectMatchResultError Match)
-correctSingleElimination match newOutcome =
+  => [BracketNodeId] -> Match -> MatchOutcome -> m (Either CorrectMatchResultError Match)
+correctSingleElimination path match newOutcome =
   case correctedParticipant newOutcome of
     Just newParticipant
       | newParticipant /= matchCompetitorA match
@@ -102,8 +136,6 @@ correctSingleElimination match newOutcome =
         pure (Left (CorrectedParticipantNotInMatch newParticipant))
     _ -> do
       (bracket, nodes) <- Repo.getBracket (matchBracket match)
-      let size = length (filter ((== 1) . nodeRound) nodes) * 2
-          path = downstreamPath (matchBracketNode match) size
 
       allMatches <- Repo.listMatchesForBracket (matchBracket match)
       let downstreamMatches =

@@ -32,6 +32,7 @@ import Shell.Persistence.Port
 import qualified Shell.Persistence.Port as Repo
 
 import Engine.Error (EngineError)
+import Engine.BracketLinks (LinkError, deriveLinks)
 import qualified Engine.Validation        as Validation
 import qualified Engine.BracketGeneration as BracketGeneration
 import qualified Engine.Seeding           as Seeding
@@ -49,6 +50,7 @@ data GenerateBracketError
   | BracketAlreadyExists BracketId
   | UnsupportedFormat TournamentFormat
   | InvalidBracket EngineError
+  | LinkDerivationFailed LinkError
   deriving (Eq, Show)
 
 generateBracket
@@ -92,12 +94,12 @@ generateBracket currentUser tid = do
                              BracketGeneration.buildDoubleEliminationTopology seededWB size
                           resolvedNodes = ByeResolution.resolveAutomaticAdvancements (seededWB ++ otherNodes)
 
-                      finalizeBracketGeneration tid tournament resolvedNodes (Just gf1Id) (Just resetId) Nothing
+                      finalizeBracketGeneration tid tournament (seededWB ++ otherNodes) resolvedNodes (Just gf1Id) (Just resetId) Nothing
 
                     RoundRobin -> do
                       let resolvedNodes = BracketGeneration.buildRoundRobinTopology validParticipants
 
-                      finalizeBracketGeneration tid tournament resolvedNodes Nothing Nothing Nothing
+                      finalizeBracketGeneration tid tournament resolvedNodes resolvedNodes Nothing Nothing Nothing
 
                     SingleElimination -> do
                       let size          = BracketGeneration.bracketSize (length validParticipants)
@@ -109,7 +111,7 @@ generateBracket currentUser tid = do
                             | tournamentThirdPlaceMatch tournament =
                                 BracketGeneration.addThirdPlaceMatch resolvedNodes
                             | otherwise = (resolvedNodes, Nothing)
-                      finalizeBracketGeneration tid tournament finalNodes Nothing Nothing mThirdPlaceId
+                      finalizeBracketGeneration tid tournament (seeded ++ [ n | n <- finalNodes, Just (nodeId n) == mThirdPlaceId ]) finalNodes Nothing Nothing mThirdPlaceId
 -- | All three TournamentFormat constructors are matched explicitly
 -- (no catch-all) so GHC's exhaustiveness checking itself guards
 -- against a future format being silently mishandled here.
@@ -135,17 +137,20 @@ requireNoBracket tournament =
 finalizeBracketGeneration
   :: ( BracketRepository m, MatchRepository m, TournamentRepository m,ParticipantRepository m
      , TournamentHistoryRepository m, Transactional m )
-  => TournamentId -> Tournament -> [BracketNode]
+  => TournamentId -> Tournament -> [BracketNode] -> [BracketNode]
   -> Maybe BracketNodeId -> Maybe BracketNodeId -> Maybe BracketNodeId
   -> m (Either GenerateBracketError BracketId)
-finalizeBracketGeneration tid tournament resolvedNodes mGf1Id mResetId mThirdPlaceId =
-  withTxN $ do
+finalizeBracketGeneration tid tournament linkGraph resolvedNodes mGf1Id mResetId mThirdPlaceId =
+  case first LinkDerivationFailed (deriveLinks linkGraph) of
+    Left err -> pure (Left err)
+    Right links -> withTxN $ do
       bracketId <- Repo.createBracket tid
       nodeIdMap <- Repo.saveBracket
           Bracket { bracketId = bracketId, bracketTournament = tid
                   , bracketGF1NodeId = mGf1Id, bracketResetNodeId = mResetId
                   , bracketThirdPlaceNodeId = mThirdPlaceId }
           resolvedNodes
+      Repo.saveBracketLinks bracketId nodeIdMap links
 
       let readyIds = Materialization.readyNodes resolvedNodes
           ready     = mapMaybe (\nid -> find (\n -> nodeId n == nid) resolvedNodes) readyIds
