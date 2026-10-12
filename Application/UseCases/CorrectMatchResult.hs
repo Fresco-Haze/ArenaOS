@@ -23,7 +23,7 @@ import Application.Internal.Authorization (AuthorizationError, requireTournament
 import qualified Domain.Tournament
 import Data.Maybe (catMaybes, listToMaybe)
 import Domain.Bracket (BracketNode(..), BracketNodeId, Bracket(..), BracketSide(..), MatchSlot(..))
-import Domain.BracketLinks (BracketLinks, NodeDestination(..), NodeLinks(..))
+import Domain.BracketLinks (BracketLinks, NodeDestination(..), NodeLinks(..), SlotPosition(..))
 import Engine.Correction.DoubleEliminationLineage
   ( resolveWBWinnerTarget, resolveWBLoserTarget, resolveLBTarget
   , LineageError(..), GF1Outcome(..), classifyGF1Outcome
@@ -229,60 +229,83 @@ slotRepairs mThirdPlace path nodes (oldWinner, newWinner) (oldLoser, newLoser) =
          swapInNode oldLoser newLoser n
     ]
 
+-- | What a correction of a double-elimination node must touch, decided from the bracket
+-- header (grand final, reset) and the STORED links, so every id is a stored id.
+-- A winners node needs both destinations (the winners final's winner goes to the grand
+-- final); a losers node needs its winner destination (the losers final's goes to the
+-- grand final). Anything missing is refused, as the old code refused "no loser target".
+data DEPlan
+  = PlanReset
+  | PlanGF1 BracketNodeId
+  | PlanWB BracketNodeId BracketNodeId
+  | PlanLB BracketNodeId
+
+planDECorrection
+  :: MatchId -> Bracket -> BracketLinks -> BracketNode -> Either CorrectMatchResultError DEPlan
+planDECorrection mid bracket links sourceNode
+  | Just sid == bracketGF1NodeId bracket =
+      case bracketResetNodeId bracket of
+        Just resetId -> Right (PlanGF1 resetId)
+        Nothing      -> Left (CorrectionIntegrityViolation mid)
+  | Just sid == bracketResetNodeId bracket = Right PlanReset
+  | otherwise =
+      case lookup sid links of
+        Nothing -> Left (CorrectionIntegrityViolation mid)
+        Just l
+          | nodeStage sourceNode == Winners ->
+              case (linkWinnerTo l, linkLoserTo l) of
+                (Just w, Just lo) -> Right (PlanWB (destNode w) (destNode lo))
+                _                 -> Left (CorrectionIntegrityViolation mid)
+          | otherwise ->
+              case linkWinnerTo l of
+                Just w  -> Right (PlanLB (destNode w))
+                Nothing -> Left (CorrectionIntegrityViolation mid)
+  where
+    sid = nodeId sourceNode
+
+-- | The winners-bracket final winner, found as the node whose winner goes to slot A of
+-- the grand final (how buildDoubleEliminationTopology wires it), not by template lookup.
+findWBFinalWinnerLinked
+  :: BracketLinks -> BracketNodeId -> [Match] -> MatchId
+  -> Either CorrectMatchResultError Participant
+findWBFinalWinnerLinked links gf1Id allMatches currentMatchId =
+  case [ nid | (nid, l) <- links, linkWinnerTo l == Just (NodeDestination gf1Id SlotA) ] of
+    [wbFinalId] ->
+      case find ((== wbFinalId) . matchBracketNode) allMatches of
+        Nothing -> Left (CorrectionIntegrityViolation currentMatchId)
+        Just wbFinalMatch ->
+          case matchOutcome wbFinalMatch >>= correctedParticipant of
+            Nothing -> Left (SourceMatchOutcomeInvalid (matchId wbFinalMatch))
+            Just w  -> Right w
+    _ -> Left (CorrectionIntegrityViolation currentMatchId)
+
 correctDoubleElimination
   :: (MatchRepository m, BracketRepository m)
   => Match -> MatchOutcome -> m (Either CorrectMatchResultError Match)
 correctDoubleElimination match newOutcome = do
   (bracket, nodes) <- Repo.getBracket (matchBracket match)
-  let size = length (filter (\n -> nodeRound n == 1 && nodeStage n == Winners) nodes) * 2
-      realWBRound1      = filter (\n -> nodeRound n == 1 && nodeStage n == Winners) nodes
-      freshLaterRounds  = filter ((> 1) . nodeRound) (buildTopology size)
-      wbNodes           = realWBRound1 ++ freshLaterRounds
-      sourceNodeId      = matchBracketNode match
-  case find ((== sourceNodeId) . nodeId) nodes of
-    Nothing -> pure (Left (CorrectionIntegrityViolation (matchId match)))
-    Just sourceNode -> do
-      allMatches <- Repo.listMatchesForBracket (matchBracket match)
-      case classifyDECase bracket wbNodes size sourceNode of
-        ResetCase -> applySourceOnlyCorrection match newOutcome
-
-        WBNonFinal ->
-          case ( resolveWBWinnerTarget size sourceNodeId
-               , resolveWBLoserTarget wbNodes size sourceNodeId
-               ) of
-            (Nothing, _) -> pure (Left (CorrectionIntegrityViolation (matchId match)))
-              -- unreachable: classifyDECase already confirmed this isn't the WB Final
-            (Just winnerTargetId, loserResult) ->
-              case loserResult of
-                Left lerr -> pure (Left (translateLineageError match lerr))
-                Right loserTargetId ->
+  mLinks <- Repo.getBracketLinks (matchBracket match)
+  case mLinks of
+    Nothing -> pure (Left BracketLinksUnavailable)
+    Just links ->
+      case find ((== matchBracketNode match) . nodeId) nodes of
+        Nothing -> pure (Left (CorrectionIntegrityViolation (matchId match)))
+        Just sourceNode ->
+          case planDECorrection (matchId match) bracket links sourceNode of
+            Left err -> pure (Left err)
+            Right plan -> do
+              allMatches <- Repo.listMatchesForBracket (matchBracket match)
+              case plan of
+                PlanReset ->
+                  applySourceOnlyCorrection match newOutcome
+                PlanWB winnerTargetId loserTargetId ->
                   handleWBSource match newOutcome allMatches winnerTargetId loserTargetId
-
-        WBFinal ->
-          case bracketGF1NodeId bracket of
-            Nothing -> pure (Left (CorrectionIntegrityViolation (matchId match)))
-              -- unreachable for a genuine DE bracket, per GenerateBracket.hs
-            Just gf1Id ->
-              case resolveWBLoserTarget wbNodes size sourceNodeId of
-                Left lerr -> pure (Left (translateLineageError match lerr))
-                Right lbFinalId -> handleWBSource match newOutcome allMatches gf1Id lbFinalId
-
-        LBNonFinal ->
-          case resolveLBTarget wbNodes size sourceNodeId of
-            Nothing -> pure (Left (CorrectionIntegrityViolation (matchId match)))
-              -- unreachable: classifyDECase already confirmed this isn't the LB Final
-            Just targetId -> handleLBSource match newOutcome allMatches targetId
-
-        LBFinal ->
-          case bracketGF1NodeId bracket of
-            Nothing -> pure (Left (CorrectionIntegrityViolation (matchId match)))
-            Just gf1Id -> handleLBSource match newOutcome allMatches gf1Id
-
-        GF1Case ->
-          case bracketResetNodeId bracket of
-            Nothing -> pure (Left (CorrectionIntegrityViolation (matchId match)))
-              -- unreachable for a genuine DE bracket
-            Just resetId -> handleGF1Case match newOutcome size wbNodes allMatches resetId
+                PlanLB targetId ->
+                  handleLBSource match newOutcome allMatches targetId
+                PlanGF1 resetId ->
+                  handleGF1Case match newOutcome
+                    (findWBFinalWinnerLinked links (nodeId sourceNode) allMatches (matchId match))
+                    allMatches resetId
 
 -- | Static downstream path from a corrected node's id up to the root,
 -- using the RECOMPUTED topology shape (buildTopology size) rather than
@@ -469,10 +492,10 @@ checkGF1Correction currentMatchId _ oldOutcome newOutcome resetMatch =
 
 handleGF1Case
   :: (MatchRepository m, BracketRepository m)
-  => Match -> MatchOutcome -> Int -> [BracketNode] -> [Match] -> BracketNodeId
+  => Match -> MatchOutcome -> Either CorrectMatchResultError Participant -> [Match] -> BracketNodeId
   -> m (Either CorrectMatchResultError Match)
-handleGF1Case match newOutcome size wbNodes allMatches resetNodeId =
-  case findWBFinalWinner size wbNodes allMatches (matchId match) of
+handleGF1Case match newOutcome wbFinalWinnerResult allMatches resetNodeId =
+  case wbFinalWinnerResult of
     Left err -> pure (Left err)
     Right wbFinalWinner ->
       case (correctedParticipant newOutcome, matchOutcome match >>= correctedParticipant) of

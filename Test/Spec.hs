@@ -276,6 +276,8 @@ spec = before_ resetTestDb $ do
   bracketLinksStoreSpec
   correctionNodeIdSpec
   bracketLinksGenerationSpec
+  doubleElimNodeIdSpec
+  doubleElimParitySpec
   describe "Tournament Lifecycle (4-participant golden scenario)" $
     it "runs the full pipeline from creation to completion" $ do
       result <- runSQLiteM testDbPath $ do
@@ -7606,5 +7608,259 @@ crLegacySpec = crBrokenSpec
 
 crCorruptSpec = crBrokenSpec
   "corrupt links (one row missing): correction fails with StorageFailure and nothing changes"
+  crDropOneLink
+  bsExpectStorageFailure
+
+-- ---------------------------------------------------------------------
+-- Double elimination correction on offset stored node ids (reproduction only).
+-- 4 players: two winners-bracket semifinals feed the winners final (winner) and
+-- the first losers match (loser). Targets are found from the stored pointers
+-- before anything is played, independent of any id arithmetic.
+-- ---------------------------------------------------------------------
+
+dcFacts nodesBefore matchesAtGen = (m1, target (BLBr.AwaitingWinnerOf src), target (BLBr.AwaitingLoserOf src))
+  where
+    m1 = head matchesAtGen
+    src = matchBracketNode m1
+    target p = case find (\nd -> BLBr.nodeSlotA nd == p || BLBr.nodeSlotB nd == p) nodesBefore of
+      Just nd -> BLBr.nodeId nd
+      Nothing -> error "test setup invariant violated: no node holds that pointer"
+
+dcHolds :: [BLBr.BracketNode] -> BLIds.BracketNodeId -> Participant -> Bool
+dcHolds nodes nid p = case filter ((== nid) . BLBr.nodeId) nodes of
+  (nd : _) -> BLBr.nodeSlotA nd == BLBr.Filled p || BLBr.nodeSlotB nd == BLBr.Filled p
+  []       -> False
+
+-- Both semifinals played, the winners final started: correcting a semifinal must be rejected.
+dcGuardSpec :: String -> Bool -> Spec
+dcGuardSpec title burn =
+  it title $ do
+    result <- runSQLiteM testDbPath $ do
+      setupSchema
+      (ownerId, bracketId) <- lgGenerate burn DoubleElimination False "dc-guard-owner" 4
+      (_, nodesBefore) <- Repo.getBracket bracketId
+      matchesAtGen <- Repo.listMatchesForBracket bracketId
+      let (m1, winTarget, _) = dcFacts nodesBefore matchesAtGen
+          m2 = head [ m | m <- matchesAtGen, matchId m /= matchId m1 ]
+      _ <- unwrap =<< startMatch ownerId (matchId m1)
+      _ <- unwrap =<< recordMatchResult ownerId (matchId m1) (Winner (matchCompetitorA m1))
+      _ <- unwrap =<< startMatch ownerId (matchId m2)
+      _ <- unwrap =<< recordMatchResult ownerId (matchId m2) (Winner (matchCompetitorA m2))
+      allM <- Repo.listMatchesForBracket bracketId
+      let wbFinalMatch = head [ m | m <- allM, matchBracketNode m == winTarget ]
+      _ <- unwrap =<< startMatch ownerId (matchId wbFinalMatch)
+      outcome <- correctMatchResult ownerId (matchId m1) (Winner (matchCompetitorB m1))
+      pure (matchId wbFinalMatch, either Just (const Nothing) outcome)
+    case result of
+      Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
+      Right (finalId, rejected) ->
+        rejected `shouldBe` Just (DownstreamMatchStarted finalId)
+
+-- One semifinal played, nothing downstream materialized: the correction must reach
+-- both target nodes (winner into the winners final, loser into the first losers match).
+dcRepairSpec :: String -> Bool -> Spec
+dcRepairSpec title burn =
+  it title $ do
+    result <- runSQLiteM testDbPath $ do
+      setupSchema
+      (ownerId, bracketId) <- lgGenerate burn DoubleElimination False "dc-repair-owner" 4
+      (_, nodesBefore) <- Repo.getBracket bracketId
+      matchesAtGen <- Repo.listMatchesForBracket bracketId
+      let (m1, winTarget, loseTarget) = dcFacts nodesBefore matchesAtGen
+          x = matchCompetitorA m1
+          y = matchCompetitorB m1
+      _ <- unwrap =<< startMatch ownerId (matchId m1)
+      _ <- unwrap =<< recordMatchResult ownerId (matchId m1) (Winner x)
+      (_, nodesPlayed) <- Repo.getBracket bracketId
+      corrected <- unwrap =<< correctMatchResult ownerId (matchId m1) (Winner y)
+      (_, nodesAfter) <- Repo.getBracket bracketId
+      pure ( corrected, y
+           , [ ("setup: winners final holds the recorded winner", dcHolds nodesPlayed winTarget x)
+             , ("setup: first losers match holds the recorded loser", dcHolds nodesPlayed loseTarget y)
+             , ("winners final holds the corrected winner", dcHolds nodesAfter winTarget y)
+             , ("winners final no longer holds the old winner", not (dcHolds nodesAfter winTarget x))
+             , ("first losers match holds the old winner as its new loser", dcHolds nodesAfter loseTarget x)
+             , ("first losers match no longer holds the corrected winner", not (dcHolds nodesAfter loseTarget y)) ] )
+    case result of
+      Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
+      Right (corrected, y, checks) -> do
+        matchOutcome corrected `shouldBe` Just (Winner y)
+        forM_ checks $ \(name, ok) -> (name, ok) `shouldBe` (name, True)
+
+doubleElimNodeIdSpec :: Spec
+doubleElimNodeIdSpec = describe "NodeIdSpace: CorrectMatchResult (Double Elim)" $ do
+  dcGuardSpec  "guard, control (first-insert ids): rejects with DownstreamMatchStarted once the winners final has started" False
+  dcGuardSpec  "guard, offset ids: rejects with DownstreamMatchStarted once the winners final has started" True
+  dcRepairSpec "repair, control (first-insert ids): both target nodes take the corrected result" False
+  dcRepairSpec "repair, offset ids: both target nodes take the corrected result" True
+  dcFinalRepairSpec "final repair, control (first-insert ids): the grand final and the losers final take the corrected result" False
+  dcFinalRepairSpec "final repair, offset ids: the grand final and the losers final take the corrected result" True
+  dcLbRepairSpec "losers match repair, control (first-insert ids): the losers final takes the corrected winner" False
+  dcLbRepairSpec "losers match repair, offset ids: the losers final takes the corrected winner" True
+  dcLegacySpec
+  dcCorruptSpec
+
+-- ---------------------------------------------------------------------
+-- DE lineage parity (tests only, no source change): on first-insert brackets the
+-- stored links must reproduce exactly what the template-based lineage helpers
+-- resolve today, including where they decline, so that switching double
+-- elimination correction to the links preserves its behavior.
+-- Old plan = (winner target, loser target) as correctDoubleElimination computes it;
+-- new plan = what the links say. A final's winner goes to the grand final.
+-- ---------------------------------------------------------------------
+
+dpPlans players =
+  [ (BLBr.nodeId n, oldPlan n, newPlan n) | n <- wb ++ lb ]
+  where
+    size = BLGen.bracketSize players
+    (wb, allNodes, gf1, _) = blDe players
+    lb = [ n | n <- allNodes, BLBr.nodeStage n == BLBr.Losers ]
+    links = blDerive allNodes
+    orGf1 = maybe (Just gf1) Just
+    oldPlan n
+      | BLBr.nodeStage n == BLBr.Winners =
+          ( orGf1 (BLLD.resolveWBWinnerTarget size (BLBr.nodeId n))
+          , either (const Nothing) Just (BLLD.resolveWBLoserTarget wb size (BLBr.nodeId n)) )
+      | otherwise = ( orGf1 (BLLD.resolveLBTarget wb size (BLBr.nodeId n)), Nothing )
+    newPlan n = (blWinnerNode links n, blLoserNode links n)
+
+dpSpec :: Int -> Spec
+dpSpec players =
+  it ("double elimination, " ++ show players ++ " players: links reproduce the lineage helpers' targets, including where they decline") $ do
+    let plans = dpPlans players
+    [ p | p@(_, o, nw) <- plans, o /= nw ] `shouldBe` []
+    -- not vacuous: some node really has a loser target to compare
+    length [ () | (_, (_, l), _) <- plans, l /= Nothing ] `shouldSatisfy` (> 0)
+
+doubleElimParitySpec :: Spec
+doubleElimParitySpec = describe "DEParity: stored links reproduce the lineage helpers" $
+  mapM_ dpSpec [4 .. 16]
+
+-- ---------------------------------------------------------------------
+-- Double elimination correction on the stored links: winners final, losers
+-- match, and legacy / corrupt link data. Each repair scenario runs as a control
+-- (first-insert ids) and with offset ids.
+-- ---------------------------------------------------------------------
+
+dcHolder nodes p = case find (\nd -> BLBr.nodeSlotA nd == p || BLBr.nodeSlotB nd == p) nodes of
+  Just nd -> BLBr.nodeId nd
+  Nothing -> error "test setup invariant violated: no node holds that pointer"
+
+dcPlaySemis ownerId m1 m2 = do
+  _ <- unwrap =<< startMatch ownerId (matchId m1)
+  _ <- unwrap =<< recordMatchResult ownerId (matchId m1) (Winner (matchCompetitorA m1))
+  _ <- unwrap =<< startMatch ownerId (matchId m2)
+  _ <- unwrap =<< recordMatchResult ownerId (matchId m2) (Winner (matchCompetitorA m2))
+  pure ()
+
+-- winners final played, then corrected: grand final (slot A, the winner) and losers final
+-- (slot A, the loser) must both follow
+dcFinalRepairSpec :: String -> Bool -> Spec
+dcFinalRepairSpec title burn =
+  it title $ do
+    result <- runSQLiteM testDbPath $ do
+      setupSchema
+      (ownerId, bracketId) <- lgGenerate burn DoubleElimination False "dc-final-owner" 4
+      (_, nodesBefore) <- Repo.getBracket bracketId
+      matchesAtGen <- Repo.listMatchesForBracket bracketId
+      let (m1, fNode, _) = dcFacts nodesBefore matchesAtGen
+          m2 = head [ m | m <- matchesAtGen, matchId m /= matchId m1 ]
+          gfNode = dcHolder nodesBefore (BLBr.AwaitingWinnerOf fNode)
+          lfNode = dcHolder nodesBefore (BLBr.AwaitingLoserOf fNode)
+      dcPlaySemis ownerId m1 m2
+      allM <- Repo.listMatchesForBracket bracketId
+      let fMatch = head [ m | m <- allM, matchBracketNode m == fNode ]
+          x = matchCompetitorA fMatch
+          y = matchCompetitorB fMatch
+      _ <- unwrap =<< startMatch ownerId (matchId fMatch)
+      _ <- unwrap =<< recordMatchResult ownerId (matchId fMatch) (Winner x)
+      (_, nodesPlayed) <- Repo.getBracket bracketId
+      corrected <- unwrap =<< correctMatchResult ownerId (matchId fMatch) (Winner y)
+      (_, nodesAfter) <- Repo.getBracket bracketId
+      pure ( corrected, y
+           , [ ("setup: grand final holds the recorded winner", dcHolds nodesPlayed gfNode x)
+             , ("setup: losers final holds the recorded loser", dcHolds nodesPlayed lfNode y)
+             , ("grand final holds the corrected winner", dcHolds nodesAfter gfNode y)
+             , ("grand final no longer holds the old winner", not (dcHolds nodesAfter gfNode x))
+             , ("losers final holds the old winner as its new loser", dcHolds nodesAfter lfNode x)
+             , ("losers final no longer holds the corrected winner", not (dcHolds nodesAfter lfNode y)) ] )
+    case result of
+      Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
+      Right (corrected, y, checks) -> do
+        matchOutcome corrected `shouldBe` Just (Winner y)
+        forM_ checks $ \(name, ok) -> (name, ok) `shouldBe` (name, True)
+
+-- first losers match played, then corrected: the losers final (slot B) must follow
+dcLbRepairSpec :: String -> Bool -> Spec
+dcLbRepairSpec title burn =
+  it title $ do
+    result <- runSQLiteM testDbPath $ do
+      setupSchema
+      (ownerId, bracketId) <- lgGenerate burn DoubleElimination False "dc-lb-owner" 4
+      (_, nodesBefore) <- Repo.getBracket bracketId
+      matchesAtGen <- Repo.listMatchesForBracket bracketId
+      let (m1, _, l1Node) = dcFacts nodesBefore matchesAtGen
+          m2 = head [ m | m <- matchesAtGen, matchId m /= matchId m1 ]
+          lfNode = dcHolder nodesBefore (BLBr.AwaitingWinnerOf l1Node)
+      dcPlaySemis ownerId m1 m2
+      allM <- Repo.listMatchesForBracket bracketId
+      let l1Match = head [ m | m <- allM, matchBracketNode m == l1Node ]
+          x = matchCompetitorA l1Match
+          y = matchCompetitorB l1Match
+      _ <- unwrap =<< startMatch ownerId (matchId l1Match)
+      _ <- unwrap =<< recordMatchResult ownerId (matchId l1Match) (Winner x)
+      (_, nodesPlayed) <- Repo.getBracket bracketId
+      corrected <- unwrap =<< correctMatchResult ownerId (matchId l1Match) (Winner y)
+      (_, nodesAfter) <- Repo.getBracket bracketId
+      pure ( corrected, y
+           , [ ("setup: losers final holds the recorded winner", dcHolds nodesPlayed lfNode x)
+             , ("losers final holds the corrected winner", dcHolds nodesAfter lfNode y)
+             , ("losers final no longer holds the old winner", not (dcHolds nodesAfter lfNode x)) ] )
+    case result of
+      Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
+      Right (corrected, y, checks) -> do
+        matchOutcome corrected `shouldBe` Just (Winner y)
+        forM_ checks $ \(name, ok) -> (name, ok) `shouldBe` (name, True)
+
+dcSnapshot bracketId winTarget loseTarget srcMatchId = do
+  src <- Repo.getMatch srcMatchId
+  ms <- Repo.listMatchesForBracket bracketId
+  (_, nodes) <- Repo.getBracket bracketId
+  pure ( src
+       , [ m | m <- ms, matchBracketNode m `elem` [winTarget, loseTarget] ]
+       , [ n | n <- nodes, BLBr.nodeId n `elem` [winTarget, loseTarget] ] )
+
+dcBrokenSpec title breakLinks expectAttempt =
+  it title $ do
+    prepared <- runSQLiteM testDbPath $ do
+      setupSchema
+      (ownerId, bracketId) <- lgGenerate True DoubleElimination False "dc-broken-owner" 4
+      (_, nodesBefore) <- Repo.getBracket bracketId
+      matchesAtGen <- Repo.listMatchesForBracket bracketId
+      let (m1, winTarget, loseTarget) = dcFacts nodesBefore matchesAtGen
+      _ <- unwrap =<< startMatch ownerId (matchId m1)
+      _ <- unwrap =<< recordMatchResult ownerId (matchId m1) (Winner (matchCompetitorA m1))
+      breakLinks bracketId (matchBracketNode m1)
+      snapshot <- dcSnapshot bracketId winTarget loseTarget (matchId m1)
+      pure (ownerId, bracketId, m1, winTarget, loseTarget, snapshot)
+    case prepared of
+      Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
+      Right (ownerId, bracketId, m1, winTarget, loseTarget, before) -> do
+        attempt <- runSQLiteM testDbPath (correctMatchResult ownerId (matchId m1) (Winner (matchCompetitorB m1)))
+        expectAttempt attempt
+        after <- runSQLiteM testDbPath (dcSnapshot bracketId winTarget loseTarget (matchId m1))
+        case after of
+          Left err   -> expectationFailure ("read-back failed: " ++ show err)
+          Right snap -> snap `shouldBe` before
+
+dcLegacySpec = dcBrokenSpec
+  "double elimination, legacy bracket without links: correction is rejected with BracketLinksUnavailable and nothing changes"
+  crDropAllLinks
+  (\attempt -> case attempt of
+      Right (Left BracketLinksUnavailable) -> pure ()
+      other -> expectationFailure ("expected Right (Left BracketLinksUnavailable), got: " ++ show other))
+
+dcCorruptSpec = dcBrokenSpec
+  "double elimination, corrupt links (one row missing): correction fails with StorageFailure and nothing changes"
   crDropOneLink
   bsExpectStorageFailure
