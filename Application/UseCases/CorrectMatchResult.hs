@@ -18,16 +18,13 @@ import Shell.Persistence.Port
   ( MatchRepository, BracketRepository, TournamentRepository, EFootballScoreRepository, Transactional(..) )
 import qualified Shell.Persistence.Port as Repo
 
-import Engine.BracketGeneration (buildTopology, findParent)  -- findParent needs exporting
 import Application.Internal.Authorization (AuthorizationError, requireTournamentOwner)
 import qualified Domain.Tournament
 import Data.Maybe (catMaybes, listToMaybe)
 import Domain.Bracket (BracketNode(..), BracketNodeId, Bracket(..), BracketSide(..), MatchSlot(..))
 import Domain.BracketLinks (BracketLinks, NodeDestination(..), NodeLinks(..), SlotPosition(..))
 import Engine.Correction.DoubleEliminationLineage
-  ( resolveWBWinnerTarget, resolveWBLoserTarget, resolveLBTarget
-  , LineageError(..), GF1Outcome(..), classifyGF1Outcome
-  )
+  ( GF1Outcome(..), classifyGF1Outcome )
 import Application.Internal.LifecycleTransition (LifecycleError, requireOperationallyActive)
 
 
@@ -307,20 +304,6 @@ correctDoubleElimination match newOutcome = do
                     (findWBFinalWinnerLinked links (nodeId sourceNode) allMatches (matchId match))
                     allMatches resetId
 
--- | Static downstream path from a corrected node's id up to the root,
--- using the RECOMPUTED topology shape (buildTopology size) rather than
--- live BracketNode state -- propagateWinner destroys the
--- AwaitingWinnerOf pointer the instant it fills a slot (SE-CORR-02).
--- Single-Elim only: relies on findParent producing a single linear
--- chain, which does not generalize to Double Elim.
-downstreamPath :: BracketNodeId -> Int -> [BracketNodeId]
-downstreamPath sourceId size = go sourceId
-  where
-    topology = buildTopology size
-    go nid = case findParent nid topology of
-      Nothing     -> []
-      Just parent -> parent : go parent
-
 correctedParticipant :: MatchOutcome -> Maybe Participant
 correctedParticipant (Winner p)           = Just p
 correctedParticipant (Forfeit p)          = Just p
@@ -339,27 +322,6 @@ findReplacementSlot m oldParticipant newParticipant
   | matchCompetitorA m == oldParticipant = Just m { matchCompetitorA = newParticipant }
   | matchCompetitorB m == oldParticipant = Just m { matchCompetitorB = newParticipant }
   | otherwise                            = Nothing
-
-
-data DECase = WBNonFinal | WBFinal | LBNonFinal | LBFinal | GF1Case | ResetCase
-  deriving (Eq, Show)
-
-classifyDECase :: Bracket -> [BracketNode] -> Int -> BracketNode -> DECase
-classifyDECase bracket wbNodes size sourceNode
-  | Just (nodeId sourceNode) == bracketGF1NodeId bracket   = GF1Case
-  | Just (nodeId sourceNode) == bracketResetNodeId bracket = ResetCase
-  | nodeStage sourceNode == Winners =
-      case resolveWBWinnerTarget size (nodeId sourceNode) of
-        Nothing -> WBFinal
-        Just _  -> WBNonFinal
-  | otherwise =
-      case resolveLBTarget wbNodes size (nodeId sourceNode) of
-        Nothing -> LBFinal
-        Just _  -> LBNonFinal
-
-translateLineageError :: Match -> LineageError -> CorrectMatchResultError
-translateLineageError match (NoLoserTarget _) = CorrectionIntegrityViolation (matchId match)
-
 
 
 -- | DE counterpart of slotRepairs. Recording writes the winner into the winner
@@ -457,20 +419,6 @@ handleLBSource match newOutcome allMatches targetId = do
                   Repo.saveMatch corrected
                   Repo.saveMatch updatedTm
                   pure (Right corrected)
-
-findWBFinalWinner
-  :: Int -> [BracketNode] -> [Match] -> MatchId
-  -> Either CorrectMatchResultError Participant
-findWBFinalWinner size wbNodes allMatches currentMatchId =
-  case find (\n -> resolveWBWinnerTarget size (nodeId n) == Nothing) wbNodes of
-    Nothing -> Left (CorrectionIntegrityViolation currentMatchId)
-    Just wbFinalNode ->
-      case find ((== nodeId wbFinalNode) . matchBracketNode) allMatches of
-        Nothing -> Left (CorrectionIntegrityViolation currentMatchId)
-        Just wbFinalMatch ->
-          case matchOutcome wbFinalMatch >>= correctedParticipant of
-            Nothing -> Left (SourceMatchOutcomeInvalid (matchId wbFinalMatch))
-            Just w  -> Right w
 
 -- 2. checkGF1Correction gains the explicit reject Thread A specified.
 -- Needs the current match's id threaded in to construct the error.
