@@ -7,6 +7,7 @@ module Application.UseCases.GetBracket
 import Data.Bifunctor (first)
 
 import Domain.Bracket (Bracket, BracketNode)
+import Domain.BracketLinks (BracketLinks)
 import Domain.Match (Match)
 import Domain.Tournament (Tournament(..), TournamentId)
 import Domain.Ids (UserId)
@@ -26,6 +27,7 @@ data BracketView = BracketView
   , viewBracket    :: Bracket
   , viewNodes      :: [BracketNode]
   , viewMatches    :: [Match]
+  , viewLinks      :: Maybe BracketLinks
   } deriving (Eq, Show)
 
 getBracket
@@ -42,5 +44,9 @@ getBracket viewer tid = do
         Nothing  -> pure (Left BracketNotGenerated)
         Just bid -> do
           (bracket, nodes) <- Repo.getBracket bid
+          
           matches <- Repo.listMatchesForBracket bid
-          pure (Right (BracketView tournament bracket nodes matches))
+          links <- Repo.getBracketLinks bid
+          pure (Right (BracketView tournament bracket nodes matches links))
+
+          

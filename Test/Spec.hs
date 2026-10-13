@@ -164,6 +164,7 @@ import qualified Engine.BracketLinks as BLEng
 import qualified Engine.ByeResolution as BLBye
 import qualified Engine.Correction.DoubleEliminationLineage as BLLD
 import qualified Engine.Seeding as BLSeed
+import qualified Application.UseCases.GetBracket as GBV
 import qualified Data.Map.Strict as BLMap
 import qualified Database.SQLite.Simple as BLSql
 
@@ -278,6 +279,7 @@ spec = before_ resetTestDb $ do
   bracketLinksGenerationSpec
   doubleElimNodeIdSpec
   doubleElimParitySpec
+  bracketLinksViewSpec
   describe "Tournament Lifecycle (4-participant golden scenario)" $
     it "runs the full pipeline from creation to completion" $ do
       result <- runSQLiteM testDbPath $ do
@@ -7864,3 +7866,47 @@ dcCorruptSpec = dcBrokenSpec
   "double elimination, corrupt links (one row missing): correction fails with StorageFailure and nothing changes"
   crDropOneLink
   bsExpectStorageFailure
+
+-- ---------------------------------------------------------------------
+-- Step 4: the bracket read model carries the stored links.
+-- ---------------------------------------------------------------------
+
+gvView ownerId bracketId = do
+  (b, _) <- Repo.getBracket bracketId
+  unwrap =<< GBV.getBracket (Just ownerId) (BLBr.bracketTournament b)
+
+bracketLinksViewSpec :: Spec
+bracketLinksViewSpec = describe "GetBracket read model carries the stored bracket links" $ do
+  it "a generated bracket with offset ids exposes exactly the stored links" $ do
+    result <- runSQLiteM testDbPath $ do
+      setupSchema
+      (ownerId, bracketId) <- lgGenerate True SingleElimination False "gv-owner-1" 5
+      v <- gvView ownerId bracketId
+      stored <- Repo.getBracketLinks bracketId
+      pure (GBV.viewLinks v, stored, map BLBr.nodeId (GBV.viewNodes v))
+    case result of
+      Left err -> expectationFailure (show err)
+      Right (viewLinks, stored, viewNodeIds) -> do
+        viewLinks `shouldSatisfy` isJust
+        viewLinks `shouldBe` stored
+        fmap (map fst) viewLinks `shouldBe` Just (BLList.sort viewNodeIds)
+
+  it "a bracket without stored links reads as no links" $ do
+    result <- runSQLiteM testDbPath $ do
+      setupSchema
+      (ownerId, bracketId) <- lgGenerate True SingleElimination False "gv-owner-2" 5
+      crDropAllLinks bracketId ()
+      v <- gvView ownerId bracketId
+      pure (GBV.viewLinks v)
+    case result of
+      Left err -> expectationFailure (show err)
+      Right links -> links `shouldBe` Nothing
+
+  it "corrupt links make the read fail loudly instead of silently dropping the links" $ do
+    result <- runSQLiteM testDbPath $ do
+      setupSchema
+      (ownerId, bracketId) <- lgGenerate True SingleElimination False "gv-owner-3" 5
+      (_, nodes) <- Repo.getBracket bracketId
+      crDropOneLink bracketId (BLBr.nodeId (head nodes))
+      gvView ownerId bracketId
+    bsExpectStorageFailure result

@@ -44,6 +44,7 @@ import qualified Application.UseCases.StartMatch as Start
 import qualified Application.UseCases.RecordMatchResult as Record
 import Data.List (find, sortOn)
 import qualified Application.UseCases.GetBracket as GetB
+import Domain.BracketLinks (BracketLinks, NodeDestination(..), NodeLinks(..), SlotPosition(..))
 import Domain.Tournament
   ( Tournament(..), TournamentName(..), OrganizerName(..)
   , TournamentFormat(..), Visibility(..), ParticipantMode(..) )
@@ -333,8 +334,16 @@ slotJson (AwaitingLoserOf n) =
 slotJson ByeSlot =
   object ["type" .= ("Bye" :: Text)]
 
-nodeJson :: Map.Map MatchId (Int, Int) -> [Match] -> BracketNode -> Value
-nodeJson scores matches n = object
+slotText :: SlotPosition -> Text
+slotText SlotA = "A"
+slotText SlotB = "B"
+
+destinationJson :: NodeDestination -> Value
+destinationJson (NodeDestination d pos) =
+  object [ "node" .= unBracketNodeId d, "slot" .= slotText pos ]
+
+nodeJson :: Map.Map MatchId (Int, Int) -> Maybe BracketLinks -> [Match] -> BracketNode -> Value
+nodeJson scores mLinks matches n = object . (++ linkPairs) $
   [ "nodeId" .= unBracketNodeId (nodeId n)
   , "round"  .= nodeRound n
   , "stage"  .= T.pack (show (nodeStage n))
@@ -343,6 +352,14 @@ nodeJson scores matches n = object
   , "match"  .= fmap matchJson (find (\m -> matchBracketNode m == nodeId n) matches)
   , "score"  .= (find (\m -> matchBracketNode m == nodeId n) matches >>= \m -> fmap (\(a, b) -> object ["a" .= a, "b" .= b]) (Map.lookup (matchId m) scores))
   ]
+  where
+    -- only when the bracket has stored links; otherwise the fields are absent on every node
+    linkPairs = case mLinks of
+      Nothing    -> []
+      Just links ->
+        let l = lookup (nodeId n) links
+        in [ "winnerTo" .= fmap destinationJson (l >>= linkWinnerTo)
+           , "loserTo"  .= fmap destinationJson (l >>= linkLoserTo) ]
 
 standingsJson :: Tournament -> [Match] -> Maybe [Value]
 standingsJson t matches
@@ -359,7 +376,8 @@ bracketViewJson scores v = object
   , "grandFinalNodeId" .= fmap unBracketNodeId (bracketGF1NodeId (GetB.viewBracket v))
   , "resetNodeId"      .= fmap unBracketNodeId (bracketResetNodeId (GetB.viewBracket v))
   , "standings"        .= standingsJson t (GetB.viewMatches v)
-  , "nodes"            .= map (nodeJson scores (GetB.viewMatches v)) sortedNodes
+  , "linksAvailable"   .= maybe False (const True) (GetB.viewLinks v)
+  , "nodes"            .= map (nodeJson scores (GetB.viewLinks v) (GetB.viewMatches v)) sortedNodes
   ]
   where
     t = GetB.viewTournament v
