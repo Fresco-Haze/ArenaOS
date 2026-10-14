@@ -603,9 +603,9 @@ button:hover:not(:disabled),
 .button-link:hover { border-color: var(--accent); }
 
 .btn-primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--on-accent);
+  background: var(--brand-solid);
+  border-color: var(--brand-solid);
+  color: #ffffff;
   font-weight: 600;
 }
 .btn-primary:hover:not(:disabled) { filter: brightness(1.1); }
