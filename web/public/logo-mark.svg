@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="-8 0 80 66" width="80" height="66">
   <style>
-    .a{fill:#17181c}.b1{fill:#9b4dff}.b2{fill:#7c3aed}
-    @media (prefers-color-scheme: dark){.a{fill:#f4f4f6}.b1{fill:#b07cff}.b2{fill:#8b5cf6}}
+    .a{fill:#17181c}.b1{fill:#0284c7}.b2{fill:#2563eb}
+    @media (prefers-color-scheme: dark){.a{fill:#f4f4f6}.b1{fill:#38bdf8}.b2{fill:#2563eb}}
   </style>
   <defs>
     <mask id="g" maskUnits="userSpaceOnUse" x="-10" y="0" width="84" height="70">

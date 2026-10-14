@@ -8,7 +8,7 @@
   </defs>
   <g transform="translate(12 11) scale(0.62)">
     <path d="M2 60L24 4H40L62 60H47L32 21L17 60Z" fill="#f4f4f6" mask="url(#g)"/>
-    <path d="M-6 50L68 20L30 41Z" fill="#b07cff"/>
-    <path d="M-2 64L52 40L24 58Z" fill="#8b5cf6"/>
+    <path d="M-6 50L68 20L30 41Z" fill="#38bdf8"/>
+    <path d="M-2 64L52 40L24 58Z" fill="#2563eb"/>
   </g>
 </svg>
