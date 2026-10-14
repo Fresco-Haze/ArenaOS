@@ -131,6 +131,10 @@ export function sectionRoundNames(count: number, prefix: 'Winners' | 'Losers'): 
   )
 }
 
+// Double-elimination labels are long; abbreviate so they fit the card.
+function shortLabel(s: string): string {
+  return s.replace('Winners', 'WB').replace('Losers', 'LB').replace(' round ', ' R').replace(' match ', ' M')
+}
 export function buildDoubleElimLabels(
   sections: { groups: RoundGroup[]; names: string[] }[],
   grandFinal: BracketNode | null,
@@ -140,7 +144,7 @@ export function buildDoubleElimLabels(
   for (const s of sections) {
     s.groups.forEach((g, gi) => {
       g.nodes.forEach((n, i) => {
-        labels.set(n.nodeId, g.nodes.length === 1 ? s.names[gi] : `${s.names[gi]} match ${i + 1}`)
+        labels.set(n.nodeId, shortLabel(g.nodes.length === 1 ? s.names[gi] : `${s.names[gi]} match ${i + 1}`))
       })
     })
   }
@@ -323,6 +327,79 @@ export function layoutSingleElim(main: BracketNode[], linksAvailable: boolean | 
   }
   return {
     nodes: main.map((n) => ({ node: n, x: xOf(n.round), cy: cyOf.get(n.nodeId) as number })),
+    links,
+    heads: rounds.map((r) => ({ round: r, x: xOf(r) })),
+    width: xOf(rounds[rounds.length - 1]) + TREE.colW,
+    height: TREE.head + leaves * pitch - TREE.rowGap,
+  }
+}
+
+// Like layoutSingleElim, but for one section of a double-elimination bracket:
+// a link leaving the section ends the tree (that node is the root), and a node
+// with a single feeder lines up with it (the other input is a drop-in).
+export function layoutSection(nodes: BracketNode[], linksAvailable: boolean | null | undefined): TreeLayout | null {
+  if (!linksAvailable || nodes.length === 0) return null
+  const byId = new Map<number, BracketNode>()
+  for (const n of nodes) byId.set(n.nodeId, n)
+  if (byId.size !== nodes.length) return null
+
+  const feeders = new Map<number, { A?: number; B?: number }>()
+  const roots: BracketNode[] = []
+  for (const n of nodes) {
+    const w = n.winnerTo
+    const target = w ? byId.get(w.node) : undefined
+    if (!w || !target) {
+      roots.push(n)
+      continue
+    }
+    if (target.round !== n.round + 1) return null
+    const f = feeders.get(target.nodeId) ?? {}
+    if (f[w.slot] !== undefined) return null
+    f[w.slot] = n.nodeId
+    feeders.set(target.nodeId, f)
+  }
+  if (roots.length !== 1) return null
+
+  const pitch = TREE.cardH + TREE.rowGap
+  const cyOf = new Map<number, number>()
+  let leaves = 0
+  let seen = 0
+  const visit = (n: BracketNode): boolean => {
+    seen++
+    const f = feeders.get(n.nodeId)
+    const kids = [f?.A, f?.B].filter((x): x is number => x !== undefined)
+    if (kids.length === 0) {
+      cyOf.set(n.nodeId, TREE.head + leaves * pitch + TREE.cardH / 2)
+      leaves++
+      return true
+    }
+    for (const k of kids) {
+      const kn = byId.get(k)
+      if (!kn || !visit(kn)) return false
+    }
+    const ys = kids.map((k) => cyOf.get(k) as number)
+    cyOf.set(n.nodeId, ys.reduce((a, b) => a + b, 0) / ys.length)
+    return true
+  }
+  if (!visit(roots[0]) || seen !== nodes.length) return null
+
+  const rounds = [...new Set(nodes.map((n) => n.round))].sort((a, b) => a - b)
+  const minRound = rounds[0]
+  const xOf = (round: number) => (round - minRound) * (TREE.colW + TREE.colGap)
+  const links: { key: number; d: string }[] = []
+  for (const n of nodes) {
+    const w = n.winnerTo
+    const t = w ? byId.get(w.node) : undefined
+    if (!w || !t) continue
+    const x1 = xOf(n.round) + TREE.colW
+    const xm = x1 + TREE.colGap / 2
+    const x2 = xOf(t.round)
+    const y1 = cyOf.get(n.nodeId) as number
+    const y2 = cyOf.get(t.nodeId) as number
+    links.push({ key: n.nodeId, d: `M${x1} ${y1}H${xm}V${y2}H${x2}` })
+  }
+  return {
+    nodes: nodes.map((n) => ({ node: n, x: xOf(n.round), cy: cyOf.get(n.nodeId) as number })),
     links,
     heads: rounds.map((r) => ({ round: r, x: xOf(r) })),
     width: xOf(rounds[rounds.length - 1]) + TREE.colW,

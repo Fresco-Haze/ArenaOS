@@ -1,4 +1,4 @@
-import { layoutSingleElim, TREE } from '../lib/bracket'
+import { layoutSection, layoutSingleElim, TREE } from '../lib/bracket'
 import type { TreeLayout } from '../lib/bracket'
 import { matchBadge } from '../badges'
 import type { BracketNode, BracketView } from '../model'
@@ -58,11 +58,15 @@ function cardState(node: BracketNode): CardState {
   return 'waiting'
 }
 
+// Undo shortLabel for the hover title on waiting slots.
+function fullLabel(s: string): string {
+  return s.replace(/\bWB\b/, 'Winners').replace(/\bLB\b/, 'Losers').replace(/ R(\d+)/, ' round $1').replace(/ M(\d+)/, ' match $1')
+}
 function SlotRow({ label, isWinner, isLoser, pending, score }: { label: string; isWinner: boolean; isLoser: boolean; pending: boolean; score?: number }) {
   const cls = 'slot' + (isWinner ? ' slot-winner' : '') + (isLoser ? ' slot-loser' : '') + (pending ? ' slot-pending' : '')
   return (
     <div className={cls}>
-      <span className="slot-name">{label}</span>
+      <span className="slot-name" title={pending ? fullLabel(label) : undefined}>{label}</span>
       {score !== undefined && <span className="slot-score">{score}</span>}
     </div>
   )
@@ -190,6 +194,11 @@ function RoundColumns({ groups, names, nodeLabels }: { groups: RoundGroup[]; nam
   )
 }
 
+function SectionView({ nodes, groups, names, nodeLabels, linksAvailable }: { nodes: BracketNode[]; groups: RoundGroup[]; names: string[]; nodeLabels: Map<number, string>; linksAvailable: boolean | null | undefined }) {
+  const tree = layoutSection(nodes, linksAvailable)
+  if (!tree) return <RoundColumns groups={groups} names={names} nodeLabels={nodeLabels} />
+  return <TreeBracket tree={tree} totalRounds={0} names={names} nodeLabels={nodeLabels} />
+}
 function DoubleElimBracket({ bracket }: { bracket: BracketView }) {
   const { winners, losers, grandFinal, reset } = splitDoubleElim(bracket)
   const wGroups = groupByRound(winners)
@@ -210,11 +219,11 @@ function DoubleElimBracket({ bracket }: { bracket: BracketView }) {
       {champ && <p className="champion">Champion: {champ}</p>}
       <Standings bracket={bracket} />
       <h3 className="bracket-section-heading">Winners bracket</h3>
-      <RoundColumns groups={wGroups} names={wNames} nodeLabels={nodeLabels} />
+      <SectionView nodes={winners} groups={wGroups} names={wNames} nodeLabels={nodeLabels} linksAvailable={bracket.linksAvailable} />
       {lGroups.length > 0 && (
         <>
           <h3 className="bracket-section-heading">Losers bracket</h3>
-          <RoundColumns groups={lGroups} names={lNames} nodeLabels={nodeLabels} />
+          <SectionView nodes={losers} groups={lGroups} names={lNames} nodeLabels={nodeLabels} linksAvailable={bracket.linksAvailable} />
         </>
       )}
       {grandFinal && (
@@ -233,13 +242,13 @@ function DoubleElimBracket({ bracket }: { bracket: BracketView }) {
     </div>
   )
 }
-function TreeBracket({ tree, totalRounds, nodeLabels }: { tree: TreeLayout; totalRounds: number; nodeLabels: Map<number, string> }) {
+function TreeBracket({ tree, totalRounds, names, nodeLabels }: { tree: TreeLayout; totalRounds: number; names?: string[]; nodeLabels: Map<number, string> }) {
   return (
     <div className="bracket-scroll">
       <div className="bracket-tree" style={{ width: tree.width, height: tree.height }}>
-        {tree.heads.map((h) => (
+        {tree.heads.map((h, i) => (
           <h3 key={h.round} className="bracket-round-heading" style={{ left: h.x, width: TREE.colW }}>
-            {roundName(h.round, totalRounds)}
+            {names ? names[i] : roundName(h.round, totalRounds)}
           </h3>
         ))}
         <svg className="bracket-links" width={tree.width} height={tree.height} aria-hidden="true">
