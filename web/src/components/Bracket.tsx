@@ -1,3 +1,4 @@
+import { formatDateTime } from '../lib/dates'
 import { layoutSection, layoutSingleElim, TREE } from '../lib/bracket'
 import type { TreeLayout } from '../lib/bracket'
 import { matchBadge } from '../badges'
@@ -18,7 +19,7 @@ function statusText(node: BracketNode): string {
   if (node.match) {
     switch (node.match.status) {
       case 'Scheduled':
-        return node.match.scheduledStart ? `Scheduled for ${new Date(node.match.scheduledStart).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : 'Scheduled'
+        return node.match.scheduledStart ? `Scheduled for ${formatDateTime(node.match.scheduledStart)}` : 'Scheduled'
       case 'InProgress':
         return 'In progress'
       case 'Completed':

@@ -1,3 +1,4 @@
+import { formatDateTime } from '../lib/dates'
 import { useState } from 'react'
 import { ApiError } from '../api'
 import EFootballResultDialog from './EFootballResultDialog'
@@ -84,7 +85,7 @@ export default function MatchActions({
             {busy ? 'Starting' : 'Start match'}
           </button>
           {match.scheduledStart && (
-            <p className="muted">Starts {new Date(match.scheduledStart).toLocaleString()}</p>
+            <p className="muted">Starts {formatDateTime(match.scheduledStart)}</p>
           )}
           <details className="schedule-details"><summary>Set start time</summary><div className="match-actions-buttons">
             <input

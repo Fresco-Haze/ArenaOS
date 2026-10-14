@@ -1,3 +1,4 @@
+import { formatDateTime } from './dates'
 import type { BracketView, Participant, Slot } from '../model'
 import {
   buildDoubleElimLabels, buildNodeLabels, groupByRound, placements,
@@ -90,7 +91,7 @@ export function playerStatus(bracket: BracketView, participant: Participant): Pl
     const [first, ...rest] = pending
     const details: string[] = []
     if (first.where) details.push(first.where)
-    if (first.when) details.push(`Scheduled for ${new Date(first.when).toLocaleString()}`)
+    if (first.when) details.push(`Scheduled for ${formatDateTime(first.when)}`)
     for (const r of rest) details.push(`Also: against ${r.opponent}`)
     return {
       name,
