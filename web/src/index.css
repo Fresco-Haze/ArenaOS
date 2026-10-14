@@ -18,11 +18,11 @@
   }
 }
 :root {
-  --bg: #ffffff;
-  --surface: #f6f6f4;
-  --text: #1a1a1a;
-  --muted: #5c5c57;
-  --line: #d9d9d4;
+  --bg: #f4f4f5;
+  --surface: #ffffff;
+  --text: #18181b;
+  --muted: #52525b;
+  --line: #c4c4cc;
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
