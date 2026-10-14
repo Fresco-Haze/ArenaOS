@@ -23,7 +23,6 @@
   --text: #1a1a1a;
   --muted: #5c5c57;
   --line: #d9d9d4;
-  --accent: #7c3aed;
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -41,7 +40,6 @@
     --text: #ececea;
     --muted: #a3a39d;
     --line: #3a3a37;
-    --accent: #a78bfa;
   }
 }
 
@@ -762,10 +760,6 @@ button:hover:not(:disabled),
   stroke-linecap: butt;
 }
 /* ArenaOS A mark */
-:root { --brand: #8b2cf5; }
-@media (prefers-color-scheme: dark) {
-  :root { --brand: #b06bff; }
-}
 .logo-glyph .logo-a-shape { fill: currentColor; }
 .logo-glyph .logo-slashes { fill: none; stroke: var(--brand); stroke-width: 5; }
 .logo-text { letter-spacing: 0.1em; font-weight: 800; }
@@ -787,10 +781,6 @@ button:hover:not(:disabled),
 }
 .logo-text { display: inline; }
 /* ArenaOS wordmark: custom A + rena + OS */
-:root { --brand: #7c3aed; --brand-2: #9b4dff; }
-@media (prefers-color-scheme: dark) {
-  :root { --brand: #8b5cf6; --brand-2: #b07cff; }
-}
 .brand { font-size: 1.5rem; }
 .logo {
   display: inline-block;
@@ -818,8 +808,9 @@ button:hover:not(:disabled),
   --accent: #2563eb;
   --brand: #2563eb;
   --brand-solid: #2563eb;
-  --brand-2: #0ea5e9;
+  --brand-2: #0284c7;
   --info: #0369a1;
+  --live: #0284c7;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -833,6 +824,7 @@ button:hover:not(:disabled),
     --brand-solid: #2563eb;
     --brand-2: #38bdf8;
     --info: #38bdf8;
+    --live: #38bdf8;
   }
 }
 /* headings: Barlow (self-hosted); body, controls, badges, scores stay on the system font */
@@ -924,7 +916,7 @@ h2, h3 { font-weight: 600; }
 }
 
 .match-live {
-  border-color: var(--accent);
+  border-color: var(--live);
 }
 
 .match-bye {
@@ -989,7 +981,7 @@ h2, h3 { font-weight: 600; }
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--live);
 }
 
 .bracket-tree {
