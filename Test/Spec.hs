@@ -4255,6 +4255,43 @@ spec = before_ resetTestDb $ do
         Left err     -> expectationFailure ("runSQLiteM failed: " ++ show err)
         Right inner  -> inner `shouldBe` Left RT.EmptyReopeningReason
 
+    it "rejects a whitespace-only reopening reason" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "reopen-blankreason-owner"
+        let alice = Individual (Player (PlayerName "Alice"))
+            bob   = Individual (Player (PlayerName "Bob"))
+            participants = [alice, bob]
+        tid <- createTournament NewTournament
+          { newTournamentName            = TournamentName "Reopen Blank Reason Cup"
+          , newTournamentOrganizer       = OrganizerName "Test Organizer"
+          , newTournamentOwner           = ownerId
+          , newTournamentFormat          = SingleElimination
+          , newTournamentVisibility      = Public
+          , newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False
+          , newTournamentParticipantMode = IndividualOnly
+          }
+        forM_ participants $ \p -> case p of
+          Individual player -> Repo.savePlayer player
+          Squad team         -> Repo.saveTeam team
+        advanceToRegistrationOpen ownerId tid
+        forM_ participants (\p -> unwrap =<< registerParticipant tid p)
+        _ <- unwrap =<< closeRegistration ownerId tid
+        bracketId <- unwrap =<< generateBracket ownerId tid
+        matches <- Repo.listMatchesForBracket bracketId
+        let m = head matches
+        _ <- unwrap =<< startTournament ownerId tid
+        _ <- unwrap =<< startMatch ownerId (matchId m)
+        _ <- unwrap =<< recordMatchResult ownerId (matchId m) (Winner (matchCompetitorA m))
+        _ <- unwrap =<< completeTournament ownerId tid
+
+        reopenTournament ownerId tid "   "
+
+      case result of
+        Left err     -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right inner  -> inner `shouldBe` Left RT.EmptyReopeningReason
+
     it "rejects reopening from a non-owner" $ do
       result <- runSQLiteM testDbPath $ do
         setupSchema

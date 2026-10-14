@@ -5,6 +5,7 @@ module Application.UseCases.ReopenTournament
 
 import Domain.Tournament (TournamentId, TournamentState(Completed, InProgress))
 import Domain.TournamentHistory (TournamentHistoryEvent(TournamentReopened, reopeningReason))
+import Data.Char (isSpace)
 import Domain.Ids (UserId)
 
 import Shell.Persistence.Port (TournamentRepository, TournamentHistoryRepository, Transactional(..))
@@ -33,7 +34,7 @@ reopenTournament currentUser tid reason = do
             case requireTournamentState Completed tournament of
                 Left err -> pure (Left (InvalidLifecycle err))
                 Right ()
-                    | null reason -> pure (Left EmptyReopeningReason)
+                    | all isSpace reason -> pure (Left EmptyReopeningReason)
                     | otherwise -> do
                         withTxN $ do
                             Repo.updateTournamentState tid InProgress
