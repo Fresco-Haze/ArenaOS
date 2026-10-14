@@ -72,6 +72,9 @@ export const Match = z.object({
 })
 export type Match = z.infer<typeof Match>
 
+export const NodeLink = z.object({ node: z.number(), slot: z.enum(['A', 'B']) })
+export type NodeLink = z.infer<typeof NodeLink>
+
 export const BracketNode = z.object({
   nodeId: z.number(),
   round: z.number(),
@@ -80,6 +83,8 @@ export const BracketNode = z.object({
   slotB: Slot,
   match: Match.nullable(),
   score: z.object({ a: z.number(), b: z.number() }).nullish(),
+  winnerTo: NodeLink.nullish(),
+  loserTo: NodeLink.nullish(),
 })
 export type BracketNode = z.infer<typeof BracketNode>
 
@@ -90,6 +95,7 @@ export const BracketView = z.object({
   thirdPlaceNodeId: z.number().nullable(),
   grandFinalNodeId: z.number().nullish(),
   resetNodeId: z.number().nullish(),
+  linksAvailable: z.boolean().nullish(),
   standings: z.array(z.object({ participant: Participant, points: z.number() })).nullish(),
   nodes: z.array(BracketNode),
 })

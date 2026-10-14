@@ -1,3 +1,5 @@
+import { layoutSingleElim, TREE } from '../lib/bracket'
+import type { TreeLayout } from '../lib/bracket'
 import { matchBadge } from '../badges'
 import type { BracketNode, BracketView } from '../model'
 import { buildNodeLabels, champion, groupByRound, roundName, slotLabel, splitThirdPlace } from '../lib/bracket'
@@ -16,7 +18,7 @@ function statusText(node: BracketNode): string {
   if (node.match) {
     switch (node.match.status) {
       case 'Scheduled':
-        return node.match.scheduledStart ? `Scheduled for ${new Date(node.match.scheduledStart).toLocaleString()}` : 'Scheduled'
+        return node.match.scheduledStart ? `Scheduled for ${new Date(node.match.scheduledStart).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : 'Scheduled'
       case 'InProgress':
         return 'In progress'
       case 'Completed':
@@ -33,7 +35,7 @@ function MatchStatus({ node }: { node: BracketNode }) {
   const text = statusText(node)
   const m = /^(Scheduled|Completed)( for .+| \(.+)$/.exec(text)
   const label = m ? m[1] : text
-  const detail = m ? m[2] : ''
+  const detail = m ? m[2].replace(/^ for /, '') : ''
   const tone = (node.match && matchBadge[node.match.status]) || 'badge-neutral'
   return (
     <>
@@ -42,29 +44,56 @@ function MatchStatus({ node }: { node: BracketNode }) {
     </>
   )
 }
-function SlotRow({ label, isWinner, score }: { label: string; isWinner: boolean; score?: number }) {
+type CardState = 'waiting' | 'scheduled' | 'live' | 'completed' | 'bye'
+
+function cardState(node: BracketNode): CardState {
+  const m = node.match
+  if (m) {
+    if (m.status === 'InProgress') return 'live'
+    if (m.status === 'Completed') return 'completed'
+    if (m.status === 'Scheduled') return 'scheduled'
+    return 'waiting'
+  }
+  if (node.slotA.type === 'Bye' || node.slotB.type === 'Bye') return 'bye'
+  return 'waiting'
+}
+
+function SlotRow({ label, isWinner, isLoser, pending, score }: { label: string; isWinner: boolean; isLoser: boolean; pending: boolean; score?: number }) {
+  const cls = 'slot' + (isWinner ? ' slot-winner' : '') + (isLoser ? ' slot-loser' : '') + (pending ? ' slot-pending' : '')
   return (
-    <div className={isWinner ? 'slot slot-winner' : 'slot'}>
-      <span>{label}</span>
-      <span className="slot-right">
-        {isWinner && <span className="slot-tag">Winner</span>}
-        {score !== undefined && <span className="slot-score">{score}</span>}
-      </span>
+    <div className={cls}>
+      <span className="slot-name">{label}</span>
+      {score !== undefined && <span className="slot-score">{score}</span>}
     </div>
   )
 }
 
 function NodeCard({ node, nodeLabels }: { node: BracketNode; nodeLabels: Map<number, string> }) {
   const winSide = outcomeSide(node)
+  const state = cardState(node)
+  if (state === 'bye') {
+    const filled = [node.slotA, node.slotB].find((s) => s.type === 'Filled')
+    return (
+      <div className="match-card match-bye">
+        <span className="slot-name">{filled && filled.type === 'Filled' ? participantName(filled.participant) : 'Bye'}</span>
+        {filled && <span>Bye</span>}
+      </div>
+    )
+  }
+  const done = state === 'completed'
+  const pendingA = node.slotA.type === 'AwaitingWinnerOf' || node.slotA.type === 'AwaitingLoserOf'
+  const pendingB = node.slotB.type === 'AwaitingWinnerOf' || node.slotB.type === 'AwaitingLoserOf'
   return (
-    <div className="match-card">
-      <SlotRow label={slotLabel(node.slotA, nodeLabels)} isWinner={winSide === 'A'} score={node.score?.a} />
-      <SlotRow label={slotLabel(node.slotB, nodeLabels)} isWinner={winSide === 'B'} score={node.score?.b} />
-      <p className="match-status"><MatchStatus node={node} /></p>
+    <div className={'match-card match-' + state}>
+      <SlotRow label={slotLabel(node.slotA, nodeLabels)} isWinner={winSide === 'A'} isLoser={done && winSide === 'B'} pending={pendingA} score={node.score?.a} />
+      <SlotRow label={slotLabel(node.slotB, nodeLabels)} isWinner={winSide === 'B'} isLoser={done && winSide === 'A'} pending={pendingB} score={node.score?.b} />
+      <p className="match-status">
+        {state === 'live' && <span className="live-dot" aria-hidden="true" />}
+        <MatchStatus node={node} />
+      </p>
     </div>
   )
 }
-
 function Standings({ bracket }: { bracket: BracketView }) {
   const list = placements(bracket)
   if (list.length === 0) return null
@@ -204,6 +233,33 @@ function DoubleElimBracket({ bracket }: { bracket: BracketView }) {
     </div>
   )
 }
+function TreeBracket({ tree, totalRounds, nodeLabels }: { tree: TreeLayout; totalRounds: number; nodeLabels: Map<number, string> }) {
+  return (
+    <div className="bracket-scroll">
+      <div className="bracket-tree" style={{ width: tree.width, height: tree.height }}>
+        {tree.heads.map((h) => (
+          <h3 key={h.round} className="bracket-round-heading" style={{ left: h.x, width: TREE.colW }}>
+            {roundName(h.round, totalRounds)}
+          </h3>
+        ))}
+        <svg className="bracket-links" width={tree.width} height={tree.height} aria-hidden="true">
+          {tree.links.map((l) => (
+            <path key={l.key} d={l.d} />
+          ))}
+        </svg>
+        {tree.nodes.map((t) => (
+          <div
+            key={t.node.nodeId}
+            className="bracket-node"
+            style={{ left: t.x, top: t.cy - TREE.cardH / 2, width: TREE.colW, height: TREE.cardH }}
+          >
+            <NodeCard node={t.node} nodeLabels={nodeLabels} />
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
 export default function Bracket({ bracket }: { bracket: BracketView }) {
   if (bracket.grandFinalNodeId != null) return <DoubleElimBracket bracket={bracket} />
   if (bracket.format === 'RoundRobin') return <RoundRobinView bracket={bracket} />
@@ -216,11 +272,15 @@ export default function Bracket({ bracket }: { bracket: BracketView }) {
   const totalRounds = Math.max(...groups.map((g) => g.round))
   const nodeLabels = buildNodeLabels(groups, totalRounds)
   const champ = champion(groups)
+  const tree = layoutSingleElim(main, bracket.linksAvailable)
 
   return (
     <div>
       {champ && <p className="champion">Champion: {champ}</p>}
       <Standings bracket={bracket} />
+      {tree ? (
+        <TreeBracket tree={tree} totalRounds={totalRounds} nodeLabels={nodeLabels} />
+      ) : (
       <div className="bracket-scroll">
         <div className="bracket">
           {groups.map((g) => (
@@ -235,6 +295,7 @@ export default function Bracket({ bracket }: { bracket: BracketView }) {
           ))}
         </div>
       </div>
+      )}
       {thirdPlace && (
         <div className="third-place">
           <h3 className="bracket-round-heading">Third place</h3>

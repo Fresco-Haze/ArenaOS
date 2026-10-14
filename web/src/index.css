@@ -227,36 +227,6 @@ button:disabled {
   gap: var(--space-3);
 }
 
-.match-card {
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: var(--space-3);
-  background: var(--surface);
-}
-
-.slot {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: var(--space-1) 0;
-}
-
-.slot-winner {
-  font-weight: 700;
-}
-
-.slot-tag {
-  font-size: 0.75rem;
-  font-weight: 400;
-  color: var(--muted);
-}
-
-.match-status {
-  margin: var(--space-2) 0 0;
-  color: var(--muted);
-  font-size: 0.875rem;
-}
-
 .champion {
   font-weight: 700;
   font-size: 1.125rem;
@@ -467,12 +437,6 @@ textarea {
   align-items: center;
   gap: var(--space-2);
 }
-.slot-right {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-}
-
 .slot-score {
   min-width: 1.25rem;
   text-align: right;
@@ -948,4 +912,121 @@ h2, h3 { font-weight: 600; }
 .tournament-card:has(h2 a:focus-visible) {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+.match-card {
+  box-sizing: border-box;
+  height: 98px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.match-live {
+  border-color: var(--accent);
+}
+
+.match-bye {
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: 0 var(--space-3);
+  border-style: dashed;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.slot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-3);
+  box-sizing: border-box;
+  height: 32px;
+  padding: 0 var(--space-3);
+  border-left: 3px solid transparent;
+}
+
+.slot-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.slot-pending,
+.slot-loser {
+  color: var(--muted);
+}
+
+.slot-winner {
+  font-weight: 700;
+  border-left-color: var(--brand-solid);
+}
+
+.match-status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  box-sizing: border-box;
+  height: 32px;
+  margin: 0;
+  padding: 0 var(--space-3);
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 0.8125rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.live-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.bracket-tree {
+  position: relative;
+}
+
+.bracket-tree .bracket-round-heading {
+  position: absolute;
+  top: 0;
+  margin: 0;
+}
+
+.bracket-links {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.bracket-links path {
+  fill: none;
+  stroke: var(--muted);
+  stroke-opacity: 0.45;
+  stroke-width: 1.5;
+}
+
+.bracket-node {
+  position: absolute;
+  display: flex;
+  align-items: center;
+}
+
+.bracket-node > .match-card {
+  width: 100%;
+}
+
+.match-status > span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
