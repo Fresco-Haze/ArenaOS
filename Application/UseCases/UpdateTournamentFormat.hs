@@ -3,7 +3,7 @@ module Application.UseCases.UpdateTournamentFormat
     , UpdateTournamentFormatError(..)
     ) where
 
-import Domain.Tournament (TournamentId, TournamentFormat, TournamentState(InProgress, Completed, Cancelled), tournamentThirdPlaceMatch)
+import Domain.Tournament (TournamentId, TournamentFormat, TournamentState(InProgress, Completed, Cancelled), tournamentThirdPlaceMatch, tournamentBracket)
 import Domain.TournamentHistory (TournamentHistoryEvent(ConfigurationChanged), ChangedField(FieldFormat))
 import Domain.Ids (UserId)
 
@@ -18,6 +18,7 @@ data UpdateTournamentFormatError
     = Unauthorized AuthorizationError
     | InvalidLifecycle LifecycleError
     | InvalidTournament TournamentValidationError
+    | BracketAlreadyGenerated
     deriving (Eq, Show)
 
 updateTournamentFormat
@@ -33,7 +34,9 @@ updateTournamentFormat currentUser tid newFormat = do
         Right () ->
             case requireTournamentStateNotIn [InProgress, Completed, Cancelled] tournament of
                 Left err -> pure (Left (InvalidLifecycle err))
-                Right () ->
+                Right ()
+                    | Just _ <- tournamentBracket tournament -> pure (Left BracketAlreadyGenerated)
+                    | otherwise ->
                     case validateThirdPlaceMatch newFormat (tournamentThirdPlaceMatch tournament) of
                         Left err -> pure (Left (InvalidTournament err))
                         Right () -> do

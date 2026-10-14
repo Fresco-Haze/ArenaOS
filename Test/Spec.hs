@@ -6747,6 +6747,39 @@ spec = before_ resetTestDb $ do
           outcome     `shouldBe` Left (UTF.InvalidTournament TV.ThirdPlaceMatchRequiresSingleElimination)
           formatAfter `shouldBe` SingleElimination   -- rejected, nothing persisted
 
+    it "rejects a format change once the bracket exists" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        ownerId <- createTestUser "format-after-bracket-owner"
+        let alice = Individual (Player (PlayerName "Alice"))
+            bob   = Individual (Player (PlayerName "Bob"))
+            participants = [alice, bob]
+        tid <- createTournament NewTournament
+          { newTournamentName            = TournamentName "Format After Bracket Cup"
+          , newTournamentOrganizer       = OrganizerName "Test Organizer"
+          , newTournamentOwner           = ownerId
+          , newTournamentFormat          = SingleElimination
+          , newTournamentVisibility      = Public
+          , newTournamentMaxParticipants = 2
+          , newTournamentThirdPlaceMatch = False
+          , newTournamentParticipantMode = IndividualOnly
+          }
+        forM_ participants $ \p -> case p of
+          Individual player -> Repo.savePlayer player
+          Squad team         -> Repo.saveTeam team
+        advanceToRegistrationOpen ownerId tid
+        forM_ participants (\p -> unwrap =<< registerParticipant tid p)
+        _ <- unwrap =<< closeRegistration ownerId tid
+        _ <- unwrap =<< generateBracket ownerId tid
+        outcome <- updateTournamentFormat ownerId tid DoubleElimination
+        after   <- Repo.getTournament tid
+        pure (outcome, tournamentFormat after)
+
+      case result of
+        Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right (outcome, formatAfter) -> do
+          outcome     `shouldBe` Left UTF.BracketAlreadyGenerated
+          formatAfter `shouldBe` SingleElimination
     it "disabling thirdPlaceMatch before bracket generation: no bronze match materializes, normal SE completion" $ do
       result <- runSQLiteM testDbPath $ do
         setupSchema
