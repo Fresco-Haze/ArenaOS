@@ -81,6 +81,13 @@ ArenaOS handles the backend logic for running tournament brackets — creating a
 - Full accessibility and error-handling pass across every page: loading, empty, and error states with retry, screen-reader-appropriate status/alert roles, keyboard-accessible confirmation dialogs, and no color-only status indicators.
 - Explicitly out of v1.0: player self-registration or accounts, a frontend for Double Elimination/Round Robin or result correction, production-grade token persistence, and production deployment infrastructure. See `Decisions.md` for the full frozen v1.0 scope.
 
+## v1.1 — Bracket redesign & visual identity
+
+- The bracket API carries the stored links (`winnerTo`, `loserTo`, `linksAvailable`).
+- New match cards with five states; a single-elimination tree with connectors computed from the links; double elimination connected within the Winners and Losers sections; round robin and older brackets get the new cards only.
+- Cobalt and ice-blue identity with light and dark palettes, and recoloured logo files.
+- Dates shown as dd/mm/yy, HH:mm.
+- Two small backend guards: reopening rejects whitespace-only reasons, and a tournament's format can't be changed once its bracket exists.
 ## Architecture
 
 A layered design, separating pure domain logic from persistence, orchestration, and presentation:
@@ -96,7 +103,7 @@ Two cross-cutting rules hold throughout: every mutating use case checks authoriz
 
 ## Testing
 
-An hspec integration suite (216 examples) covers the full stack — golden-path lifecycles, bye-path bracket generation across all three formats, error paths, the full lifecycle/editing/history state machine, team creation, CoD/PUBG registration, role-based authorization and audit, score-derived outcomes, Double Elimination (including correction lineage and non-power-of-2 participant counts), Round Robin, result correction, reopening, pause/resume, and scheduling.
+An hspec integration suite (425 examples) covers the full stack — golden-path lifecycles, bye-path bracket generation across all three formats, error paths, the full lifecycle/editing/history state machine, team creation, CoD/PUBG registration, role-based authorization and audit, score-derived outcomes, Double Elimination (including correction lineage and non-power-of-2 participant counts), Round Robin, result correction, reopening, pause/resume, and scheduling.
 
 Run the suite:
 
