@@ -183,13 +183,43 @@ buildDoubleEliminationTopology wbNodes size =
   in (lbNodes ++ [gf1Node, resetNode], gf1Id, resetId)
 
 
+-- | Every pair once, in circle-method rounds (everyone plays once per round,
+-- one player rests per round when the count is odd). Within a round each
+-- match is chosen so it shares no player with the match before it where
+-- possible, so with 5+ players nobody plays twice in a row; with 3 or 4 a
+-- two-match run cannot be avoided. Slot A is always the lower-seeded player.
 buildRoundRobinTopology :: [Participant] -> [BracketNode]
 buildRoundRobinTopology ps =
-  [ BracketNode (BracketNodeId i) (Filled a) (Filled b) 1 Winners
-  | (i, (a, b)) <- zip [1 ..] (pairUp ps) ]
-  where
-    pairUp xs = [ (a, b) | (a:rest) <- tails xs, b <- rest ]
+  [ BracketNode (BracketNodeId i) (Filled (ps !! a)) (Filled (ps !! b)) 1 Winners
+  | (i, (a, b)) <- zip [1 ..] (roundRobinOrder (length ps)) ]
 
+roundRobinRounds :: Int -> [[(Int, Int)]]
+roundRobinRounds n = take (m - 1) (map pairsOf (iterate rotate slots))
+  where
+    slots = map Just [0 .. n - 1] ++ [Nothing | odd n]
+    m = length slots
+    half = m `div` 2
+    pairsOf arr = [ (min a b, max a b) | (Just a, Just b) <- zip (take half arr) (reverse (drop half arr)) ]
+    rotate [] = []
+    rotate (x : xs) = x : last xs : init xs
+
+roundRobinOrder :: Int -> [(Int, Int)]
+roundRobinOrder n = place Nothing (roundRobinRounds n)
+  where
+    place _ [] = []
+    place prev (r : rs) =
+      let ordered = arrange prev r
+      in ordered ++ place (lastMatch prev ordered) rs
+    arrange _ [] = []
+    arrange prev remaining =
+      let next = case [ m | m <- remaining, notTouching prev m ] of
+                   (m : _) -> m
+                   []      -> head remaining
+      in next : arrange (Just next) (filter (/= next) remaining)
+    notTouching Nothing _ = True
+    notTouching (Just (a, b)) (c, d) = a /= c && a /= d && b /= c && b /= d
+    lastMatch prev [] = prev
+    lastMatch _ ordered = Just (last ordered)
 addThirdPlaceMatch :: [BracketNode] -> ([BracketNode], Maybe BracketNodeId)
 addThirdPlaceMatch nodes
   | wbRoundCount < 2      = (nodes, Nothing)  -- size 1/2: no semifinal round exists

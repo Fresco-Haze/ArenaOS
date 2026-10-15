@@ -3195,9 +3195,9 @@ spec = before_ resetTestDb $ do
 
       map nodeId nodes `shouldBe` map BracketNodeId [1, 2, 3]
       map (\n -> (nodeSlotA n, nodeSlotB n)) nodes `shouldBe`
-        [ (Filled p1, Filled p2)
+        [ (Filled p2, Filled p3)
         , (Filled p1, Filled p3)
-        , (Filled p2, Filled p3)
+        , (Filled p1, Filled p2)
         ]
       all (\n -> nodeRound n == 1 && nodeStage n == Winners) nodes `shouldBe` True
 
@@ -3210,14 +3210,22 @@ spec = before_ resetTestDb $ do
 
       map nodeId nodes `shouldBe` map BracketNodeId [1 .. 6]
       map (\n -> (nodeSlotA n, nodeSlotB n)) nodes `shouldBe`
-        [ (Filled p1, Filled p2)
-        , (Filled p1, Filled p3)
-        , (Filled p1, Filled p4)
+        [ (Filled p1, Filled p4)
         , (Filled p2, Filled p3)
+        , (Filled p1, Filled p3)
         , (Filled p2, Filled p4)
+        , (Filled p1, Filled p2)
         , (Filled p3, Filled p4)
         ]
 
+    it "spreads round robin matches so no player plays many in a row (n = 3..20)" $
+      forM_ [3 .. 20 :: Int] $ \n -> do
+        let ps = [ Individual (Player (PlayerName ("P" ++ show i))) | i <- [1 .. n] ]
+            pairs = rrNodePairs ps (BracketGeneration.buildRoundRobinTopology ps)
+            expected = [ (i, j) | i <- [1 .. n], j <- [i + 1 .. n] ]
+        length pairs `shouldBe` length expected
+        all (`elem` pairs) expected `shouldBe` True
+        rrLongestStreak n pairs `shouldSatisfy` (<= (if n <= 4 then 2 else 1))
   describe "RoundRobin (v0.8 RoundRobin sub-thread)" $ do
 
     it "generates every pair as an immediately-playable match, and accepts a Draw as a terminal outcome" $ do
@@ -8033,3 +8041,20 @@ bracketLinksViewSpec = describe "GetBracket read model carries the stored bracke
       crDropOneLink bracketId (BLBr.nodeId (head nodes))
       gvView ownerId bracketId
     bsExpectStorageFailure result
+
+-- Round robin ordering helpers: each node as (index of A, index of B), 1-based.
+rrNodePairs ps nodes =
+  [ (slotIdx (nodeSlotA n), slotIdx (nodeSlotB n)) | n <- nodes ]
+  where
+    slotIdx (Filled p) = head ([ i | (i, q) <- zip [1 :: Int ..] ps, q == p ] ++ [0])
+    slotIdx _ = 0
+
+-- Longest run of consecutive matches any one player appears in.
+rrLongestStreak n pairs =
+  maximum [ run [ k == a || k == b | (a, b) <- pairs ] | k <- [1 .. n] ]
+  where
+    run = go 0 0
+    go best cur [] = max best cur
+    go best cur (x : xs)
+      | x = go (max best (cur + 1)) (cur + 1) xs
+      | otherwise = go best 0 xs
