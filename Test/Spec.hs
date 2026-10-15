@@ -3427,6 +3427,59 @@ spec = before_ resetTestDb $ do
       map standingParticipant standings `shouldBe` [a, b, c]
       map standingPoints standings `shouldBe` [3, 3, 3]
 
+    it "orders players level on points by goal difference (computeStandingsWith)" $ do
+      let a = Individual (Player (PlayerName "A"))
+          b = Individual (Player (PlayerName "B"))
+          c = Individual (Player (PlayerName "C"))
+          mkMatch i cA cB outcome = Match
+            { matchId = MatchId i, matchTournament = TournamentId 0
+            , matchBracket = BracketId 0, matchBracketNode = BracketNodeId (fromIntegral i)
+            , matchCompetitorA = cA, matchCompetitorB = cB
+            , matchStatus = Match.Completed, matchOutcome = Just outcome
+            , matchScheduledStart = Nothing
+            }
+          matches = [ mkMatch 1 a b (Winner a), mkMatch 2 b c (Winner b), mkMatch 3 c a (Winner c) ]
+          scores = [ (MatchId 1, (3, 0)), (MatchId 2, (1, 0)), (MatchId 3, (1, 0)) ]
+          standings = Standings.computeStandingsWith scores matches
+      map standingParticipant standings `shouldBe` [a, c, b]
+      map standingGoalsFor standings `shouldBe` [3, 1, 1]
+      map standingGoalsAgainst standings `shouldBe` [1, 1, 3]
+
+    it "orders players level on points and goal difference by goals scored (computeStandingsWith)" $ do
+      let a = Individual (Player (PlayerName "A"))
+          b = Individual (Player (PlayerName "B"))
+          c = Individual (Player (PlayerName "C"))
+          mkMatch i cA cB outcome = Match
+            { matchId = MatchId i, matchTournament = TournamentId 0
+            , matchBracket = BracketId 0, matchBracketNode = BracketNodeId (fromIntegral i)
+            , matchCompetitorA = cA, matchCompetitorB = cB
+            , matchStatus = Match.Completed, matchOutcome = Just outcome
+            , matchScheduledStart = Nothing
+            }
+          matches = [ mkMatch 1 a b (Winner a), mkMatch 2 b c (Winner b), mkMatch 3 c a (Winner c) ]
+          scores = [ (MatchId 1, (2, 1)), (MatchId 2, (3, 2)), (MatchId 3, (4, 3)) ]
+          standings = Standings.computeStandingsWith scores matches
+      map Standings.standingGoalDifference standings `shouldBe` [0, 0, 0]
+      map standingParticipant standings `shouldBe` [c, a, b]
+
+    it "counts a match without a score for points only (computeStandingsWith)" $ do
+      let a = Individual (Player (PlayerName "A"))
+          b = Individual (Player (PlayerName "B"))
+          c = Individual (Player (PlayerName "C"))
+          mkMatch i cA cB outcome = Match
+            { matchId = MatchId i, matchTournament = TournamentId 0
+            , matchBracket = BracketId 0, matchBracketNode = BracketNodeId (fromIntegral i)
+            , matchCompetitorA = cA, matchCompetitorB = cB
+            , matchStatus = Match.Completed, matchOutcome = Just outcome
+            , matchScheduledStart = Nothing
+            }
+          matches = [ mkMatch 1 a b (Winner a), mkMatch 2 a c (Forfeit a) ]
+          scores = [ (MatchId 1, (2, 0)) ]
+          standings = Standings.computeStandingsWith scores matches
+      map standingPoints standings `shouldBe` [6, 0, 0]
+      map standingParticipant standings `shouldBe` [a, c, b]
+      map standingGoalsFor standings `shouldBe` [2, 0, 0]
+      map standingGoalsAgainst standings `shouldBe` [0, 0, 2]
   describe "GetRoundRobinStandings" $ do
 
     it "rejects a non-RoundRobin tournament" $ do
@@ -3544,7 +3597,7 @@ spec = before_ resetTestDb $ do
                 participants = [alice, bob, carol, dave]
 
             map standingPoints standings `shouldBe` [6, 1, 1]
-            head standings `shouldBe` Standing alice 6
+            head standings `shouldBe` Standing alice 6 0 0
 
 
   describe "withTxEither" $ do
