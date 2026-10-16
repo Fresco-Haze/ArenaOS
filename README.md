@@ -88,6 +88,12 @@ ArenaOS handles the backend logic for running tournament brackets — creating a
 - Cobalt and ice-blue identity with light and dark palettes, and recoloured logo files.
 - Dates shown as dd/mm/yy, HH:mm.
 - Two small backend guards: reopening rejects whitespace-only reasons, and a tournament's format can't be changed once its bracket exists.
+## v1.2 — Round robin as a league table
+
+- Standings rank by points, then goal difference, then goals scored, then head-to-head, and the table shows GF, GA and GD.
+- Matches recorded without a score count for points only, and the table says how many were left out.
+- New round robins use circle-method match order, so players are spread across the match list: nobody plays twice in a row with five or more players.
+
 ## Architecture
 
 A layered design, separating pure domain logic from persistence, orchestration, and presentation:
@@ -103,7 +109,7 @@ Two cross-cutting rules hold throughout: every mutating use case checks authoriz
 
 ## Testing
 
-An hspec integration suite (425 examples) covers the full stack — golden-path lifecycles, bye-path bracket generation across all three formats, error paths, the full lifecycle/editing/history state machine, team creation, CoD/PUBG registration, role-based authorization and audit, score-derived outcomes, Double Elimination (including correction lineage and non-power-of-2 participant counts), Round Robin, result correction, reopening, pause/resume, and scheduling.
+An hspec integration suite (429 examples) covers the full stack — golden-path lifecycles, bye-path bracket generation across all three formats, error paths, the full lifecycle/editing/history state machine, team creation, CoD/PUBG registration, role-based authorization and audit, score-derived outcomes, Double Elimination (including correction lineage and non-power-of-2 participant counts), Round Robin, result correction, reopening, pause/resume, and scheduling.
 
 Run the suite:
 
