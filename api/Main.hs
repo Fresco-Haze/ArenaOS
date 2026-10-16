@@ -28,7 +28,7 @@ import Domain.Ids (UserId(..), TournamentId(..), BracketId(..), BracketNodeId(..
 import Domain.Match (Match(..), MatchId(..), MatchOutcome(..))
 import Domain.MatchError (MatchError(..))
 import Domain.Scoreable (EFootballScore, mkEFootballScore, ScoreError(..), unEFootballScore)
-import Engine.Standings (Standing(..), computeStandings)
+import Engine.Standings (Standing(..), computeStandingsWith, standingGoalDifference)
 import Application.UseCases.RecordEFootballResult (recordEFootballResult, RecordEFootballResultError(..), correctEFootballResult, CorrectEFootballResultError(..))
 import qualified Application.UseCases.CorrectMatchResult as Correct
 import qualified Application.UseCases.SetMatchSchedule as Sched
@@ -361,11 +361,15 @@ nodeJson scores mLinks matches n = object . (++ linkPairs) $
         in [ "winnerTo" .= fmap destinationJson (l >>= linkWinnerTo)
            , "loserTo"  .= fmap destinationJson (l >>= linkLoserTo) ]
 
-standingsJson :: Tournament -> [Match] -> Maybe [Value]
-standingsJson t matches
+standingsJson :: Map.Map MatchId (Int, Int) -> Tournament -> [Match] -> Maybe [Value]
+standingsJson scores t matches
   | tournamentFormat t == RoundRobin =
-      Just [ object ["participant" .= participantJson (standingParticipant s), "points" .= standingPoints s]
-           | s <- computeStandings matches ]
+      Just [ object [ "participant"    .= participantJson (standingParticipant s)
+                    , "points"         .= standingPoints s
+                    , "goalsFor"       .= standingGoalsFor s
+                    , "goalsAgainst"   .= standingGoalsAgainst s
+                    , "goalDifference" .= standingGoalDifference s ]
+           | s <- computeStandingsWith (Map.toList scores) matches ]
   | otherwise = Nothing
 bracketViewJson :: Map.Map MatchId (Int, Int) -> GetB.BracketView -> Value
 bracketViewJson scores v = object
@@ -375,12 +379,14 @@ bracketViewJson scores v = object
   , "thirdPlaceNodeId" .= fmap unBracketNodeId (bracketThirdPlaceNodeId (GetB.viewBracket v))
   , "grandFinalNodeId" .= fmap unBracketNodeId (bracketGF1NodeId (GetB.viewBracket v))
   , "resetNodeId"      .= fmap unBracketNodeId (bracketResetNodeId (GetB.viewBracket v))
-  , "standings"        .= standingsJson t (GetB.viewMatches v)
+  , "standings"        .= standingsJson scores t (GetB.viewMatches v)
+  , "unscoredMatches" .= unscoredMatches
   , "linksAvailable"   .= maybe False (const True) (GetB.viewLinks v)
   , "nodes"            .= map (nodeJson scores (GetB.viewLinks v) (GetB.viewMatches v)) sortedNodes
   ]
   where
     t = GetB.viewTournament v
+    unscoredMatches = length [ m | m <- GetB.viewMatches v, maybe False (const True) (matchOutcome m), not (Map.member (matchId m) scores) ]
     sortedNodes = sortOn (\n -> (nodeRound n, unBracketNodeId (nodeId n)))
                          (GetB.viewNodes v)
 
