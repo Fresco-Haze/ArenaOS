@@ -114,6 +114,16 @@ function Standings({ bracket }: { bracket: BracketView }) {
     </div>
   )
 }
+type StandingRow = NonNullable<BracketView['standings']>[number]
+
+// Same table position: level on points, goal difference and goals scored.
+function sameRank(a: StandingRow, b: StandingRow): boolean {
+  return a.points === b.points && a.goalDifference === b.goalDifference && a.goalsFor === b.goalsFor
+}
+
+function signed(n: number): string {
+  return n > 0 ? `+${n}` : String(n)
+}
 function RoundRobinView({ bracket }: { bracket: BracketView }) {
   const nodes = [...bracket.nodes].sort((a, b) => a.nodeId - b.nodeId)
   const rows = bracket.standings ?? []
@@ -128,8 +138,8 @@ function RoundRobinView({ bracket }: { bracket: BracketView }) {
       }
     }
   }
-  const levelAtTop = rows.length > 1 && rows[0].points === rows[1].points
-  const anyLevel = rows.some((r, i) => i > 0 && r.points === rows[i - 1].points)
+  const levelAtTop = rows.length > 1 && sameRank(rows[0], rows[1])
+  const anyLevel = rows.some((r, i) => i > 0 && sameRank(r, rows[i - 1]))
   const labels = new Map<number, string>()
 
   return (
@@ -137,14 +147,18 @@ function RoundRobinView({ bracket }: { bracket: BracketView }) {
       {decided && rows.length > 0 && !levelAtTop && (
         <p className="champion">Winner: {participantName(rows[0].participant)}</p>
       )}
-      {decided && levelAtTop && <p className="muted">The top places are level on points.</p>}
+      {decided && levelAtTop && <p className="muted">The top places are level on points, goal difference and goals scored.</p>}
       <h3 className="bracket-section-heading">Standings</h3>
+      <div className="rr-scroll">
       <table className="rr-table">
         <thead>
           <tr>
             <th>#</th>
             <th>Name</th>
             <th>Played</th>
+            <th>GF</th>
+            <th>GA</th>
+            <th>GD</th>
             <th>Pts</th>
           </tr>
         </thead>
@@ -156,15 +170,24 @@ function RoundRobinView({ bracket }: { bracket: BracketView }) {
                 <td>{i + 1}</td>
                 <td>{name}</td>
                 <td>{played.get(name) ?? 0}</td>
+                <td>{r.goalsFor}</td>
+                <td>{r.goalsAgainst}</td>
+                <td>{signed(r.goalDifference)}</td>
                 <td>{r.points}</td>
               </tr>
             )
           })}
         </tbody>
       </table>
+      </div>
+      {(bracket.unscoredMatches ?? 0) > 0 && (
+        <p className="muted">
+          Goals exclude {bracket.unscoredMatches} completed {bracket.unscoredMatches === 1 ? 'match' : 'matches'} recorded without a score.
+        </p>
+      )}
       {anyLevel && (
         <p className="muted">
-          Level on points: ordered by the results between them where possible. If they are still level, the order shown is not a ranking.
+          Level on points, goal difference and goals scored: ordered by the results between them where possible. If they are still level, the order shown is not a ranking.
         </p>
       )}
       <h3 className="bracket-section-heading">Matches</h3>

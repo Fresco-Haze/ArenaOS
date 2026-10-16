@@ -1022,3 +1022,13 @@ h2, h3 { font-weight: 600; }
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+.rr-scroll {
+  overflow-x: auto;
+}
+
+.rr-table th:nth-child(n+3),
+.rr-table td:nth-child(n+3) {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}

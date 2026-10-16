@@ -96,7 +96,8 @@ export const BracketView = z.object({
   grandFinalNodeId: z.number().nullish(),
   resetNodeId: z.number().nullish(),
   linksAvailable: z.boolean().nullish(),
-  standings: z.array(z.object({ participant: Participant, points: z.number() })).nullish(),
+  standings: z.array(z.object({ participant: Participant, points: z.number(), goalsFor: z.number().default(0), goalsAgainst: z.number().default(0), goalDifference: z.number().default(0) })).nullish(),
+  unscoredMatches: z.number().nullish(),
   nodes: z.array(BracketNode),
 })
 export type BracketView = z.infer<typeof BracketView>

@@ -141,7 +141,7 @@ export default function CreateTournamentPage() {
             {format === 'DoubleElimination'
               ? 'A first loss sends you to the losers bracket, so everyone plays at least twice. If the losers-bracket winner wins the grand final, one extra match settles it.'
               : format === 'RoundRobin'
-              ? 'Everyone plays everyone once. Points decide the table: 3 for a win, 1 for a draw.'
+              ? 'Everyone plays everyone once. Points decide the table: 3 for a win, 1 for a draw. Ties go to goal difference, then goals scored.'
               : 'One loss and you are out.'}
           </p>
         </fieldset>
@@ -207,7 +207,7 @@ export default function CreateTournamentPage() {
             ? `A third-place match is always played, so 1st to 4th are decided (needs 4 or more ${participantMode === 'SquadOnly' ? 'teams' : 'players'}).`
             : format === 'DoubleElimination'
             ? 'Double elimination decides the top four by itself.'
-            : 'Round robin ranks everyone by points.'}
+            : 'Round robin ranks everyone by points, then goal difference, then goals scored.'}
         </p>
         {matchCountLine(format, Number(maxParticipants), participantMode === 'SquadOnly' ? 'teams' : 'players') && (
           <p className="muted">
