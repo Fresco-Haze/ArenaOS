@@ -5,7 +5,7 @@ WORKDIR /src
 # The library uses `hs-source-dirs: .`, so cabal needs the real sources even to
 # build dependencies. Copy only what the API needs, so edits to web/, scripts/,
 # docs and tests don't invalidate the slow dependency layer.
-COPY arenaos.cabal cabal.project ./
+COPY arenaos.cabal cabal.project cabal.project.freeze ./
 COPY Application ./Application/
 COPY Domain ./Domain/
 COPY Engine ./Engine/
