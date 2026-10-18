@@ -837,7 +837,7 @@ data RateRule = RateRule
 
 loginUserRule, loginIpRule, registerIpRule :: RateRule
 loginUserRule  = RateRule "login-user"  900  5 (Just 300)
-loginIpRule    = RateRule "login-ip"    900 10 Nothing
+loginIpRule    = RateRule "login-ip"    600 30 Nothing
 registerIpRule = RateRule "register-ip" 3600 10 Nothing
 
 pruneHits :: UTCTime -> NominalDiffTime -> [UTCTime] -> [UTCTime]

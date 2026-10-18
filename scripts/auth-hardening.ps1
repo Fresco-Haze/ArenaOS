@@ -1,4 +1,4 @@
-﻿$ErrorActionPreference = 'Stop'
+$ErrorActionPreference = 'Stop'
 $exe  = (cabal list-bin exe:arenaos-api).Trim()
 $port = 3200
 $db   = Join-Path $env:TEMP 'arenaos-auth-test.db'
@@ -38,6 +38,12 @@ try {
   Check 'Retry-After header present' ($r6.Headers -match '(?im)^retry-after:\s*\d+')
   Check 'locked even with correct password' ((Req POST '/login' '{"username":"alice","password":"correcthorse"}').Code -eq 429)
   Check 'other user unaffected' ((Req POST '/login' '{"username":"bob","password":"correcthorse"}').Code -eq 200)
+  $first429 = 0
+  foreach ($i in 1..31) {
+    $c = (Req POST '/login' ('{"username":"flood' + $i + '","password":"wrongpass1"}')).Code
+    if ($c -eq 429) { $first429 = $i; break }
+  }
+  Check "per-IP limit trips between 20 and 31 failures (tripped at $first429)" ($first429 -ge 20 -and $first429 -le 31)
 } finally {
   Stop-Process -Id $srv.Id -Force -ErrorAction SilentlyContinue
 }
