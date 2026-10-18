@@ -78,3 +78,52 @@ jobs:
           labels: org.opencontainers.image.source=${{ env.SOURCE_URL }}
           cache-from: type=gha,scope=web
           cache-to: type=gha,mode=max,scope=web
+
+  backup-restore:
+    needs: api
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Backup, wipe, restore, verify
+        run: |
+          set -euo pipefail
+          printf 'services:\n  api:\n    ports:\n      - "127.0.0.1:3000:3000"\n' > /tmp/ci.override.yml
+          export COMPOSE_FILE="$GITHUB_WORKSPACE/deploy/compose.yml:/tmp/ci.override.yml"
+          export ARENAOS_TAG="${{ github.sha }}"
+          export BACKUP_DIR=/tmp/arenaos-backups
+
+          login_ok() {
+            local resp
+            resp=$(curl -fsS -X POST http://127.0.0.1:3000/login \
+              -H 'Content-Type: application/json' \
+              -d '{"username":"backup_test","password":"correcthorse1"}')
+            [[ "$resp" == *'"token"'* ]]
+          }
+
+          docker compose pull api
+          docker compose up -d --wait api
+
+          curl -fsS -X POST http://127.0.0.1:3000/register \
+            -H 'Content-Type: application/json' \
+            -d '{"username":"backup_test","email":"bt@example.com","password":"correcthorse1"}'
+          echo
+          login_ok
+
+          bash deploy/backup.sh
+          f=$(find "$BACKUP_DIR" -name 'arenaos-*.db.gz' | head -n 1)
+          test -s "$f"
+
+          echo "--- wiping the data volume"
+          docker compose stop api
+          docker compose rm -f api
+          docker volume rm arenaos_arenaos-data
+
+          echo "--- restoring"
+          bash deploy/restore.sh -y "$f"
+          login_ok
+          echo "restore verified: the user survived"
