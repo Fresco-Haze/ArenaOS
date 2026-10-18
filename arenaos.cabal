@@ -138,12 +138,15 @@ test-suite arenaos-test
     default-language: Haskell2010
 
 executable arenaos-api
+    ghc-options:      -threaded -with-rtsopts=-N
     build-depends: time
     main-is:          Main.hs
     hs-source-dirs:   api
     build-depends:    base
                     , arenaos
                     , scotty
+                    , warp
+                    , wai
                     , aeson
                     , text
                     , http-types

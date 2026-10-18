@@ -1,6 +1,9 @@
 {-# LANGUAGE InstanceSigs #-}
 
-module Shell.Infrastructure.PasswordHasher () where
+module Shell.Infrastructure.PasswordHasher
+  ( hashPasswordIO
+  , verifyPasswordPure
+  ) where
 
 import Shell.Persistence.Port (PasswordHasher(..))
 import Shell.Persistence.SQLite.Connection (SQLiteM)
@@ -26,25 +29,34 @@ import qualified Data.Text.Short as TS
 -- is self-contained and carries its own algorithm, version,
 -- parameters, and salt -- no separate salt column or config is
 -- persisted anywhere else. See ADR-007 for the failure-propagation
--- boundary this instance relies on (HashingFailure).
+-- boundary this instance relies on (HashFailure).
+--
+-- hashPasswordIO / verifyPasswordPure exist so the API can run the
+-- expensive Argon2 work OUTSIDE the global DB lock.
 
 saltLength :: Int
 saltLength = 16
 
+hashPasswordIO :: Text -> IO PasswordHash
+hashPasswordIO pw = do
+    salt <- getEntropy saltLength
+    let passwordBytes = TE.encodeUtf8 pw
+        opts = defaultHashOptions { hashVariant = Argon2id }
+    case hashEncoded opts passwordBytes salt of
+        Left status ->
+            throwIO (HashFailure (show status))
+        Right encoded ->
+            pure (PasswordHash (TS.toText encoded))
+
+verifyPasswordPure :: Text -> PasswordHash -> Bool
+verifyPasswordPure pw (PasswordHash encodedText) =
+    case verifyEncoded (TS.fromText encodedText) (TE.encodeUtf8 pw) of
+        Argon2Ok -> True
+        _        -> False
+
 instance PasswordHasher SQLiteM where
     hashPassword :: Text -> SQLiteM PasswordHash
-    hashPassword pw = do
-        salt <- liftIO (getEntropy saltLength)
-        let passwordBytes = TE.encodeUtf8 pw
-            opts = defaultHashOptions { hashVariant = Argon2id }
-        case hashEncoded opts passwordBytes salt of
-            Left status ->
-                liftIO $ throwIO $ HashFailure (show status)
-            Right encoded ->
-                pure (PasswordHash (TS.toText encoded))
+    hashPassword = liftIO . hashPasswordIO
 
     verifyPassword :: Text -> PasswordHash -> SQLiteM Bool
-    verifyPassword pw (PasswordHash encodedText) =
-        case verifyEncoded (TS.fromText encodedText) (TE.encodeUtf8 pw) of
-            Argon2Ok -> pure True
-            _        -> pure False
+    verifyPassword pw h = pure (verifyPasswordPure pw h)

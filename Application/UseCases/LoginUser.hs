@@ -2,6 +2,8 @@ module Application.UseCases.LoginUser
   ( LoginUserRequest(..)
   , LoginUserError(..)
   , loginUser
+  , lookupForLogin
+  , finishLogin
   ) where
 
 import Data.Text (Text)
@@ -18,6 +20,20 @@ data LoginUserError
   | AccountNotActive AccountStatus
   deriving (Eq, Show)
 
+-- | Step 1 (needs the DB): find the user.
+lookupForLogin :: UserRepository m => LoginUserRequest -> m (Maybe User)
+lookupForLogin req = findUserByUsername (loginUsername req)
+
+-- | Step 3 (pure): decide the outcome. The password check comes first,
+-- so a wrong password on a suspended account is still InvalidCredentials
+-- and account state never leaks to someone who doesn't know the password.
+finishLogin :: Maybe User -> Bool -> Either LoginUserError User
+finishLogin Nothing _ = Left InvalidCredentials
+finishLogin (Just user) ok
+  | not ok                       = Left InvalidCredentials
+  | accountStatus user /= Active = Left (AccountNotActive (accountStatus user))
+  | otherwise                    = Right user
+
 loginUser
   :: ( Monad m
      , UserRepository m
@@ -26,20 +42,8 @@ loginUser
   => LoginUserRequest
   -> m (Either LoginUserError User)
 loginUser req = do
-  maybeUser <- findUserByUsername (loginUsername req)
-  case maybeUser of
-    Nothing ->
-      -- SECURITY (deferred, not forgotten): no dummy-hash verification on
-      -- this branch yet, so a timing side-channel exists (unknown-username
-      -- rejection is faster than wrong-password rejection). Mitigation needs
-      -- a config-managed constant hash, which doesn't exist yet in v0.2.
-      -- Revisit when config/session infrastructure is introduced.
-      pure (Left InvalidCredentials)
-    Just user -> do
-      ok <- verifyPassword (loginPassword req) (passwordHash user)
-      pure $
-        if not ok
-          then Left InvalidCredentials
-          else if accountStatus user /= Active
-            then Left (AccountNotActive (accountStatus user))
-            else Right user
+  maybeUser <- lookupForLogin req
+  ok <- case maybeUser of
+    Nothing   -> pure False
+    Just user -> verifyPassword (loginPassword req) (passwordHash user)
+  pure (finishLogin maybeUser ok)

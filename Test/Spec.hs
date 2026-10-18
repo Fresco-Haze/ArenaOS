@@ -1521,6 +1521,87 @@ spec = before_ resetTestDb $ do
         Left err      -> expectationFailure ("runSQLiteM failed: " ++ show err)
         Right gotTeam -> teamMembers gotTeam `shouldBe` [Player (PlayerName "Solo Captain")]
 
+    it "rejects a blank team name and does not save the team" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        let captain = Player (PlayerName "Alice")
+            team = Team { teamName = TeamName "   ", teamCaptain = captain, teamMembers = [captain] }
+        outcome <- createTeam team
+        saved   <- Repo.teamExists (TeamName "   ")
+        pure (outcome, saved)
+
+      case result of
+        Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right (outcome, saved) -> do
+          outcome `shouldBe` Left EmptyTeamName
+          saved `shouldBe` False
+
+    it "rejects a blank captain name" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        let captain = Player (PlayerName "")
+            team = Team { teamName = TeamName "Blank Captain Squad", teamCaptain = captain, teamMembers = [captain] }
+        outcome <- createTeam team
+        saved   <- Repo.teamExists (TeamName "Blank Captain Squad")
+        pure (outcome, saved)
+
+      case result of
+        Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right (outcome, saved) -> do
+          outcome `shouldBe` Left EmptyPlayerName
+          saved `shouldBe` False
+
+    it "rejects a blank member name" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        let captain = Player (PlayerName "Alice")
+            ghost   = Player (PlayerName "  ")
+            team = Team { teamName = TeamName "Blank Member Squad", teamCaptain = captain, teamMembers = [captain, ghost] }
+        createTeam team
+
+      case result of
+        Left err    -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right inner -> inner `shouldBe` Left EmptyPlayerName
+
+    it "rejects duplicate member names and does not save the team" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        let captain = Player (PlayerName "Alice")
+            team = Team { teamName = TeamName "Twin Squad", teamCaptain = captain, teamMembers = [captain, captain] }
+        outcome <- createTeam team
+        saved   <- Repo.teamExists (TeamName "Twin Squad")
+        pure (outcome, saved)
+
+      case result of
+        Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right (outcome, saved) -> do
+          outcome `shouldBe` Left DuplicateMemberNames
+          saved `shouldBe` False
+
+    it "checks a blank name before the captain rule" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        let captain = Player (PlayerName "Alice")
+            bob     = Player (PlayerName "Bob")
+            team = Team { teamName = TeamName "", teamCaptain = captain, teamMembers = [bob] }
+        createTeam team
+
+      case result of
+        Left err    -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right inner -> inner `shouldBe` Left EmptyTeamName
+
+    it "checks duplicate members before the captain rule" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        let captain = Player (PlayerName "Alice")
+            bob     = Player (PlayerName "Bob")
+            team = Team { teamName = TeamName "Dup Before Captain", teamCaptain = captain, teamMembers = [bob, bob] }
+        createTeam team
+
+      case result of
+        Left err    -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right inner -> inner `shouldBe` Left DuplicateMemberNames
+
   describe "Registration Validation (FR-TM-009)" $ do
 
     it "rejects registration when the tournament isn't RegistrationOpen" $ do
@@ -5130,7 +5211,7 @@ spec = before_ resetTestDb $ do
       case result of
         Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
         Right (correction, matchAfter) -> do
-          correction `shouldBe` Left (CorrectionIntegrityViolation (matchId matchAfter))
+          correction `shouldBe` Left (GF1ResetNotRestorable (matchId matchAfter))
           matchOutcome matchAfter `shouldBe` Just (Winner (Individual (Player (PlayerName "Alice"))))
 
   describe "Transaction atomicity: GF1 retraction (v0.9.4 item 4)" $ do
@@ -7820,6 +7901,74 @@ dcRepairSpec title burn =
         matchOutcome corrected `shouldBe` Just (Winner y)
         forM_ checks $ \(name, ok) -> (name, ok) `shouldBe` (name, True)
 
+-- 6 players: the loser of the second winners round drops into a bye-shaped losers
+-- node and is passed on. Correcting that match must follow the pass-through, and
+-- must be refused once the node it was passed into has started.
+dcPassThroughSpec :: String -> Bool -> Spec
+dcPassThroughSpec title burn =
+  it title $ do
+    result <- runSQLiteM testDbPath $ do
+      setupSchema
+      (ownerId, bracketId) <- lgGenerate burn DoubleElimination False "dc-pass-owner" 6
+      (_, nodes0) <- Repo.getBracket bracketId
+      mLinks <- Repo.getBracketLinks bracketId
+      let links = case mLinks of
+            Just l  -> l
+            Nothing -> error "test setup: bracket has no stored links"
+          isByeLb n = (BLBr.nodeStage n == BLBr.Losers) && (case (BLBr.nodeSlotA n, BLBr.nodeSlotB n) of
+            (BLBr.AwaitingLoserOf _, BLBr.ByeSlot) -> True
+            _                                      -> False)
+          byeLb = head (filter isByeLb nodes0)
+          srcOf s = case s of
+            BLBr.AwaitingLoserOf i  -> i
+            BLBr.AwaitingWinnerOf i -> i
+            _                       -> error "test setup: unexpected slot"
+          byeLbId = BLBr.nodeId byeLb
+          n6Id = srcOf (BLBr.nodeSlotA byeLb)
+          lb3Id = case blWinnerNode links byeLb of
+            Just i  -> i
+            Nothing -> error "test setup: bye node has no winner link"
+          n9Id = srcOf (BLBr.nodeSlotA (blNodeById lb3Id nodes0))
+          n5Id = srcOf (BLBr.nodeSlotA (blNodeById n9Id nodes0))
+          lb1Id = srcOf (BLBr.nodeSlotB (blNodeById n9Id nodes0))
+          n6 = blNodeById n6Id nodes0
+          feeders = [srcOf (BLBr.nodeSlotA n6), srcOf (BLBr.nodeSlotB n6)]
+          playNode nid = do
+            ms <- Repo.listMatchesForBracket bracketId
+            let m = head [ x | x <- ms, matchBracketNode x == nid ]
+            _ <- unwrap =<< startMatch ownerId (matchId m)
+            _ <- unwrap =<< recordMatchResult ownerId (matchId m) (Winner (matchCompetitorA m))
+            pure m
+      mapM_ playNode feeders
+      m6 <- playNode n6Id
+      let x = matchCompetitorA m6
+          y = matchCompetitorB m6
+      (_, nodesPlayed) <- Repo.getBracket bracketId
+      corrected <- unwrap =<< correctMatchResult ownerId (matchId m6) (Winner y)
+      (_, nodesAfter) <- Repo.getBracket bracketId
+      _ <- playNode n5Id
+      _ <- playNode lb1Id
+      _ <- playNode n9Id
+      ms <- Repo.listMatchesForBracket bracketId
+      let lb3Match = head [ m | m <- ms, matchBracketNode m == lb3Id ]
+      _ <- unwrap =<< startMatch ownerId (matchId lb3Match)
+      late <- correctMatchResult ownerId (matchId m6) (Winner x)
+      m6After <- Repo.getMatch (matchId m6)
+      pure ( corrected, y
+           , [ ("setup: bye-shaped node holds the recorded loser", dcHolds nodesPlayed byeLbId y)
+             , ("setup: the node it was passed into holds the recorded loser", dcHolds nodesPlayed lb3Id y)
+             , ("bye-shaped node holds the old winner as its new loser", dcHolds nodesAfter byeLbId x)
+             , ("pass-through node follows the correction", dcHolds nodesAfter lb3Id x)
+             , ("pass-through node no longer holds the corrected winner", not (dcHolds nodesAfter lb3Id y)) ]
+           , (matchId lb3Match, either Just (const Nothing) late, matchOutcome m6After) )
+    case result of
+      Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
+      Right (corrected, y, checks, (lb3MatchId, rejected, m6Outcome)) -> do
+        matchOutcome corrected `shouldBe` Just (Winner y)
+        forM_ checks $ \(name, ok) -> (name, ok) `shouldBe` (name, True)
+        rejected `shouldBe` Just (DownstreamMatchStarted lb3MatchId)
+        m6Outcome `shouldBe` Just (Winner y)
+
 doubleElimNodeIdSpec :: Spec
 doubleElimNodeIdSpec = describe "NodeIdSpace: CorrectMatchResult (Double Elim)" $ do
   dcGuardSpec  "guard, control (first-insert ids): rejects with DownstreamMatchStarted once the winners final has started" False
@@ -7828,6 +7977,8 @@ doubleElimNodeIdSpec = describe "NodeIdSpace: CorrectMatchResult (Double Elim)" 
   dcRepairSpec "repair, offset ids: both target nodes take the corrected result" True
   dcFinalRepairSpec "final repair, control (first-insert ids): the grand final and the losers final take the corrected result" False
   dcFinalRepairSpec "final repair, offset ids: the grand final and the losers final take the corrected result" True
+  dcPassThroughSpec "pass-through, control (first-insert ids): correction follows a loser passed through a bye node and is refused once that node started" False
+  dcPassThroughSpec "pass-through, offset ids: correction follows a loser passed through a bye node and is refused once that node started" True
   dcLbRepairSpec "losers match repair, control (first-insert ids): the losers final takes the corrected winner" False
   dcLbRepairSpec "losers match repair, offset ids: the losers final takes the corrected winner" True
   dcLegacySpec

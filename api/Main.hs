@@ -8,10 +8,16 @@ import qualified Data.Text.Lazy as TL
 import Text.Read (readMaybe)
 import Control.Monad.IO.Class (liftIO)
 import Control.Concurrent.MVar (MVar, newMVar, withMVar)
-import Control.Exception (SomeException, try)
+import Control.Exception (SomeException, try, bracket_, evaluate)
+import Control.Concurrent.QSem (QSem, newQSem, waitQSem, signalQSem)
+import Data.Maybe (isJust)
 import System.IO (hPutStrLn, stderr)
+import System.Environment (lookupEnv)
+import System.Exit (exitFailure)
+import Data.String (fromString)
+import Network.Wai.Handler.Warp (setHost, setPort, defaultSettings)
 import Network.HTTP.Types
-  (Status, status201, status204, status400, status401, status403, status404, status409, status500)
+  (Status, status201, status204, status400, status401, status403, status404, status409, status429, status500)
 import Data.Aeson
   (Value, object, (.=), FromJSON(..), withObject, withText, (.:), (.:?), (.!=), eitherDecode)
 
@@ -32,7 +38,9 @@ import Engine.Standings (Standing(..), computeStandingsWith, standingGoalDiffere
 import Application.UseCases.RecordEFootballResult (recordEFootballResult, RecordEFootballResultError(..), correctEFootballResult, CorrectEFootballResultError(..))
 import qualified Application.UseCases.CorrectMatchResult as Correct
 import qualified Application.UseCases.SetMatchSchedule as Sched
-import Data.Time (UTCTime)
+import Data.Time (UTCTime, NominalDiffTime, getCurrentTime, addUTCTime, diffUTCTime)
+import Network.Wai (remoteHost, requestHeaders)
+import Control.Monad (when)
 import Engine.Error (EngineError(..))
 import Application.Internal.Authorization (AuthorizationError(..))
 import Application.Internal.LifecycleTransition (LifecycleError(..))
@@ -60,9 +68,9 @@ import qualified Data.ByteString as BS
 import Numeric (showHex)
 import System.Entropy (getEntropy)
 import Shell.Persistence.SQLite.UserRepository ()
-import Shell.Infrastructure.PasswordHasher ()
+import Shell.Infrastructure.PasswordHasher (hashPasswordIO, verifyPasswordPure)
 import qualified Application.UseCases.LoginUser as LU
-import Domain.User (User(..), Username(..), Email(..), AccountStatus(..))
+import Domain.User (User(..), Username(..), Email(..), AccountStatus(..), PasswordHash)
 import qualified Application.UseCases.RegisterUser as RU
 import Engine.User (UserError(..))
 import qualified Application.UseCases.GetTournament as GetT
@@ -90,8 +98,33 @@ import Application.UseCases.CreateTeam (createTeam, CreateTeamError(..))
 import Application.UseCases.CreateTeam (createTeam, CreateTeamError(..))
 
 
-dbPath :: FilePath
-dbPath = "arenaos-dev.db"
+defaultDbPath :: FilePath
+defaultDbPath = "arenaos-dev.db"
+
+envOr :: String -> String -> IO String
+envOr name def = do
+  v <- lookupEnv name
+  pure (case v of
+    Just s | not (null s) -> s
+    _                     -> def)
+
+readIntEnv :: String -> Int -> IO Int
+readIntEnv name def = do
+  v <- envOr name (show def)
+  case readMaybe v of
+    Just n | n > 0 -> pure n
+    _ -> do
+      hPutStrLn stderr ("invalid " ++ name ++ ": " ++ v)
+      exitFailure
+
+readPort :: IO Int
+readPort = do
+  v <- envOr "PORT" "3000"
+  case readMaybe v of
+    Just p | p > 0 && p < 65536 -> pure p
+    _ -> do
+      hPutStrLn stderr ("invalid PORT: " ++ v)
+      exitFailure
 
 -- ===== Errors =====
 
@@ -207,6 +240,10 @@ fromCorrect (Correct.CorrectedOutcomeNotAdvanceable _) =
   ApiError status409 "OUTCOME_NOT_ADVANCEABLE" "This outcome cannot advance the bracket"
     (object [])
 fromCorrect (Correct.CorrectionIntegrityViolation _) = internalError
+fromCorrect (Correct.GF1ResetNotRestorable mid) =
+  ApiError status409 "GF1_RESET_NOT_RESTORABLE"
+    "This final was decided without a reset and cannot be changed back"
+    (object ["matchId" .= unMatchId mid])
 fromCorrect Correct.BracketLinksUnavailable =
   ApiError status409 "BRACKET_LINKS_UNAVAILABLE"
     "This tournament's bracket was generated before result correction was supported, so its results cannot be corrected"
@@ -443,6 +480,15 @@ fromCreateTeam :: CreateTeamError -> ApiError
 fromCreateTeam CaptainNotInMembers =
   ApiError status400 "VALIDATION_FAILED"
     "The captain must be one of the team's members" (object ["field" .= ("captain" :: Text)])
+fromCreateTeam EmptyTeamName =
+  ApiError status400 "VALIDATION_FAILED"
+    "Team name must not be blank" (object ["field" .= ("name" :: Text)])
+fromCreateTeam EmptyPlayerName =
+  ApiError status400 "VALIDATION_FAILED"
+    "Player names must not be blank" (object ["field" .= ("members" :: Text)])
+fromCreateTeam DuplicateMemberNames =
+  ApiError status400 "VALIDATION_FAILED"
+    "A player is listed more than once" (object ["field" .= ("members" :: Text)])
 fromCreateTeam (TeamNameAlreadyExists (TeamName n)) =
   ApiError status409 "TEAM_NAME_TAKEN"
     "A team with that name already exists" (object ["name" .= n])
@@ -681,7 +727,14 @@ fromReopen ReopenT.EmptyReopeningReason =
 
 data Env = Env
   { envLock   :: MVar ()
-  , envTokens :: IORef (Map.Map Text UserId)
+  , envTokens :: IORef (Map.Map Text (UserId, UTCTime))
+  , envDbPath :: FilePath
+  , envHashSem :: QSem          -- caps concurrent Argon2 runs (memory)
+  , envDummyHash :: PasswordHash -- verified against for unknown usernames (timing)
+  , envTokenTtl :: NominalDiffTime
+  , envHits :: IORef (Map.Map (Text, Text) [UTCTime])  -- rate-limit hit log
+  , envRateOn :: Bool
+  , envTrustProxy :: Bool
   }
 
 unauthenticated :: ApiError
@@ -706,12 +759,14 @@ currentUser env = do
   case mTok of
     Nothing  -> pure Nothing
     Just tok -> do
-      store <- liftIO (readIORef (envTokens env))
+      store0 <- liftIO (readIORef (envTokens env))
+      now <- liftIO getCurrentTime
+      let store = Map.mapMaybe (\(tUid, expAt) -> if expAt > now then Just tUid else Nothing) store0
       case Map.lookup tok store of
         Nothing  -> pure Nothing
         Just uid -> do
           r <- liftIO (tryAny (withMVar (envLock env)
-                 (\_ -> runSQLiteM dbPath (Repo.findUserById uid))))
+                 (\_ -> runSQLiteM (envDbPath env) (Repo.findUserById uid))))
           pure $ case r of
             Right (Right (Just u)) | accountStatus u == Active -> Just uid
             _                                                   -> Nothing
@@ -771,12 +826,86 @@ fromRegisterUser RU.EmailTaken =
 
 -- ===== Helpers =====
 
+-- ===== Rate limiting (in memory) =====
+
+data RateRule = RateRule
+  { ruleBucket  :: Text
+  , ruleWindow  :: NominalDiffTime
+  , ruleMax     :: Int
+  , ruleLockFor :: Maybe NominalDiffTime
+  }
+
+loginUserRule, loginIpRule, registerIpRule :: RateRule
+loginUserRule  = RateRule "login-user"  900  5 (Just 300)
+loginIpRule    = RateRule "login-ip"    900 10 Nothing
+registerIpRule = RateRule "register-ip" 3600 10 Nothing
+
+pruneHits :: UTCTime -> NominalDiffTime -> [UTCTime] -> [UTCTime]
+pruneHits now w = filter (\t -> diffUTCTime now t < w)
+
+-- | Seconds until another attempt is allowed; Nothing = allowed now.
+blockedFor :: Env -> RateRule -> Text -> IO (Maybe Int)
+blockedFor env rule key
+  | not (envRateOn env) = pure Nothing
+  | otherwise = do
+      now <- getCurrentTime
+      m   <- readIORef (envHits env)
+      let ts = maybe [] (pruneHits now (ruleWindow rule)) (Map.lookup (ruleBucket rule, key) m)
+      pure $
+        if length ts < ruleMax rule then Nothing
+        else
+          let waitS = case ruleLockFor rule of
+                Just lockFor -> lockFor - diffUTCTime now (maximum ts)
+                Nothing      -> ruleWindow rule - diffUTCTime now (minimum ts)
+          in if waitS > 0 then Just (ceiling waitS) else Nothing
+
+recordHit :: Env -> RateRule -> Text -> IO ()
+recordHit env rule key = when (envRateOn env) $ do
+  now <- getCurrentTime
+  atomicModifyIORef' (envHits env) $ \m ->
+    let pruned = Map.filter (not . null) (Map.map (pruneHits now 3600) m)
+    in (Map.insertWith (++) (ruleBucket rule, key) [now] pruned, ())
+
+clearHits :: Env -> RateRule -> Text -> IO ()
+clearHits env rule key =
+  atomicModifyIORef' (envHits env) (\m -> (Map.delete (ruleBucket rule, key) m, ()))
+
+firstBlocked :: [IO (Maybe Int)] -> IO (Maybe Int)
+firstBlocked []     = pure Nothing
+firstBlocked (a:as) = a >>= maybe (firstBlocked as) (pure . Just)
+
+tooMany :: Int -> ApiError
+tooMany secs = ApiError status429 "TOO_MANY_ATTEMPTS"
+  "Too many attempts, try again later" (object ["retryAfterSeconds" .= secs])
+
+peerIp :: String -> Text
+peerIp s = case s of
+  ('[':rest) -> T.pack (takeWhile (/= ']') rest)
+  _          -> T.pack (reverse (drop 1 (dropWhile (/= ':') (reverse s))))
+
+-- | Real client IP. X-Forwarded-For (rightmost entry, set by our own proxy)
+-- is honoured only when ARENAOS_TRUST_PROXY=1.
+clientIp :: Env -> ActionM Text
+clientIp env = do
+  req <- request
+  let direct = peerIp (show (remoteHost req))
+      fwd    = lookup "x-forwarded-for" (requestHeaders req)
+      latin1 = T.pack . map (toEnum . fromIntegral) . BS.unpack
+  pure $ case fwd of
+    Just v | envTrustProxy env ->
+      let parts = map T.strip (T.splitOn "," (latin1 v))
+      in if null parts || T.null (last parts) then direct else last parts
+    _ -> direct
+
+withHashSlot :: Env -> IO a -> IO a
+withHashSlot env = bracket_ (waitQSem (envHashSem env)) (signalQSem (envHashSem env))
+
 tryAny :: IO a -> IO (Either SomeException a)
 tryAny = try
 
 runUseCase :: Env -> SQLiteM a -> ActionM (Either ApiError a)
 runUseCase lock action = do
-  outcome <- liftIO (tryAny (withMVar (envLock lock) (\_ -> runSQLiteM dbPath action)))
+  outcome <- liftIO (tryAny (withMVar (envLock lock) (\_ -> runSQLiteM (envDbPath lock) action)))
   case outcome of
     Left ex -> do
       liftIO (hPutStrLn stderr ("unhandled: " ++ show ex))
@@ -868,14 +997,28 @@ runViewAction lock useCase toApiError onSuccess = do
 
 main :: IO ()
 main = do
-  initResult <- runSQLiteM dbPath $ do
+  dbFile <- envOr "ARENAOS_DB" defaultDbPath
+  host   <- envOr "ARENAOS_HOST" "127.0.0.1"
+  port   <- readPort
+  ttlSecs    <- readIntEnv "ARENAOS_TOKEN_TTL_SECONDS" 604800
+  rateOn     <- (/= "off") <$> envOr "ARENAOS_RATE_LIMIT" "on"
+  trustProxy <- (== "1") <$> envOr "ARENAOS_TRUST_PROXY" "0"
+  initResult <- runSQLiteM dbFile $ do
     env <- ask
     liftIO (initializeSchema (envConnection env))
   case initResult of
-    Left err -> hPutStrLn stderr ("schema init failed: " ++ show err)
+    Left err -> hPutStrLn stderr ("schema init failed: " ++ show err) >> exitFailure
     Right () -> pure ()
-  lock <- Env <$> newMVar () <*> newIORef Map.empty
-  scotty 3000 $ do
+  dummyHash <- newToken >>= hashPasswordIO
+  lock <- Env <$> newMVar () <*> newIORef Map.empty <*> pure dbFile
+                <*> newQSem 2 <*> pure dummyHash
+                <*> pure (fromIntegral ttlSecs) <*> newIORef Map.empty
+                <*> pure rateOn <*> pure trustProxy
+  let opts = Options
+        { verbose  = 1
+        , settings = setHost (fromString host) (setPort port defaultSettings)
+        , jsonMode = False }
+  scottyOpts opts $ do
     get "/health" $ json (object ["status" .= ("ok" :: Text)])
 
     post "/tournaments/:id/publish" $
@@ -970,7 +1113,11 @@ main = do
       case eitherDecode raw of
         Left reason -> sendError (invalidBody reason)
         Right req -> do
-          resolved <- runUseCase lock (resolveParticipantReq req)
+          resolved <- do
+            mu <- currentUser lock
+            case mu of
+              Nothing -> pure (Left unauthenticated)
+              Just _  -> runUseCase lock (resolveParticipantReq req)
           case resolved of
             Left apiErr -> sendError apiErr
             Right p ->
@@ -985,14 +1132,39 @@ main = do
       case eitherDecode raw of
         Left reason -> sendError (invalidBody reason)
         Right (LoginReq u p) -> do
-          result <- runUseCase lock (LU.loginUser (LU.LoginUserRequest (Username u) p))
+          ip <- clientIp lock
+          let ukey = T.take 64 (T.toLower u)
+              loginReq = LU.LoginUserRequest (Username u) p
+          blocked <- liftIO (firstBlocked
+                       [blockedFor lock loginIpRule ip, blockedFor lock loginUserRule ukey])
+          result <- case blocked of
+            Just secs -> do
+              setHeader "Retry-After" (TL.pack (show secs))
+              pure (Left (tooMany secs))
+            Nothing -> do
+              looked <- runUseCase lock (LU.lookupForLogin loginReq)
+              case looked of
+                Left apiErr -> pure (Left apiErr)
+                Right mUser -> do
+                  let h = maybe (envDummyHash lock) passwordHash mUser
+                  ok <- liftIO (tryAny (withHashSlot lock (evaluate (verifyPasswordPure p h))))
+                  pure $ case ok of
+                    Left _  -> Left internalError
+                    Right v -> Right (LU.finishLogin mUser (v && isJust mUser))
+          liftIO $ case result of
+            Right (Left LU.InvalidCredentials) ->
+              recordHit lock loginIpRule ip >> recordHit lock loginUserRule ukey
+            Right (Right _) -> clearHits lock loginUserRule ukey
+            _               -> pure ()
           case result of
             Left apiErr    -> sendError apiErr
             Right (Left e) -> sendError (fromLogin e)
             Right (Right user) -> do
               tok <- liftIO newToken
+              nowT <- liftIO getCurrentTime
+              let expiresAt = addUTCTime (envTokenTtl lock) nowT
               liftIO (atomicModifyIORef' (envTokens lock)
-                        (\m -> (Map.insert tok (userId user) m, ())))
+                        (\m -> (Map.insert tok (userId user, expiresAt) (Map.filter ((> nowT) . snd) m), ())))
               let Username uname = username user
               json (object [ "token" .= tok
                            , "user"  .= object [ "id"       .= unUserId (userId user)
@@ -1011,8 +1183,23 @@ main = do
       case eitherDecode raw of
         Left reason -> sendError (invalidBody reason)
         Right (RegisterReq u e p) -> do
-          result <- runUseCase lock
-            (RU.registerUser (RU.RegisterUserRequest (Username u) (Email e) p))
+          ip <- clientIp lock
+          blocked <- liftIO (blockedFor lock registerIpRule ip)
+          let regReq = RU.RegisterUserRequest (Username u) (Email e) p
+          result <- case blocked of
+            Just secs -> do
+              setHeader "Retry-After" (TL.pack (show secs))
+              pure (Left (tooMany secs))
+            Nothing -> case RU.validateRegistration regReq of
+              Left verr -> pure (Right (Left verr))
+              Right () -> do
+                liftIO (recordHit lock registerIpRule ip)
+                hr <- liftIO (tryAny (withHashSlot lock (hashPasswordIO p)))
+                case hr of
+                  Left ex -> do
+                    liftIO (hPutStrLn stderr ("hash failed: " ++ show ex))
+                    pure (Left internalError)
+                  Right h -> runUseCase lock (RU.registerWithHash regReq h)
           case result of
             Left apiErr      -> sendError apiErr
             Right (Left err) -> sendError (fromRegisterUser err)

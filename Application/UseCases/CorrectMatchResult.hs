@@ -38,6 +38,7 @@ data CorrectMatchResultError
   | DownstreamMatchStarted MatchId
   | SourceMatchOutcomeInvalid MatchId
   | CorrectionIntegrityViolation MatchId
+  | GF1ResetNotRestorable MatchId
   | CorrectedOutcomeNotAdvanceable MatchOutcome
   | BracketLinksUnavailable
   deriving (Eq, Show)
@@ -384,14 +385,22 @@ handleWBSource
   => Match -> MatchOutcome -> [Match] -> BracketNodeId -> BracketNodeId
   -> m (Either CorrectMatchResultError Match)
 handleWBSource match newOutcome allMatches winnerTargetId loserTargetId = do
+  -- A loser dropped into a bye-shaped losers node is passed straight on, so the
+  -- nodes it was passed into must be guarded and repaired too.
+  (_, bracketNodes) <- Repo.getBracket (matchBracket match)
+  mLinks <- Repo.getBracketLinks (matchBracket match)
+  let extraIds = maybe [] (\ls -> loserPassThrough bracketNodes ls loserTargetId) mLinks
   let winnerTargetMatch = find ((== winnerTargetId) . matchBracketNode) allMatches
       loserTargetMatch  = find ((== loserTargetId)  . matchBracketNode) allMatches
-  case validateTarget winnerTargetMatch *> validateTarget loserTargetMatch of
+      extraMatches = [ m | eid <- extraIds, Just m <- [find ((== eid) . matchBracketNode) allMatches] ]
+  case validateTarget winnerTargetMatch *> validateTarget loserTargetMatch *> mapM_ (validateTarget . Just) extraMatches of
     Left err -> pure (Left err)
     Right () -> do
       r <- applyDualTargetCorrection match newOutcome winnerTargetMatch loserTargetMatch
       case r of
-        Right _ -> repairTargetSlots match newOutcome (Just winnerTargetId) (Just loserTargetId)
+        Right _ -> do
+          repairTargetSlots match newOutcome (Just winnerTargetId) (Just loserTargetId)
+          repairPassThrough match newOutcome extraIds extraMatches
         Left _  -> pure ()
       pure r
 
@@ -420,6 +429,48 @@ handleLBSource match newOutcome allMatches targetId = do
                   Repo.saveMatch updatedTm
                   pure (Right corrected)
 
+-- | A bye-shaped node (one real slot, one ByeSlot) never gets a match: whoever
+-- drops into it is passed straight on along its winner link.
+isByeShapedNode :: BracketNode -> Bool
+isByeShapedNode n = case (nodeSlotA n, nodeSlotB n) of
+  (Filled _, ByeSlot) -> True
+  (ByeSlot, Filled _) -> True
+  _                   -> False
+
+-- | The nodes a loser is passed into after the loser target, following stored
+-- winner links through bye-shaped nodes. Includes the first node that is not
+-- bye-shaped (where the passed-on player actually waits for a match).
+-- The step budget (the node count) stops a corrupt cyclic chain.
+loserPassThrough :: [BracketNode] -> BracketLinks -> BracketNodeId -> [BracketNodeId]
+loserPassThrough nodes links = go (length nodes)
+  where
+    go budget nid
+      | budget <= 0 = []
+      | otherwise =
+          case find ((== nid) . nodeId) nodes of
+            Just n | isByeShapedNode n ->
+              case lookup nid links >>= linkWinnerTo of
+                Just d  -> destNode d : go (budget - 1) (destNode d)
+                Nothing -> []
+            _ -> []
+
+-- | Swaps the corrected loser into the nodes (and scheduled matches) the old
+-- loser was passed into. Validation happens before this, in handleWBSource.
+repairPassThrough
+  :: (MatchRepository m, BracketRepository m)
+  => Match -> MatchOutcome -> [BracketNodeId] -> [Match] -> m ()
+repairPassThrough match newOutcome extraIds extraMatches =
+  case (correctedParticipant newOutcome, matchOutcome match >>= correctedParticipant) of
+    (Just newWinner, Just oldWinner) -> do
+      (_, nodes) <- Repo.getBracket (matchBracket match)
+      let nodeRepairs = catMaybes
+            [ find ((== t) . nodeId) nodes >>= swapInNode newWinner oldWinner | t <- extraIds ]
+          matchRepairs = catMaybes
+            [ findReplacementSlot tm newWinner oldWinner | tm <- extraMatches ]
+      mapM_ Repo.updateNodeSlots nodeRepairs
+      mapM_ Repo.saveMatch matchRepairs
+    _ -> pure ()
+
 -- 2. checkGF1Correction gains the explicit reject Thread A specified.
 -- Needs the current match's id threaded in to construct the error.
 checkGF1Correction
@@ -432,7 +483,7 @@ checkGF1Correction currentMatchId _ oldOutcome newOutcome resetMatch =
       Just m | matchStatus m == Match.Scheduled  -> Right (Just (matchId m))
              | matchStatus m == Match.InProgress -> Left (DownstreamMatchStarted (matchId m))
              | matchStatus m == Match.Completed  -> Left TournamentAlreadyCompleted
-    (Decisive, ResetRequired) -> Left (CorrectionIntegrityViolation currentMatchId)
+    (Decisive, ResetRequired) -> Left (GF1ResetNotRestorable currentMatchId)
       -- Thread A's explicit, documented exception: would require
       -- materializing a reset match that never existed.
     _ -> Right Nothing  -- Decisive->Decisive, ResetRequired->ResetRequired: no structural change
