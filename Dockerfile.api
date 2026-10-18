@@ -1,0 +1,47 @@
+# ---- build ----
+FROM haskell:9.6.7 AS build
+WORKDIR /src
+
+# Dependency layer: only re-runs when the cabal files change.
+COPY arenaos.cabal cabal.project ./
+RUN cabal update && cabal build --only-dependencies exe:arenaos-api
+
+COPY . .
+RUN cabal build exe:arenaos-api
+
+# Collect the binary and every shared lib it needs except the libc family.
+RUN mkdir -p /out/lib \
+ && cp "$(cabal list-bin exe:arenaos-api)" /out/arenaos-api \
+ && strip /out/arenaos-api \
+ && ldd /out/arenaos-api \
+    | awk '/=> \//{print $3}' \
+    | grep -Ev '/(libc|libm|libdl|libpthread|librt|libutil|libresolv)\.so' \
+    | xargs -r -I{} cp -L {} /out/lib/
+
+# ---- runtime ----
+FROM debian:trixie-slim
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends sqlite3 \
+ && rm -rf /var/lib/apt/lists/* \
+ && useradd --system --uid 10001 --home-dir /data --shell /usr/sbin/nologin arenaos \
+ && mkdir -p /data \
+ && chown arenaos:arenaos /data
+
+COPY --from=build /out/arenaos-api /usr/local/bin/arenaos-api
+COPY --from=build /out/lib/ /usr/local/lib/arenaos/
+
+ENV LD_LIBRARY_PATH=/usr/local/lib/arenaos \
+    ARENAOS_DB=/data/arenaos.db \
+    PORT=3000 \
+    ARENAOS_HOST=0.0.0.0 \
+    ARENAOS_TRUST_PROXY=1
+
+# Fail the build now, not at runtime, if a shared library is missing.
+RUN if ldd /usr/local/bin/arenaos-api | grep -q 'not found'; then \
+      ldd /usr/local/bin/arenaos-api; exit 1; \
+    fi
+
+USER arenaos
+VOLUME /data
+EXPOSE 3000
+CMD ["arenaos-api"]

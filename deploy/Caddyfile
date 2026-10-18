@@ -1,0 +1,29 @@
+# Site address comes from SITE_ADDRESS. Default ":80" = plain HTTP on any host or IP.
+# Set SITE_ADDRESS=yourdomain.com and Caddy gets a certificate automatically.
+{$SITE_ADDRESS::80} {
+    encode zstd gzip
+
+    header {
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+        Referrer-Policy strict-origin-when-cross-origin
+        -Server
+    }
+
+    # /api/foo -> api:3000/foo (the /api prefix is stripped).
+    # Caddy overwrites any client-supplied X-Forwarded-For here.
+    handle_path /api/* {
+        reverse_proxy api:3000
+    }
+
+    # Everything else: the built SPA, with index.html fallback for client routes.
+    handle {
+        root * /srv
+        @assets path /assets/*
+        @notassets not path /assets/*
+        header @assets Cache-Control "public, max-age=31536000, immutable"
+        header @notassets Cache-Control "no-cache"
+        try_files {path} /index.html
+        file_server
+    }
+}

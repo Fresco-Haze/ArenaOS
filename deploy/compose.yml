@@ -1,0 +1,42 @@
+name: arenaos
+
+services:
+  api:
+    image: ghcr.io/fresco-haze/arenaos-api:${ARENAOS_TAG:-latest}
+    restart: unless-stopped
+    # No published ports: only the web service can reach this over the compose network.
+    volumes:
+      - arenaos-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/3000 && printf 'GET /health HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q '\"status\":\"ok\"' <&3"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  web:
+    image: ghcr.io/fresco-haze/arenaos-web:${ARENAOS_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-:80}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  arenaos-data:
+  caddy-data:
+  caddy-config:

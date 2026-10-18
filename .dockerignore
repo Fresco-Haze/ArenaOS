@@ -1,0 +1,13 @@
+.git
+.github
+dist-newstyle
+**/node_modules
+web/dist
+*.db
+*.db-*
+*.bak
+*.log
+*.txt
+*.md
+*.ps1
+scripts
