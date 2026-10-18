@@ -22,3 +22,11 @@ test.log
 .DS_Store
 *.diff
 build-errors.txt
+
+# Backups, logs, local output, env files
+*.bak
+scripts/logs/
+build-output.txt
+test-output.txt
+.env
+.env.*
