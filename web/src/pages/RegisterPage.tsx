@@ -5,6 +5,7 @@ import { ApiError } from '../api'
 import { useAuth } from '../auth/context'
 import { registerUser } from '../auth/authActions'
 import { safeNext } from '../lib/safeNext'
+import { retrySeconds, useCooldown } from '../lib/rateLimit'
 
 type Field = 'username' | 'email' | 'password'
 
@@ -30,6 +31,7 @@ export default function RegisterPage() {
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<Field, string>>>({})
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const cooldown = useCooldown()
 
   if (user) return <Navigate to={next} replace />
 
@@ -43,7 +45,10 @@ export default function RegisterPage() {
       await registerUser(username, email, password)
     } catch (err) {
       setBusy(false)
-      if (err instanceof ApiError) {
+      const wait = retrySeconds(err)
+      if (wait !== null) {
+        cooldown.start(wait)
+      } else if (err instanceof ApiError) {
         const field = fieldOf(err)
         if (field) setFieldErrors({ [field]: err.message })
         else setError(err.message)
@@ -107,8 +112,9 @@ export default function RegisterPage() {
             <span role="alert" className="form-error">{fieldErrors.password}</span>
           )}
         </label>
+        {cooldown.message && <p role="alert" className="form-error">{cooldown.message}</p>}
         {error && <p role="alert" className="form-error">{error}</p>}
-        <button type="submit" className="btn-primary" disabled={busy}>
+        <button type="submit" className="btn-primary" disabled={busy || cooldown.cooling}>
           {busy ? 'Creating account' : 'Create account'}
         </button>
       </form>

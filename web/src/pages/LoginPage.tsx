@@ -3,6 +3,7 @@ import type { FormEvent } from 'react'
 import { ApiError } from '../api'
 import { useAuth } from '../auth/context'
 import { safeNext } from '../lib/safeNext'
+import { retrySeconds, useCooldown } from '../lib/rateLimit'
 import { Link, Navigate, useLocation, useSearchParams } from 'react-router'
 
 export default function LoginPage() {
@@ -16,6 +17,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const cooldown = useCooldown()
 
   if (user) return <Navigate to={next} replace />
 
@@ -26,7 +28,9 @@ export default function LoginPage() {
     try {
       await login(username, password)
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Could not reach the server')
+      const wait = retrySeconds(err)
+      if (wait !== null) cooldown.start(wait)
+      else setError(err instanceof ApiError ? err.message : 'Could not reach the server')
       setPassword('')
       setBusy(false)
     }
@@ -57,8 +61,9 @@ export default function LoginPage() {
             required
           />
         </label>
+        {cooldown.message && <p role="alert" className="form-error">{cooldown.message}</p>}
         {error && <p role="alert" className="form-error">{error}</p>}
-        <button type="submit" className="btn-primary" disabled={busy}>
+        <button type="submit" className="btn-primary" disabled={busy || cooldown.cooling}>
           {busy ? 'Signing in' : 'Sign in'}
         </button>
       </form>
