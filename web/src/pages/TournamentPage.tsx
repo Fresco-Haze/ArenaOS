@@ -108,8 +108,14 @@ export default function TournamentPage({ id }: { id: string }) {
       <section className="section">
         <h2>Bracket</h2>
 
+        {t.state === 'Cancelled' && (
+          <p role="status" className="muted">
+            This tournament was cancelled. Matches that had not finished were not completed.
+          </p>
+        )}
+
         {bracket ? (
-          <Bracket bracket={bracket} />
+          <Bracket bracket={bracket} tournamentState={t.state} />
         ) : (
           <p className="muted">
             The bracket has not been generated yet.

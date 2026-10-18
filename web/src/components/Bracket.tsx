@@ -1,3 +1,4 @@
+import { createContext, useContext } from 'react'
 import { formatDateTime } from '../lib/dates'
 import { layoutSection, layoutSingleElim, TREE } from '../lib/bracket'
 import type { TreeLayout } from '../lib/bracket'
@@ -76,6 +77,8 @@ function SlotRow({ label, isWinner, isLoser, pending, score }: { label: string; 
 function NodeCard({ node, nodeLabels }: { node: BracketNode; nodeLabels: Map<number, string> }) {
   const winSide = outcomeSide(node)
   const state = cardState(node)
+  const cancelled = useContext(CancelledContext)
+  const stopped = cancelled && (state === 'live' || state === 'scheduled')
   if (state === 'bye') {
     const filled = [node.slotA, node.slotB].find((s) => s.type === 'Filled')
     return (
@@ -89,12 +92,12 @@ function NodeCard({ node, nodeLabels }: { node: BracketNode; nodeLabels: Map<num
   const pendingA = node.slotA.type === 'AwaitingWinnerOf' || node.slotA.type === 'AwaitingLoserOf'
   const pendingB = node.slotB.type === 'AwaitingWinnerOf' || node.slotB.type === 'AwaitingLoserOf'
   return (
-    <div className={'match-card match-' + state}>
+    <div className={'match-card match-' + (stopped ? 'waiting' : state)}>
       <SlotRow label={slotLabel(node.slotA, nodeLabels)} isWinner={winSide === 'A'} isLoser={done && winSide === 'B'} pending={pendingA} score={node.score?.a} />
       <SlotRow label={slotLabel(node.slotB, nodeLabels)} isWinner={winSide === 'B'} isLoser={done && winSide === 'A'} pending={pendingB} score={node.score?.b} />
       <p className="match-status">
-        {state === 'live' && <span className="live-dot" aria-hidden="true" />}
-        <MatchStatus node={node} />
+        {state === 'live' && !stopped && <span className="live-dot" aria-hidden="true" />}
+        {stopped ? <span className="badge badge-danger">Cancelled</span> : <MatchStatus node={node} />}
       </p>
     </div>
   )
@@ -293,7 +296,17 @@ function TreeBracket({ tree, totalRounds, names, nodeLabels }: { tree: TreeLayou
     </div>
   )
 }
-export default function Bracket({ bracket }: { bracket: BracketView }) {
+const CancelledContext = createContext(false)
+
+export default function Bracket({ bracket, tournamentState }: { bracket: BracketView; tournamentState?: string }) {
+  return (
+    <CancelledContext.Provider value={tournamentState === 'Cancelled'}>
+      <BracketInner bracket={bracket} />
+    </CancelledContext.Provider>
+  )
+}
+
+function BracketInner({ bracket }: { bracket: BracketView }) {
   if (bracket.grandFinalNodeId != null) return <DoubleElimBracket bracket={bracket} />
   if (bracket.format === 'RoundRobin') return <RoundRobinView bracket={bracket} />
   const { main, thirdPlace } = splitThirdPlace(bracket)
