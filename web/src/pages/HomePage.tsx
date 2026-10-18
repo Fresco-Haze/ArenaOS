@@ -3,6 +3,9 @@ import { useEffect, useState } from 'react'
 import { api, ApiError } from '../api'
 import { TournamentList, } from '../model'
 import type { Tournament } from '../model'
+import EmptyState from '../components/EmptyState'
+import ErrorBanner from '../components/ErrorBanner'
+import LoadingBlock from '../components/LoadingBlock'
 
 export default function HomePage() {
   const [items, setItems] = useState<Tournament[] | null>(null)
@@ -35,14 +38,11 @@ export default function HomePage() {
     <>
       <h1>Public tournaments</h1>
       {error ? (
-        <>
-          <p role="alert">{error}</p>
-          <button onClick={retry}>Try again</button>
-        </>
+        <ErrorBanner message={error} onRetry={retry} />
       ) : items === null ? (
-        <p role="status" className="muted">Loading tournaments</p>
+        <LoadingBlock label="Loading tournaments" />
       ) : items.length === 0 ? (
-        <p className="muted">No public tournaments yet.</p>
+        <EmptyState title="No public tournaments yet">Tournaments show up here once an organizer publishes one.</EmptyState>
       ) : (
         <ul className="cards">
           {items.map((t) => (
