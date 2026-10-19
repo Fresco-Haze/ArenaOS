@@ -9,7 +9,7 @@ import Control.Monad (when)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Reader (asks)
 
-import Database.SQLite.Simple (Only(..), changes, execute, query, lastInsertRowId)
+import Database.SQLite.Simple (Only(..), changes, execute, query, query_, lastInsertRowId)
 
 import Domain.Registration
     ( Registration(..)
@@ -109,3 +109,12 @@ instance RegistrationRepository SQLiteM where
                 , registrationParticipant = participant
                 , registrationStatus      = status
                 }
+
+    countRegistrationsByTournament :: SQLiteM [(TournamentId, Int)]
+    countRegistrationsByTournament = do
+        conn <- asks envConnection
+        rows <- liftIO $
+            (query_ conn
+                "SELECT tournament_id, COUNT(*) FROM registrations GROUP BY tournament_id"
+             :: IO [(Int, Int)])
+        pure [ (TournamentId tidInt, n) | (tidInt, n) <- rows ]

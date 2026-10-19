@@ -1108,3 +1108,179 @@ h2, h3 { font-weight: 600; }
   background: var(--surface);
   color: var(--danger);
 }
+/* ===== step 2: tournament stage ===== */
+/* Re-scopes the theme variables so existing bracket and card CSS adapts. */
+.stage {
+  --bg: var(--stage-bg);
+  --surface: var(--stage-panel);
+  --line: var(--stage-line);
+  --text: var(--stage-text);
+  --muted: var(--stage-muted);
+  --accent: var(--stage-live);
+  --live: var(--stage-live);
+  --info: var(--stage-live);
+  --success: #7ddc9a;
+  --warning: #ffc857;
+  --danger: #ff8a80;
+  padding: var(--space-6) var(--space-4);
+  border: 1px solid var(--stage-line);
+  border-radius: var(--radius-lg);
+  background: var(--stage-bg);
+  color: var(--text);
+}
+.stage .page-header { margin-bottom: var(--space-4); }
+.stage h1 { font-size: 2.5rem; line-height: 1.05; }
+
+.stat-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+.stat {
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.stat-value { font-size: 1.9rem; line-height: 1.1; }
+.stat-value-text { font-size: 1.4rem; }
+.stat-sub { color: var(--muted); font-size: 1.1rem; }
+.stat-label { color: var(--muted); font-size: var(--font-sm); }
+
+.tabs {
+  display: flex;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto;
+}
+.tab {
+  padding: var(--space-3) var(--space-1);
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: none;
+  color: var(--muted);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.tab[aria-selected='true'] {
+  color: var(--text);
+  border-bottom-color: var(--stage-win);
+}
+
+@media (max-width: 600px) {
+  .stage { padding: var(--space-4) var(--space-3); }
+  .stage h1 { font-size: 2rem; }
+}
+/* ===== step 3: bracket and match cards ===== */
+.stage .slot-winner {
+  background: var(--stage-win);
+  border-left-color: transparent;
+  color: #ffffff;
+}
+.stage .slot-score { font-size: 1.15rem; }
+.stage .slot-winner .slot-score { color: #ffffff; }
+.slot-check {
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.stage .slot-pending { color: var(--stage-pending); font-style: italic; }
+.stage .match-waiting { border-style: dashed; }
+.stage .match-live { box-shadow: 0 0 0 1px var(--live); }
+
+.stage .bracket-round-heading {
+  color: var(--stage-live);
+  font-family: var(--font-display);
+  font-size: 0.95rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.champion-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+  padding: var(--space-4);
+  border-radius: var(--radius);
+  background: var(--stage-win);
+  color: #ffffff;
+}
+.champion-icon {
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.champion-label { color: #d6e2ff; font-size: var(--font-sm); }
+.champion-name {
+  font-size: 2rem;
+  letter-spacing: 0.02em;
+  line-height: 1.1;
+  text-transform: uppercase;
+}
+
+.round-list { display: grid; gap: var(--space-3); }
+/* ===== step 4: auth, forms, nav ===== */
+.auth-card {
+  max-width: 26rem;
+  margin: var(--space-8) auto 0;
+  padding: var(--space-6);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+.auth-card h1 { font-size: 1.75rem; }
+.auth-card .form { max-width: none; }
+.auth-card .btn-primary { width: 100%; }
+.auth-card > p:last-child { margin: var(--space-4) 0 0; }
+
+main > .form { max-width: 32rem; }
+.form-actions { display: flex; flex-wrap: wrap; gap: var(--space-3); }
+
+/* radio groups as pills; the native input stays in place, invisible, so keyboard and screen readers work */
+.form fieldset { padding: 0; border: 0; gap: var(--space-2); }
+.form fieldset legend { margin-bottom: var(--space-2); padding: 0; font-weight: 600; }
+.form fieldset label:has(input[type='radio']) {
+  position: relative;
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  cursor: pointer;
+}
+.form fieldset label:has(input[type='radio']) input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.form fieldset label:has(input[type='radio']:checked) {
+  border-color: var(--brand-solid);
+  background: var(--brand-solid);
+  color: #ffffff;
+}
+.form fieldset label:has(input[type='radio']:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.nav a[aria-current='page'] { color: var(--text); font-weight: 600; }
+
+.dialog h2 { margin-bottom: var(--space-2); font-size: 1.25rem; }
+
+@media (max-width: 600px) {
+  h1 { font-size: 1.75rem; }
+  .auth-card { margin-top: var(--space-4); padding: var(--space-4); }
+}

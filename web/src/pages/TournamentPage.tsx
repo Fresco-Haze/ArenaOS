@@ -1,45 +1,55 @@
-import { stateBadge } from '../badges'
+import { useState } from 'react'
 import { Link } from 'react-router'
 
+import { stateBadge } from '../badges'
 import { useAuth } from '../auth/context'
 import { useTournament } from '../hooks/useTournament'
 
 import { participantName } from '../lib/participants'
+import { currentRoundName, matchStats } from '../lib/tournamentStats'
 import { formatLabel, stateLabel } from '../model'
 
 import Bracket from '../components/Bracket'
-import PlayerLookup from '../components/PlayerLookup'
+import EmptyState from '../components/EmptyState'
+import ErrorBanner from '../components/ErrorBanner'
+import LoadingBlock from '../components/LoadingBlock'
 import OrganizerPanel from '../components/OrganizerPanel'
+import PageHeader from '../components/PageHeader'
+import PlayerLookup from '../components/PlayerLookup'
+import StatStrip from '../components/StatStrip'
+import type { Stat } from '../components/StatStrip'
+import Tabs from '../components/Tabs'
+
+type TabId = 'bracket' | 'players'
 
 export default function TournamentPage({ id }: { id: string }) {
   const { user } = useAuth()
   const { state, reload } = useTournament(id)
+  const [tab, setTab] = useState<TabId>('bracket')
 
   if (state.kind === 'loading') {
-    return <p role="status" className="muted">Loading tournament</p>
+    return <LoadingBlock label="Loading tournament" rows={4} />
   }
 
   if (state.kind === 'notfound') {
     return (
-      <>
-        <h1>Tournament not found</h1>
-        <p className="muted">
-          It may not exist, or it may be private.
-        </p>
-
-        {!user && (
-          <p>
-            <Link to={`/login?next=/tournaments/${id}`}>
-              Sign in
-            </Link>{' '}
-            to check.
-          </p>
-        )}
-
-        <p>
-          <Link to="/">Back to public tournaments</Link>
-        </p>
-      </>
+      <EmptyState
+        title="Tournament not found"
+        action={
+          <>
+            {!user && (
+              <p>
+                <Link to={`/login?next=/tournaments/${id}`}>Sign in</Link> to check.
+              </p>
+            )}
+            <p>
+              <Link to="/">Back to public tournaments</Link>
+            </p>
+          </>
+        }
+      >
+        It may not exist, or it may be private.
+      </EmptyState>
     )
   }
 
@@ -47,81 +57,105 @@ export default function TournamentPage({ id }: { id: string }) {
     return (
       <>
         <h1>Tournament</h1>
-        <p role="alert">{state.message}</p>
-        <button onClick={() => void reload()}>
-          Try again
-        </button>
+        <ErrorBanner message={state.message} onRetry={() => void reload()} />
       </>
     )
   }
 
   const { view, bracket, lastUpdated } = state.data
   const t = view.tournament
+  const squads = t.participantMode === 'SquadOnly'
+  const unit = squads ? 'teams' : 'players'
+
+  const stats: Stat[] = [
+    {
+      label: squads ? 'Teams registered' : 'Players registered',
+      value: String(view.participants.length),
+      sub: `/ ${t.maxParticipants}`,
+    },
+  ]
+  if (bracket) {
+    const m = matchStats(bracket)
+    stats.push({
+      label: 'Matches played',
+      value: String(m.played),
+      sub: m.total === null ? undefined : `/ ${m.total}`,
+    })
+    const round = currentRoundName(bracket)
+    if (round) stats.push({ label: 'Current round', value: round, text: true })
+  }
 
   return (
     <>
-      <div className="title-row">
-        <h1>{t.name}</h1>
-        <span className={'badge ' + stateBadge[t.state]}>{stateLabel[t.state]}</span>
-      </div>
-
-      <p className="meta">
-        {formatLabel[t.format]} · up to{' '}
-        {t.maxParticipants} {t.participantMode === 'SquadOnly' ? 'teams' : 'players'}
-      </p>
-
-      <p className="meta">
-        Organized by {t.organizer}
-      </p>
-
-      <section className="section">
-        <h2>
-          {t.participantMode === 'SquadOnly' ? 'Teams' : 'Players'} ({view.participants.length} of {t.maxParticipants})
-        </h2>
-
-        {view.participants.length === 0 ? (
-          <p className="muted">
-            {t.participantMode === 'SquadOnly' ? 'No teams have registered yet.' : 'No players have registered yet.'}
-          </p>
-        ) : (
-        <ul className="participants">
-           {view.participants.map((p, i) => (
-             <li key={i}>
-                <span className="participant-name">{participantName(p)}</span>
-               {p.type === 'Squad' && (
-                 <span className="participant-members">{p.team.members.join(', ')}</span>
-               )}
-             </li>
-           ))}
-         </ul>
-        )}
-      </section>
-
-      {bracket && t.state !== 'Cancelled' && (
-        <PlayerLookup
-          bracket={bracket}
-          participants={view.participants}
-          squads={t.participantMode === 'SquadOnly'}
+      <div className="stage">
+        <PageHeader
+          title={t.name}
+          status={<span className={'badge ' + stateBadge[t.state]}>{stateLabel[t.state]}</span>}
+          meta={
+            <>
+              {formatLabel[t.format]} &middot; up to {t.maxParticipants} {unit}
+              {t.thirdPlaceMatch && <> &middot; third-place match</>} &middot; Organized by{' '}
+              {t.organizer}
+            </>
+          }
         />
-      )}
 
-      <section className="section">
-        <h2>Bracket</h2>
+        <StatStrip stats={stats} />
 
-        {t.state === 'Cancelled' && (
-          <p role="status" className="muted">
-            This tournament was cancelled. Matches that had not finished were not completed.
-          </p>
-        )}
+        <Tabs<TabId>
+          label="Tournament sections"
+          active={tab}
+          onChange={setTab}
+          tabs={[
+            { id: 'bracket', label: 'Bracket' },
+            { id: 'players', label: squads ? 'Teams' : 'Players', count: view.participants.length },
+          ]}
+        />
 
-        {bracket ? (
-          <Bracket bracket={bracket} tournamentState={t.state} />
+        {tab === 'bracket' ? (
+          <div role="tabpanel" id="panel-bracket" aria-labelledby="tab-bracket">
+            {t.state === 'Cancelled' && (
+              <p role="status" className="muted">
+                This tournament was cancelled. Matches that had not finished were not completed.
+              </p>
+            )}
+
+            {bracket && t.state !== 'Cancelled' && (
+              <PlayerLookup bracket={bracket} participants={view.participants} squads={squads} />
+            )}
+
+            {bracket ? (
+              <Bracket bracket={bracket} tournamentState={t.state} />
+            ) : (
+              <EmptyState title="No bracket yet">
+                The bracket appears here once the organizer generates it.
+              </EmptyState>
+            )}
+          </div>
         ) : (
-          <p className="muted">
-            The bracket has not been generated yet.
-          </p>
+          <div role="tabpanel" id="panel-players" aria-labelledby="tab-players">
+            <h2>
+              {squads ? 'Teams' : 'Players'} ({view.participants.length} of {t.maxParticipants})
+            </h2>
+            {view.participants.length === 0 ? (
+              <EmptyState title={squads ? 'No teams registered yet' : 'No players registered yet'}>
+                Registered {unit} will appear here.
+              </EmptyState>
+            ) : (
+              <ul className="participants">
+                {view.participants.map((p, i) => (
+                  <li key={i}>
+                    <span className="participant-name">{participantName(p)}</span>
+                    {p.type === 'Squad' && (
+                      <span className="participant-members">{p.team.members.join(', ')}</span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         )}
-      </section>
+      </div>
 
       {view.viewerIsOwner && (
         <OrganizerPanel
@@ -134,9 +168,7 @@ export default function TournamentPage({ id }: { id: string }) {
       )}
 
       <p className="toolbar muted">
-        <span>
-          Updated at {new Date(lastUpdated).toLocaleTimeString()}
-        </span>
+        <span>Updated at {new Date(lastUpdated).toLocaleTimeString()}</span>
 
         <button onClick={() => void reload()} disabled={state.refreshing}>
           {state.refreshing ? 'Refreshing' : 'Refresh'}

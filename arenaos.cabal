@@ -57,6 +57,7 @@ library
                       Application.UseCases.StartTournament
                       Application.UseCases.CancelTournament
                       Application.UseCases.UpdateTournamentName
+                      Application.UseCases.UpdateTournamentDetails
                       Application.UseCases.UpdateTournamentMaxParticipants
                       Application.UseCases.UpdateTournamentVisibility
                       Application.UseCases.UpdateTournamentFormat

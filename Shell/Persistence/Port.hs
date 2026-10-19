@@ -41,7 +41,7 @@ module Shell.Persistence.Port
 
 import Domain.Participant (Player, PlayerName, Team, TeamName, Participant, ParticipantId)
 import Domain.Tournament (Tournament, TournamentId, TournamentName, OrganizerName, TournamentFormat, Visibility, TournamentState
- , ParticipantMode)
+ , ParticipantMode, TournamentDetails)
 import Domain.Registration (Registration, RegistrationId)
 import Domain.Bracket (Bracket, BracketId, BracketNode, BracketNodeId)
 import Domain.BracketLinks (BracketLinks)
@@ -116,6 +116,7 @@ class Monad m => TournamentRepository m where
     updateTournamentFormat   :: TournamentId -> TournamentFormat -> m ()
     updateTournamentThirdPlaceMatch :: TournamentId -> Bool -> m ()
     listAllTournaments :: m [Tournament]
+    updateTournamentDetails :: TournamentId -> TournamentDetails -> m ()
 
 -- Creation-shaped input for RegistrationRepository.createRegistration.
 -- No status field -- RegistrationStatus has exactly one constructor
@@ -139,6 +140,8 @@ class Monad m => RegistrationRepository m where
     getRegistration    :: RegistrationId -> m Registration
     deleteRegistration :: RegistrationId -> m ()
     listRegistrations  :: TournamentId -> m [Registration]
+    -- One GROUP BY query: registrations per tournament (tournaments with none are absent).
+    countRegistrationsByTournament :: m [(TournamentId, Int)]
 
 
 class Monad m => BracketRepository m where

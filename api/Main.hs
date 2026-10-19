@@ -10,7 +10,7 @@ import Control.Monad.IO.Class (liftIO)
 import Control.Concurrent.MVar (MVar, newMVar, withMVar)
 import Control.Exception (SomeException, try, bracket_, evaluate)
 import Control.Concurrent.QSem (QSem, newQSem, waitQSem, signalQSem)
-import Data.Maybe (isJust)
+import Data.Maybe (isJust, fromMaybe)
 import System.IO (hPutStrLn, stderr)
 import System.Environment (lookupEnv)
 import System.Exit (exitFailure)
@@ -18,8 +18,9 @@ import Data.String (fromString)
 import Network.Wai.Handler.Warp (setHost, setPort, defaultSettings)
 import Network.HTTP.Types
   (Status, status201, status204, status400, status401, status403, status404, status409, status429, status500)
+import Data.Aeson.Types (Pair)
 import Data.Aeson
-  (Value, object, (.=), FromJSON(..), withObject, withText, (.:), (.:?), (.!=), eitherDecode)
+  (Value(Object), object, (.=), FromJSON(..), withObject, withText, (.:), (.:?), (.!=), eitherDecode)
 
 import Shell.Persistence.SQLite.Error (PersistenceError(..))
 import Shell.Persistence.SQLite.TournamentRepository ()
@@ -55,11 +56,12 @@ import qualified Application.UseCases.GetBracket as GetB
 import Domain.BracketLinks (BracketLinks, NodeDestination(..), NodeLinks(..), SlotPosition(..))
 import Domain.Tournament
   ( Tournament(..), TournamentName(..), OrganizerName(..)
-  , TournamentFormat(..), Visibility(..), ParticipantMode(..) )
+  , TournamentFormat(..), Visibility(..), ParticipantMode(..)
+  , Game(..), TournamentDetails(..) )
 import Shell.Persistence.Port (NewTournament(..))
 import qualified Application.UseCases.CreateTournament as Create
 import Engine.TournamentValidation
-  (TournamentValidationError(..), ParticipantValidationError(..))
+  (TournamentValidationError(..), ParticipantValidationError(..), DetailsValidationError(..))
 import Domain.Registration (RegistrationId(..))
 import qualified Application.UseCases.RegisterParticipant as Register
 import Data.IORef (IORef, newIORef, readIORef, atomicModifyIORef')
@@ -82,6 +84,7 @@ import Domain.TournamentError (TournamentError(..))
 import qualified Application.UseCases.ListPublicTournaments as ListPublic
 import qualified Application.UseCases.UpdateTournamentThirdPlaceMatch as UTTP
 import qualified Application.UseCases.UpdateTournamentName as UTN
+import qualified Application.UseCases.UpdateTournamentDetails as UTD
 import qualified Application.UseCases.UpdateTournamentMaxParticipants as UTM
 import qualified Application.UseCases.UpdateTournamentVisibility as UTV
 import qualified Application.UseCases.PauseTournament as PauseT
@@ -502,6 +505,7 @@ data CreateReq = CreateReq
   , reqMaxPlayers      :: Int
   , reqThirdPlaceMatch :: Bool
   , reqParticipantMode :: ParticipantMode
+  , reqDetails         :: TournamentDetails
   }
 
 instance FromJSON CreateReq where
@@ -526,7 +530,8 @@ instance FromJSON CreateReq where
       "IndividualOnly" -> pure IndividualOnly
       "SquadOnly"      -> pure SquadOnly
       _ -> fail "participantMode must be IndividualOnly or SquadOnly"
-    pure (CreateReq n org fmt vis m tp mode)
+    DetailsReq det <- parseJSON (Object o)
+    pure (CreateReq n org fmt vis m tp mode det)
   --  pure (CreateReq n org fmt vis m tp)
 
 toNewTournament :: UserId -> CreateReq -> NewTournament
@@ -542,8 +547,48 @@ toNewTournament uid r = NewTournament
   }
 
 tournamentJson :: Tournament -> Value
-tournamentJson t = object
-  [ "tournamentId"    .= unTournamentId (tournamentId t)
+tournamentJson t = object (tournamentPairs t)
+
+tournamentJsonCounted :: Int -> Tournament -> Value
+tournamentJsonCounted n t = object (("registeredCount" .= n) : tournamentPairs t)
+
+countFor :: [(TournamentId, Int)] -> Tournament -> Int
+countFor cs t = fromMaybe 0 (lookup (tournamentId t) cs)
+
+gameText :: Game -> Text
+gameText GameEFootball  = "eFootball"
+gameText GamePubgMobile = "PubgMobile"
+gameText GameCallOfDuty = "CallOfDuty"
+gameText GameOther      = "Other"
+
+gameFromText :: Text -> Maybe Game
+gameFromText "eFootball"  = Just GameEFootball
+gameFromText "PubgMobile" = Just GamePubgMobile
+gameFromText "CallOfDuty" = Just GameCallOfDuty
+gameFromText "Other"      = Just GameOther
+gameFromText _            = Nothing
+
+-- Absent or null fields mean "none". Shared by create and PUT /details.
+newtype DetailsReq = DetailsReq TournamentDetails
+
+instance FromJSON DetailsReq where
+  parseJSON = withObject "details" $ \o -> do
+    mg <- o .:? "game"
+    g <- case mg of
+      Nothing -> pure Nothing
+      Just txt -> case gameFromText txt of
+        Just x  -> pure (Just x)
+        Nothing -> fail "game must be eFootball, PubgMobile, CallOfDuty or Other"
+    st <- o .:? "startTime"
+    pz <- o .:? "prize"
+    pure (DetailsReq (TournamentDetails g st pz))
+
+tournamentPairs :: Tournament -> [Pair]
+tournamentPairs t =
+  [ "game"      .= fmap gameText (tournamentGame t)
+  , "startTime" .= tournamentStartTime t
+  , "prize"     .= tournamentPrize t
+  , "tournamentId"    .= unTournamentId (tournamentId t)
   , "name"            .= unTournamentName (tournamentName t)
   , "organizer"       .= unOrganizerName (tournamentOrganizer t)
   , "format"          .= T.pack (show (tournamentFormat t))
@@ -559,7 +604,7 @@ tournamentJson t = object
 
 tournamentViewJson :: GetT.TournamentView -> Value
 tournamentViewJson v = object
-  [ "tournament"    .= tournamentJson (GetT.tvTournament v)
+  [ "tournament"    .= tournamentJsonCounted (length (GetT.tvParticipants v)) (GetT.tvTournament v)
   , "participants"  .= map participantJson (GetT.tvParticipants v)
   , "viewerIsOwner" .= GetT.tvViewerIsOwner v
   ]
@@ -620,6 +665,16 @@ fromValidation ThirdPlaceMatchRequiresSingleElimination =
   ApiError status400 "VALIDATION_FAILED"
     "Third-place match is only supported for Single Elimination"
     (object ["field" .= ("thirdPlaceMatch" :: Text)])
+
+fromDetailsValidation :: DetailsValidationError -> ApiError
+fromDetailsValidation (PrizeTooLong n) =
+  ApiError status400 "VALIDATION_FAILED" "Prize is too long"
+    (object ["field" .= ("prize" :: Text), "maximum" .= (100 :: Int), "actual" .= n])
+
+fromUpdateDetails :: UTD.UpdateTournamentDetailsError -> ApiError
+fromUpdateDetails (UTD.Unauthorized a)     = fromAuthorization a
+fromUpdateDetails (UTD.InvalidLifecycle l) = fromLifecycle l
+fromUpdateDetails (UTD.InvalidDetails e)   = fromDetailsValidation e
 
 data ParticipantReq
   = IndividualReq String
@@ -1099,11 +1154,12 @@ main = do
         (_, Left reason) -> sendError (invalidBody reason)
         (Just uid, Right req) -> do
           result <- runUseCase lock
-                      (Create.createTournamentChecked (toNewTournament uid req))
+                      (Create.createTournamentWithDetails (toNewTournament uid req) (reqDetails req))
                  --     (Create.createTournamentChecked (toNewTournament (UserId uid) req))
           case result of
             Left apiErr -> sendError apiErr
-            Right (Left (Create.InvalidTournament v)) -> sendError (fromValidation v)
+            Right (Left (Create.CreateInvalid v)) -> sendError (fromValidation v)
+            Right (Left (Create.CreateInvalidDetails e)) -> sendError (fromDetailsValidation e)
             Right (Right tid) -> do
               status status201
               json (object ["tournamentId" .= unTournamentId tid])
@@ -1214,12 +1270,12 @@ main = do
       case mUser of
         Nothing  -> sendError unauthenticated
         Just uid -> do
-          result <- runUseCase lock (ListMine.listMyTournaments uid)
+          result <- runUseCase lock ((,) <$> ListMine.listMyTournaments uid <*> Repo.countRegistrationsByTournament)
           case result of
             Left apiErr -> sendError apiErr
             Right ts    -> json (object
               [ "tournaments" .=
-                  map tournamentJson (sortOn (negate . unTournamentId . tournamentId) ts) ])
+                  map (\t -> tournamentJsonCounted (countFor (snd ts) t) t) (sortOn (negate . unTournamentId . tournamentId) (fst ts)) ])
     
     post "/tournaments/:id/start" $
       runTransition lock StartT.startTournament fromStartTournament
@@ -1249,10 +1305,10 @@ main = do
       case mv of
         Left err -> sendError err
         Right _  -> do
-          result <- runUseCase lock ListPublic.listPublicTournaments
+          result <- runUseCase lock ((,) <$> ListPublic.listPublicTournaments <*> Repo.countRegistrationsByTournament)
           case result of
             Left apiErr -> sendError apiErr
-            Right ts    -> json (object ["tournaments" .= map tournamentJson ts])
+            Right ts    -> json (object ["tournaments" .= map (\t -> tournamentJsonCounted (countFor (snd ts) t) t) (fst ts)])
 
     put "/tournaments/:id/name" $ do
       raw <- body
@@ -1277,6 +1333,14 @@ main = do
         Right (MaxReq n) ->
           runTransition lock
             (\uid tid -> UTM.updateTournamentMaxParticipants uid tid n) fromUpdateMax
+
+    put "/tournaments/:id/details" $ do
+      raw <- body
+      case eitherDecode raw of
+        Left reason -> sendError (invalidBody reason)
+        Right (DetailsReq d) ->
+          runTransition lock
+            (\uid tid -> UTD.updateTournamentDetails uid tid d) fromUpdateDetails
 
     post "/tournaments/:id/pause" $
       runTransition lock PauseT.pauseTournament fromPause

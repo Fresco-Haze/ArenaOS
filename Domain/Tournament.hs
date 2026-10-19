@@ -11,8 +11,12 @@ module Domain.Tournament
     , BracketId(..)
     , Tournament(..)
     , ParticipantMode(..)
+    , Game(..)
+    , TournamentDetails(..)
+    , noDetails
     ) where
 
+import Data.Time (UTCTime)
 import Domain.Ids (TournamentId(..), BracketId(..),UserId(..))
 
 
@@ -36,6 +40,21 @@ data TournamentFormat = SingleElimination | DoubleElimination | RoundRobin
 
 data Visibility = Public | Private deriving (Show, Eq)
 
+-- v0.11: optional tournament tag. Stored as text; see Schema CHECK.
+data Game = GameEFootball | GamePubgMobile | GameCallOfDuty | GameOther
+    deriving (Show, Eq)
+
+-- v0.11: optional, organizer-editable descriptive fields.
+-- startTime is the scheduled start (UTC); it never starts the tournament.
+data TournamentDetails = TournamentDetails
+    { detailsGame      :: Maybe Game
+    , detailsStartTime :: Maybe UTCTime
+    , detailsPrize     :: Maybe String
+    } deriving (Show, Eq)
+
+noDetails :: TournamentDetails
+noDetails = TournamentDetails Nothing Nothing Nothing
+
 data ParticipantMode = IndividualOnly | SquadOnly
     deriving (Show, Eq)
 
@@ -53,5 +72,8 @@ data Tournament = Tournament
     , tournamentBracket :: Maybe BracketId
     , tournamentOwner :: UserId
     , tournamentParticipantMode :: ParticipantMode
+    , tournamentGame :: Maybe Game
+    , tournamentStartTime :: Maybe UTCTime
+    , tournamentPrize :: Maybe String
     } deriving (Show, Eq)
 

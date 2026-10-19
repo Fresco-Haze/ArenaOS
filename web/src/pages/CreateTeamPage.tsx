@@ -62,9 +62,12 @@ export default function CreateTeamPage() {
           />
         </label>
         {error && <p role="alert" className="form-error">{error}</p>}
+        <div className="form-actions">
         <button type="submit" className="btn-primary" disabled={busy}>
           {busy ? 'Creating' : 'Create team'}
         </button>
+        <button type="button" onClick={() => navigate(-1)}>Cancel</button>
+        </div>
       </form>
     </>
   )

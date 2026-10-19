@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
-import { Navigate, useNavigate, useSearchParams } from 'react-router'
+import { Link, Navigate, useNavigate, useSearchParams } from 'react-router'
 import { ApiError } from '../api'
 import { useAuth } from '../auth/context'
 import { registerUser } from '../auth/authActions'
@@ -70,7 +70,7 @@ export default function RegisterPage() {
   }
 
   return (
-    <>
+    <div className="auth-card">
       <h1>Create an account</h1>
       <form onSubmit={onSubmit} className="form">
         <label>
@@ -118,6 +118,10 @@ export default function RegisterPage() {
           {busy ? 'Creating account' : 'Create account'}
         </button>
       </form>
-    </>
+      <p>
+        Already have an account?{' '}
+        <Link to={`/login?next=${encodeURIComponent(next)}`}>Sign in</Link>
+      </p>
+    </div>
   )
 }

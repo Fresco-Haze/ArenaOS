@@ -10,8 +10,9 @@ import Control.Exception (throwIO)
 import Control.Monad (when)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Reader (asks)
+import Data.Time (UTCTime, formatTime, defaultTimeLocale, parseTimeM)
 
-import Database.SQLite.Simple (Only(..), (:.)(..), changes, execute, query, lastInsertRowId, query_)
+import Database.SQLite.Simple (Only(..), (:.)(..), Query, changes, execute, query, lastInsertRowId, query_)
 
 import Domain.Tournament
     ( Tournament(..)
@@ -23,6 +24,8 @@ import Domain.Tournament
     , Visibility(..)
     , BracketId(..)
     , ParticipantMode(..)
+    , Game(..)
+    , TournamentDetails(..)
     )
 import Domain.TournamentHistory (TournamentHistoryEvent(..), TournamentHistoryEntry(..), ChangedField(..))
 import Shell.Persistence.Port (TournamentRepository(..), NewTournament(..),UserId(..))
@@ -89,6 +92,34 @@ textToParticipantMode "SquadOnly"      = pure SquadOnly
 textToParticipantMode other            =
     throwIO (StorageFailure ("Unknown participant mode in storage: " ++ other))
 
+-- v0.11. Values must match the CHECK on tournaments.game in Schema.hs.
+gameToText :: Game -> String
+gameToText GameEFootball   = "eFootball"
+gameToText GamePubgMobile  = "PubgMobile"
+gameToText GameCallOfDuty  = "CallOfDuty"
+gameToText GameOther       = "Other"
+
+textToGame :: String -> IO Game
+textToGame "eFootball"  = pure GameEFootball
+textToGame "PubgMobile" = pure GamePubgMobile
+textToGame "CallOfDuty" = pure GameCallOfDuty
+textToGame "Other"      = pure GameOther
+textToGame other        =
+    throwIO (StorageFailure ("Unknown game in storage: " ++ other))
+
+-- Canonical UTC ISO 8601, whole seconds (same shape as matches.scheduled_start).
+timeFormat :: String
+timeFormat = "%Y-%m-%dT%H:%M:%SZ"
+
+timeToText :: UTCTime -> String
+timeToText = formatTime defaultTimeLocale timeFormat
+
+textToTime :: String -> IO UTCTime
+textToTime s =
+    case (parseTimeM True defaultTimeLocale timeFormat s :: Maybe UTCTime) of
+        Just t  -> pure t
+        Nothing -> throwIO (StorageFailure ("Invalid start_time in storage: " ++ s))
+
 eventToRow :: TournamentHistoryEvent -> (String, Maybe String, Maybe String)
 eventToRow TournamentCreated               = ("TournamentCreated", Nothing, Nothing)
 eventToRow TournamentPublished             = ("TournamentPublished", Nothing, Nothing)
@@ -126,6 +157,9 @@ changedFieldToText FieldVisibility       = "Visibility"
 changedFieldToText FieldFormat           = "Format"
 changedFieldToText FieldMaxParticipants  = "MaxParticipants"
 changedFieldToText FieldThirdPlaceMatch  = "ThirdPlaceMatch"
+changedFieldToText FieldGame             = "Game"
+changedFieldToText FieldStartTime        = "StartTime"
+changedFieldToText FieldPrize            = "Prize"
 
 textToChangedField :: String -> IO ChangedField
 textToChangedField "Name"             = pure FieldName
@@ -133,6 +167,9 @@ textToChangedField "Visibility"       = pure FieldVisibility
 textToChangedField "Format"           = pure FieldFormat
 textToChangedField "MaxParticipants"  = pure FieldMaxParticipants
 textToChangedField "ThirdPlaceMatch"  = pure FieldThirdPlaceMatch
+textToChangedField "Game"             = pure FieldGame
+textToChangedField "StartTime"        = pure FieldStartTime
+textToChangedField "Prize"            = pure FieldPrize
 textToChangedField other              =
     throwIO (StorageFailure ("Unknown changed field in storage: " ++ other))
 
@@ -143,6 +180,45 @@ intToThirdPlaceMatch _ = True
 thirdPlaceMatchToInt :: Bool -> Int
 thirdPlaceMatchToInt False = 0
 thirdPlaceMatchToInt True  = 1
+
+-- One SELECT and one decoder shared by getTournament and both list queries.
+tournamentSelect :: Query
+tournamentSelect =
+    "SELECT id, name, organizer_name, owner_id, format, state, visibility, \
+    \max_participants, third_place_match, bracket_id, \
+    \participant_mode, game, start_time, prize \
+    \FROM tournaments"
+
+type TournamentRow =
+    (Int, String, String, Int, String, String, String, Int, Int, Maybe Int)
+    :. (String, Maybe String, Maybe String, Maybe String)
+
+decodeTournamentRow :: TournamentRow -> IO Tournament
+decodeTournamentRow
+    ( (tidInt, name, organizer, ownerId, formatText, stateText, visText, maxP, thirdPlaceInt, bracketIdMaybe)
+      :. (modeText, gameMaybe, startMaybe, prizeMaybe) ) = do
+    format <- textToFormat formatText
+    state  <- textToState stateText
+    vis    <- textToVisibility visText
+    mode   <- textToParticipantMode modeText
+    game   <- traverse textToGame gameMaybe
+    start  <- traverse textToTime startMaybe
+    pure Tournament
+        { tournamentId              = TournamentId tidInt
+        , tournamentName            = TournamentName name
+        , tournamentOrganizer       = OrganizerName organizer
+        , tournamentOwner           = UserId ownerId
+        , tournamentFormat          = format
+        , tournamentState           = state
+        , tournamentVisibility      = vis
+        , tournamentMaxParticipants = maxP
+        , tournamentThirdPlaceMatch = intToThirdPlaceMatch thirdPlaceInt
+        , tournamentParticipantMode = mode
+        , tournamentBracket         = BracketId <$> bracketIdMaybe
+        , tournamentGame            = game
+        , tournamentStartTime       = start
+        , tournamentPrize           = prizeMaybe
+        }
 
 instance TournamentRepository SQLiteM where
 
@@ -157,7 +233,7 @@ instance TournamentRepository SQLiteM where
             \VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)"
             ( tname
             , organizer
-            , owner 
+            , owner
             , formatToText (newTournamentFormat nt)
             , stateToText Draft
             , visibilityToText (newTournamentVisibility nt)
@@ -169,35 +245,15 @@ instance TournamentRepository SQLiteM where
         pure (TournamentId (fromIntegral rowId))
 
     getTournament :: TournamentId -> SQLiteM Tournament
-    getTournament tid@(TournamentId tidInt) = do
+    getTournament (TournamentId tidInt) = do
         conn <- asks envConnection
         rows <- liftIO $
-            (query conn
-                "SELECT name, organizer_name,owner_id, format, state, visibility, max_participants,third_place_match, participant_mode, bracket_id \
-                \FROM tournaments WHERE id = ?"
-                (Only tidInt)
-             :: IO [(String, String, Int,String, String, String, Int,Int, String, Maybe Int)])
+            (query conn (tournamentSelect <> " WHERE id = ?") (Only tidInt)
+             :: IO [TournamentRow])
         case rows of
-            [(name, organizer, owner_id, formatText, stateText, visText, maxP, thirdPlaceInt, modeText, bracketIdMaybe)] -> do
-                format <- liftIO $ textToFormat formatText
-                state  <- liftIO $ textToState stateText
-                vis    <- liftIO $ textToVisibility visText
-                mode   <- liftIO $ textToParticipantMode modeText
-                pure Tournament
-                    { tournamentId              = tid
-                    , tournamentName            = TournamentName name
-                    , tournamentOrganizer       = OrganizerName organizer
-                    , tournamentOwner           = UserId  owner_id
-                    , tournamentFormat          = format
-                    , tournamentState           = state
-                    , tournamentVisibility      = vis
-                    , tournamentThirdPlaceMatch = intToThirdPlaceMatch thirdPlaceInt
-                    , tournamentMaxParticipants = maxP
-                    , tournamentParticipantMode = mode
-                    , tournamentBracket         = BracketId <$> bracketIdMaybe
-                    }
-            [] -> liftIO $ throwIO (NotFound ("Tournament not found: " ++ show tidInt))
-            _  -> liftIO $ throwIO (StorageFailure ("Multiple tournaments with id " ++ show tidInt))
+            [row] -> liftIO (decodeTournamentRow row)
+            []    -> liftIO $ throwIO (NotFound ("Tournament not found: " ++ show tidInt))
+            _     -> liftIO $ throwIO (StorageFailure ("Multiple tournaments with id " ++ show tidInt))
 
     saveTournament :: Tournament -> SQLiteM ()
     saveTournament t = do
@@ -205,11 +261,11 @@ instance TournamentRepository SQLiteM where
         let TournamentId tidInt     = tournamentId t
             TournamentName tname    = tournamentName t
             OrganizerName organizer = tournamentOrganizer t
-            UserId owner_id           = tournamentOwner t
+            UserId owner_id         = tournamentOwner t
             bracketIdMaybe          = (\(BracketId bid) -> bid) <$> tournamentBracket t
         liftIO $ execute conn
-            "INSERT INTO tournaments (id, name, organizer_name, owner_id, format, state, visibility, max_participants,third_place_match,  bracket_id, participant_mode) \
-            \VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
+            "INSERT INTO tournaments (id, name, organizer_name, owner_id, format, state, visibility, max_participants, third_place_match, bracket_id, participant_mode, game, start_time, prize) \
+            \VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
             \ON CONFLICT(id) DO UPDATE SET \
             \  name = excluded.name, \
             \  organizer_name = excluded.organizer_name, \
@@ -219,19 +275,27 @@ instance TournamentRepository SQLiteM where
             \  visibility = excluded.visibility, \
             \  max_participants = excluded.max_participants, \
             \  third_place_match = excluded.third_place_match, \
-            \  bracket_id = excluded.bracket_id"
+            \  bracket_id = excluded.bracket_id, \
+            \  game = excluded.game, \
+            \  start_time = excluded.start_time, \
+            \  prize = excluded.prize"
             ( ( tidInt
-            , tname
-            , organizer
-            , owner_id
-            , formatToText (tournamentFormat t)
-            , stateToText (tournamentState t)
-            , visibilityToText (tournamentVisibility t)
-            , tournamentMaxParticipants t
-            , thirdPlaceMatchToInt (tournamentThirdPlaceMatch t)
-            , bracketIdMaybe
-            ) :. Only (participantModeToText (tournamentParticipantMode t))
-          )
+              , tname
+              , organizer
+              , owner_id
+              , formatToText (tournamentFormat t)
+              , stateToText (tournamentState t)
+              , visibilityToText (tournamentVisibility t)
+              , tournamentMaxParticipants t
+              , thirdPlaceMatchToInt (tournamentThirdPlaceMatch t)
+              , bracketIdMaybe
+              )
+              :. ( participantModeToText (tournamentParticipantMode t)
+                 , gameToText <$> tournamentGame t
+                 , timeToText <$> tournamentStartTime t
+                 , tournamentPrize t
+                 )
+            )
 
     deleteTournament :: TournamentId -> SQLiteM ()
     deleteTournament (TournamentId tidInt) = do
@@ -243,36 +307,13 @@ instance TournamentRepository SQLiteM where
         when (n == 0) $
             liftIO $ throwIO (NotFound ("Tournament not found: " ++ show tidInt))
 
-    
     listTournamentsByOwner :: UserId -> SQLiteM [Tournament]
     listTournamentsByOwner (UserId ownerId) = do
         conn <- asks envConnection
         rows <- liftIO $
-         (query conn
-            "SELECT id, name, organizer_name, owner_id, format, state, visibility, max_participants,third_place_match, bracket_id, participant_mode \
-            \FROM tournaments WHERE owner_id = ?"
-            (Only ownerId)
-         :: IO [(Int, String, String, Int, String, String, String, Int, Int, Maybe Int) :. Only String])
-        mapM decodeRow rows
-     where
-      decodeRow ((tidInt, name, organizer, owner_id, formatText, stateText, visText, maxP, thirdPlaceInt, bracketIdMaybe) :. Only modeText) = do
-        format <- liftIO $ textToFormat formatText
-        state  <- liftIO $ textToState stateText
-        vis    <- liftIO $ textToVisibility visText
-        mode   <- liftIO $ textToParticipantMode modeText
-        pure Tournament
-            { tournamentId              = TournamentId tidInt
-            , tournamentName            = TournamentName name
-            , tournamentOrganizer       = OrganizerName organizer
-            , tournamentOwner           = UserId owner_id
-            , tournamentFormat          = format
-            , tournamentState           = state
-            , tournamentVisibility      = vis
-            , tournamentMaxParticipants = maxP
-            , tournamentThirdPlaceMatch = intToThirdPlaceMatch thirdPlaceInt
-            , tournamentParticipantMode = mode
-            , tournamentBracket         = BracketId <$> bracketIdMaybe
-            }
+            (query conn (tournamentSelect <> " WHERE owner_id = ?") (Only ownerId)
+             :: IO [TournamentRow])
+        liftIO (mapM decodeTournamentRow rows)
 
     updateTournamentState :: TournamentId -> TournamentState -> SQLiteM ()
     updateTournamentState (TournamentId tidInt) newState = do
@@ -286,7 +327,7 @@ instance TournamentRepository SQLiteM where
 
     updateTournamentName :: TournamentId -> TournamentName -> SQLiteM ()
     updateTournamentName (TournamentId tidInt) (TournamentName newName) = do
-        conn <- asks envConnection          
+        conn <- asks envConnection
         liftIO $ execute conn
             "UPDATE tournaments SET name = ? WHERE id = ?"
             (newName, tidInt)
@@ -327,38 +368,29 @@ instance TournamentRepository SQLiteM where
     listAllTournaments :: SQLiteM [Tournament]
     listAllTournaments = do
         conn <- asks envConnection
-        rows <- liftIO $
-         (query_ conn
-         "SELECT id, name, organizer_name, owner_id, format, state, visibility, max_participants,third_place_match, bracket_id, participant_mode \
-            \FROM tournaments"
-         :: IO [(Int, String, String, Int, String, String, String, Int, Int, Maybe Int) :. Only String])
-        mapM decodeRow rows
-     where
-      decodeRow ((tidInt, name, organizer, owner_id, formatText, stateText, visText, maxP,thirdPlaceInt, bracketIdMaybe) :. Only modeText) = do
-        format <- liftIO $ textToFormat formatText
-        state  <- liftIO $ textToState stateText
-        vis    <- liftIO $ textToVisibility visText
-        mode   <- liftIO $ textToParticipantMode modeText
-        pure Tournament
-            { tournamentId              = TournamentId tidInt
-            , tournamentName            = TournamentName name
-            , tournamentOrganizer       = OrganizerName organizer
-            , tournamentOwner           = UserId owner_id
-            , tournamentFormat          = format
-            , tournamentState           = state
-            , tournamentVisibility      = vis
-            , tournamentMaxParticipants = maxP
-            , tournamentThirdPlaceMatch = intToThirdPlaceMatch thirdPlaceInt
-            , tournamentParticipantMode = mode
-            , tournamentBracket         = BracketId <$> bracketIdMaybe
-            }
-    
+        rows <- liftIO $ (query_ conn tournamentSelect :: IO [TournamentRow])
+        liftIO (mapM decodeTournamentRow rows)
+
     updateTournamentThirdPlaceMatch :: TournamentId -> Bool -> SQLiteM ()
     updateTournamentThirdPlaceMatch (TournamentId tidInt) newThirdPlaceMatch = do
         conn <- asks envConnection
         liftIO $ execute conn
             "UPDATE tournaments SET third_place_match = ? WHERE id = ?"
             (thirdPlaceMatchToInt newThirdPlaceMatch, tidInt)
+        n <- liftIO $ changes conn
+        when (n == 0) $
+            liftIO $ throwIO (NotFound ("Tournament not found: " ++ show tidInt))
+
+    updateTournamentDetails :: TournamentId -> TournamentDetails -> SQLiteM ()
+    updateTournamentDetails (TournamentId tidInt) d = do
+        conn <- asks envConnection
+        liftIO $ execute conn
+            "UPDATE tournaments SET game = ?, start_time = ?, prize = ? WHERE id = ?"
+            ( gameToText <$> detailsGame d
+            , timeToText <$> detailsStartTime d
+            , detailsPrize d
+            , tidInt
+            )
         n <- liftIO $ changes conn
         when (n == 0) $
             liftIO $ throwIO (NotFound ("Tournament not found: " ++ show tidInt))

@@ -216,9 +216,12 @@ export default function CreateTournamentPage() {
         )}
 
         {error && <p role="alert" className="form-error">{error}</p>}
+        <div className="form-actions">
         <button type="submit" className="btn-primary" disabled={busy}>
           {busy ? 'Creating' : 'Create tournament'}
         </button>
+        <button type="button" onClick={() => navigate('/me')}>Cancel</button>
+        </div>
       </form>
     </>
   )

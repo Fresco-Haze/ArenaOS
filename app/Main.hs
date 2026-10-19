@@ -398,6 +398,9 @@ dispatch args = case args of
       describeField FieldVisibility       = "visibility"
       describeField FieldFormat           = "format"
       describeField FieldMaxParticipants  = "max participants"
+describeField FieldGame = "game"
+describeField FieldStartTime = "start time"
+describeField FieldPrize = "prize"
 
   ("create-team":teamNameStr:captainNameStr:memberStrs) -> do
     let team = Team

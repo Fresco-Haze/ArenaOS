@@ -1,4 +1,4 @@
-import { Link, Route, Routes, useParams } from 'react-router'
+import { Link, NavLink, Route, Routes, useParams } from 'react-router'
 import { useAuth } from './auth/context'
 import HomePage from './pages/HomePage'
 import LoginPage from './pages/LoginPage'
@@ -18,7 +18,7 @@ function Header() {
       <nav className="nav">
         {user ? (
           <>
-            <Link to="/me">My tournaments</Link>
+            <NavLink to="/me">My tournaments</NavLink>
             <span className="muted">{user.username}</span>
             <button onClick={logout}>Sign out</button>
           </>

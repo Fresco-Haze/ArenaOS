@@ -37,7 +37,7 @@ export default function LoginPage() {
   }
 
   return (
-    <>
+    <div className="auth-card">
       <h1>Sign in</h1>
       {notice && <p role="status" className="form-notice">{notice}</p>}
       <form onSubmit={onSubmit} className="form">
@@ -74,6 +74,6 @@ export default function LoginPage() {
           Register
         </Link>
       </p>
-    </>
+    </div>
   )
 }

@@ -42,6 +42,11 @@ import Domain.Tournament
   , Visibility(..), TournamentState(..), Tournament(..), TournamentId(..)
   )
 import Domain.Tournament (ParticipantMode(..))
+import Domain.Tournament (Game(..), TournamentDetails(..), noDetails)
+import qualified Application.UseCases.CreateTournament as CTD
+import qualified Application.UseCases.UpdateTournamentDetails as UTD
+import qualified Engine.TournamentValidation as DV
+import qualified Database.SQLite.Simple as SQLite
 import qualified Application.UseCases.CreateTeam as CTM
 import Domain.Match (Match(..),MatchId(..), MatchStatus(Scheduled), MatchOutcome(..))
 import Domain.User (User(..),Email(..), PasswordHash(..), Username(..), AccountStatus(..))
@@ -280,6 +285,7 @@ spec = before_ resetTestDb $ do
   doubleElimNodeIdSpec
   doubleElimParitySpec
   bracketLinksViewSpec
+  detailsSpec
   describe "Tournament Lifecycle (4-participant golden scenario)" $
     it "runs the full pipeline from creation to completion" $ do
       result <- runSQLiteM testDbPath $ do
@@ -1409,7 +1415,7 @@ spec = before_ resetTestDb $ do
             , tournamentVisibility = Public
             , tournamentMaxParticipants = 2
             , tournamentBracket = Nothing
-            , tournamentOwner = UserId 1, tournamentThirdPlaceMatch = False, tournamentParticipantMode = IndividualOnly
+            , tournamentOwner = UserId 1, tournamentThirdPlaceMatch = False, tournamentParticipantMode = IndividualOnly, tournamentGame = Nothing, tournamentStartTime = Nothing, tournamentPrize = Nothing
             }
           tournaments = map mkT [Draft, Draft, Published, InProgress, Completed, Completed, Completed, Cancelled]
           overview = buildTournamentOverview tournaments
@@ -6330,7 +6336,7 @@ spec = before_ resetTestDb $ do
           , tournamentOrganizer = OrganizerName "x", tournamentFormat = SingleElimination
           , tournamentState = st, tournamentVisibility = vis
           , tournamentMaxParticipants = 2, tournamentBracket = Nothing
-          , tournamentOwner = UserId 1, tournamentThirdPlaceMatch = False, tournamentParticipantMode = IndividualOnly }
+          , tournamentOwner = UserId 1, tournamentThirdPlaceMatch = False, tournamentParticipantMode = IndividualOnly, tournamentGame = Nothing, tournamentStartTime = Nothing, tournamentPrize = Nothing }
         owner    = Just (UserId 1)
         stranger = Just (UserId 2)
 
@@ -6386,7 +6392,7 @@ spec = before_ resetTestDb $ do
           , tournamentOrganizer = OrganizerName "x", tournamentFormat = SingleElimination
           , tournamentState = st, tournamentVisibility = vis
           , tournamentMaxParticipants = 2, tournamentBracket = Nothing
-          , tournamentOwner = UserId 1, tournamentThirdPlaceMatch = False, tournamentParticipantMode = IndividualOnly }
+          , tournamentOwner = UserId 1, tournamentThirdPlaceMatch = False, tournamentParticipantMode = IndividualOnly, tournamentGame = Nothing, tournamentStartTime = Nothing, tournamentPrize = Nothing }
         ids = map (unTournamentId . tournamentId)
 
     it "keeps only Public tournaments past Draft, newest first" $
@@ -8209,3 +8215,244 @@ rrLongestStreak n pairs =
     go best cur (x : xs)
       | x = go (max best (cur + 1)) (cur + 1) xs
       | otherwise = go best 0 xs
+
+-- ---------------------------------------------------------------------
+-- v0.11: optional game / start time / prize, and registered counts.
+-- ---------------------------------------------------------------------
+
+dtNew :: UserId -> String -> NewTournament
+dtNew owner name = NewTournament
+  { newTournamentName            = TournamentName name
+  , newTournamentOrganizer       = OrganizerName "Test Organizer"
+  , newTournamentOwner           = owner
+  , newTournamentFormat          = SingleElimination
+  , newTournamentVisibility      = Public
+  , newTournamentMaxParticipants = 4
+  , newTournamentThirdPlaceMatch = False
+  , newTournamentParticipantMode = IndividualOnly
+  }
+
+dtTime :: UTCTime
+dtTime = UTCTime (fromGregorian 2026 12 12) 64800
+
+dtDetails :: TournamentDetails
+dtDetails = TournamentDetails (Just GameEFootball) (Just dtTime) (Just "KSh 50,000")
+
+dtCreate :: UserId -> String -> TournamentDetails -> SQLiteM TournamentId
+dtCreate owner name d = unwrap =<< CTD.createTournamentWithDetails (dtNew owner name) d
+
+dtTriple :: Tournament -> (Maybe Game, Maybe UTCTime, Maybe String)
+dtTriple t = (tournamentGame t, tournamentStartTime t, tournamentPrize t)
+
+dtChanged :: TournamentId -> SQLiteM [TournamentHistory.ChangedField]
+dtChanged tid = do
+  entries <- Repo.getTournamentHistory tid
+  pure [ f | TournamentHistoryEntry { historyEvent = ConfigurationChanged f } <- entries ]
+
+detailsSpec :: Spec
+detailsSpec = describe "Tournament details: game, start time, prize (v0.11)" $ do
+
+  it "creates with details and reads them back, trimming the prize" $ do
+    result <- runSQLiteM testDbPath $ do
+      setupSchema
+      owner <- createTestUser "dt-owner-1"
+      tid <- dtCreate owner "Details Cup" (dtDetails { detailsPrize = Just "  KSh 50,000  " })
+      Repo.getTournament tid
+    case result of
+      Left err -> expectationFailure (show err)
+      Right t  -> dtTriple t `shouldBe` (Just GameEFootball, Just dtTime, Just "KSh 50,000")
+
+  it "creates without details: all three fields are absent" $ do
+    result <- runSQLiteM testDbPath $ do
+      setupSchema
+      owner <- createTestUser "dt-owner-2"
+      tid <- dtCreate owner "Plain Cup" noDetails
+      Repo.getTournament tid
+    case result of
+      Left err -> expectationFailure (show err)
+      Right t  -> dtTriple t `shouldBe` (Nothing, Nothing, Nothing)
+
+  it "stores the start time in whole seconds" $ do
+    result <- runSQLiteM testDbPath $ do
+      setupSchema
+      owner <- createTestUser "dt-owner-3"
+      tid <- dtCreate owner "Seconds Cup" (noDetails { detailsStartTime = Just (UTCTime (fromGregorian 2026 12 12) 64800.75) })
+      Repo.getTournament tid
+    case result of
+      Left err -> expectationFailure (show err)
+      Right t  -> tournamentStartTime t `shouldBe` Just dtTime
+
+  it "turns a blank prize into no prize" $ do
+    result <- runSQLiteM testDbPath $ do
+      setupSchema
+      owner <- createTestUser "dt-owner-4"
+      tid <- dtCreate owner "Blank Prize Cup" (noDetails { detailsPrize = Just "   " })
+      Repo.getTournament tid
+    case result of
+      Left err -> expectationFailure (show err)
+      Right t  -> tournamentPrize t `shouldBe` Nothing
+
+  it "accepts a 100-character prize and rejects 101, creating nothing" $ do
+    result <- runSQLiteM testDbPath $ do
+      setupSchema
+      owner <- createTestUser "dt-owner-5"
+      ok  <- CTD.createTournamentWithDetails (dtNew owner "Ok") (noDetails { detailsPrize = Just (replicate 100 'x') })
+      bad <- CTD.createTournamentWithDetails (dtNew owner "Bad") (noDetails { detailsPrize = Just (replicate 101 'x') })
+      everything <- Repo.listAllTournaments
+      pure (isRight ok, bad, map tournamentName everything)
+    case result of
+      Left err -> expectationFailure (show err)
+      Right (okRight, bad, names) -> do
+        okRight `shouldBe` True
+        bad `shouldBe` Left (CTD.CreateInvalidDetails (DV.PrizeTooLong 101))
+        names `shouldBe` [TournamentName "Ok"]
+
+  it "update replaces the details and logs one history entry per changed field" $ do
+    result <- runSQLiteM testDbPath $ do
+      setupSchema
+      owner <- createTestUser "dt-owner-6"
+      tid <- dtCreate owner "Edit Cup" (TournamentDetails (Just GameEFootball) Nothing (Just "A"))
+      r <- UTD.updateTournamentDetails owner tid (TournamentDetails (Just GameEFootball) (Just dtTime) (Just "B"))
+      t <- Repo.getTournament tid
+      changed <- dtChanged tid
+      pure (r, t, changed)
+    case result of
+      Left err -> expectationFailure (show err)
+      Right (r, t, changed) -> do
+        r `shouldBe` Right ()
+        dtTriple t `shouldBe` (Just GameEFootball, Just dtTime, Just "B")
+        changed `shouldMatchList` [TournamentHistory.FieldStartTime, TournamentHistory.FieldPrize]
+
+  it "an update that changes nothing logs nothing" $ do
+    result <- runSQLiteM testDbPath $ do
+      setupSchema
+      owner <- createTestUser "dt-owner-7"
+      tid <- dtCreate owner "Same Cup" dtDetails
+      r <- UTD.updateTournamentDetails owner tid dtDetails
+      changed <- dtChanged tid
+      pure (r, changed)
+    case result of
+      Left err -> expectationFailure (show err)
+      Right (r, changed) -> do
+        r `shouldBe` Right ()
+        changed `shouldBe` []
+
+  it "an update with no fields clears all three" $ do
+    result <- runSQLiteM testDbPath $ do
+      setupSchema
+      owner <- createTestUser "dt-owner-8"
+      tid <- dtCreate owner "Clear Cup" dtDetails
+      r <- UTD.updateTournamentDetails owner tid noDetails
+      t <- Repo.getTournament tid
+      changed <- dtChanged tid
+      pure (r, t, changed)
+    case result of
+      Left err -> expectationFailure (show err)
+      Right (r, t, changed) -> do
+        r `shouldBe` Right ()
+        dtTriple t `shouldBe` (Nothing, Nothing, Nothing)
+        changed `shouldMatchList`
+          [TournamentHistory.FieldGame, TournamentHistory.FieldStartTime, TournamentHistory.FieldPrize]
+
+  it "rejects a non-owner and leaves the tournament unchanged" $ do
+    result <- runSQLiteM testDbPath $ do
+      setupSchema
+      owner <- createTestUser "dt-owner-9"
+      other <- createTestUser "dt-other-9"
+      tid <- dtCreate owner "Guarded Cup" dtDetails
+      before <- Repo.getTournament tid
+      r <- UTD.updateTournamentDetails other tid noDetails
+      after <- Repo.getTournament tid
+      pure (r, before, after)
+    case result of
+      Left err -> expectationFailure (show err)
+      Right (r, before, after) -> do
+        r `shouldBe` Left (UTD.Unauthorized NotTournamentOwner)
+        after `shouldBe` before
+
+  it "is locked once the tournament is cancelled" $ do
+    result <- runSQLiteM testDbPath $ do
+      setupSchema
+      owner <- createTestUser "dt-owner-10"
+      tid <- dtCreate owner "Locked Cup" dtDetails
+      _ <- unwrap =<< cancelTournament owner tid "no longer needed"
+      before <- Repo.getTournament tid
+      r <- UTD.updateTournamentDetails owner tid noDetails
+      after <- Repo.getTournament tid
+      pure (r, before, after)
+    case result of
+      Left err -> expectationFailure (show err)
+      Right (r, before, after) -> do
+        case r of
+          Left (UTD.InvalidLifecycle _) -> pure ()
+          other -> expectationFailure ("expected InvalidLifecycle, got: " ++ show other)
+        after `shouldBe` before
+
+  it "a too-long prize on update is rejected and nothing changes" $ do
+    result <- runSQLiteM testDbPath $ do
+      setupSchema
+      owner <- createTestUser "dt-owner-11"
+      tid <- dtCreate owner "Long Prize Cup" dtDetails
+      before <- Repo.getTournament tid
+      r <- UTD.updateTournamentDetails owner tid (dtDetails { detailsPrize = Just (replicate 101 'x') })
+      after <- Repo.getTournament tid
+      pure (r, before, after)
+    case result of
+      Left err -> expectationFailure (show err)
+      Right (r, before, after) -> do
+        r `shouldBe` Left (UTD.InvalidDetails (DV.PrizeTooLong 101))
+        after `shouldBe` before
+
+  it "saveTournament and publishing keep the details" $ do
+    result <- runSQLiteM testDbPath $ do
+      setupSchema
+      owner <- createTestUser "dt-owner-12"
+      tid <- dtCreate owner "Keep Cup" dtDetails
+      t0 <- Repo.getTournament tid
+      Repo.saveTournament t0
+      t1 <- Repo.getTournament tid
+      _ <- unwrap =<< publishTournament owner tid
+      t2 <- Repo.getTournament tid
+      pure (t0, t1, t2)
+    case result of
+      Left err -> expectationFailure (show err)
+      Right (t0, t1, t2) -> do
+        t1 `shouldBe` t0
+        dtTriple t2 `shouldBe` dtTriple t0
+
+  it "countRegistrationsByTournament matches real registrations" $ do
+    result <- runSQLiteM testDbPath $ do
+      setupSchema
+      owner <- createTestUser "dt-owner-13"
+      busy  <- createOpenTournament owner "Busy Cup" 4
+      empty <- createOpenTournament owner "Empty Cup" 4
+      let alice = Individual (Player (PlayerName "CountAlice"))
+          bob   = Individual (Player (PlayerName "CountBob"))
+      Repo.savePlayer (Player (PlayerName "CountAlice"))
+      Repo.savePlayer (Player (PlayerName "CountBob"))
+      forM_ [alice, bob] (\p -> unwrap =<< registerParticipant busy p)
+      counts <- Repo.countRegistrationsByTournament
+      pure (busy, empty, counts)
+    case result of
+      Left err -> expectationFailure (show err)
+      Right (busy, empty, counts) -> do
+        lookup busy counts `shouldBe` Just 2
+        lookup empty counts `shouldBe` Nothing
+
+  it "migrates a pre-v0.11 database in place and is safe to run twice" $ do
+    let path = "test/arenaos-migrate-test.db"
+    exists <- doesFileExist path
+    if exists then removeFile path else pure ()
+    conn <- SQLite.open path
+    SQLite.execute_ conn "CREATE TABLE tournaments ( id INTEGER PRIMARY KEY, name TEXT NOT NULL, organizer_name TEXT NOT NULL, owner_id INTEGER NOT NULL, format TEXT NOT NULL, state TEXT NOT NULL, visibility TEXT NOT NULL, third_place_match INTEGER NOT NULL DEFAULT 0, participant_mode TEXT NOT NULL DEFAULT 'IndividualOnly', max_participants INTEGER NOT NULL, bracket_id INTEGER )"
+    SQLite.execute_ conn "INSERT INTO tournaments (id, name, organizer_name, owner_id, format, state, visibility, max_participants) VALUES (1, 'Old Cup', 'Org', 1, 'SingleElimination', 'Draft', 'Public', 4)"
+    initializeSchema conn
+    initializeSchema conn
+    SQLite.close conn
+    result <- runSQLiteM path (Repo.getTournament (TournamentId 1))
+    removeFile path
+    case result of
+      Left err -> expectationFailure (show err)
+      Right t -> do
+        tournamentName t `shouldBe` TournamentName "Old Cup"
+        dtTriple t `shouldBe` (Nothing, Nothing, Nothing)

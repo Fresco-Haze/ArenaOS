@@ -14,6 +14,9 @@ data ChangedField
     | FieldFormat
     | FieldMaxParticipants
     | FieldThirdPlaceMatch
+    | FieldGame
+    | FieldStartTime
+    | FieldPrize
     deriving (Show, Eq)
 
 data TournamentHistoryEvent

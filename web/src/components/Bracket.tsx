@@ -1,4 +1,4 @@
-import { createContext, useContext } from 'react'
+import { createContext, useContext, useState } from 'react'
 import { formatDateTime } from '../lib/dates'
 import { layoutSection, layoutSingleElim, TREE } from '../lib/bracket'
 import type { TreeLayout } from '../lib/bracket'
@@ -9,6 +9,9 @@ import { buildDoubleElimLabels, doubleElimChampion, placements, sectionRoundName
 import { isBracketDecided } from '../lib/bracket'
 import { participantName } from '../lib/participants'
 import type { RoundGroup } from '../lib/bracket'
+import ChampionBanner from './ChampionBanner'
+import Tabs from './Tabs'
+import { useMediaQuery } from '../hooks/useMediaQuery'
 
 function outcomeSide(node: BracketNode): 'A' | 'B' | null {
   const o = node.match?.outcome
@@ -64,12 +67,19 @@ function cardState(node: BracketNode): CardState {
 function fullLabel(s: string): string {
   return s.replace(/\bWB\b/, 'Winners').replace(/\bLB\b/, 'Losers').replace(/ R(\d+)/, ' round $1').replace(/ M(\d+)/, ' match $1')
 }
+function CheckIcon() {
+  return (
+    <svg className="slot-check" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+      <path d="M3 8.5l3.2 3L13 4.5" />
+    </svg>
+  )
+}
 function SlotRow({ label, isWinner, isLoser, pending, score }: { label: string; isWinner: boolean; isLoser: boolean; pending: boolean; score?: number }) {
   const cls = 'slot' + (isWinner ? ' slot-winner' : '') + (isLoser ? ' slot-loser' : '') + (pending ? ' slot-pending' : '')
   return (
     <div className={cls}>
-      <span className="slot-name" title={pending ? fullLabel(label) : undefined}>{label}</span>
-      {score !== undefined && <span className="slot-score">{score}</span>}
+      <span className="slot-name" title={pending ? fullLabel(label) : undefined}>{isWinner && <span className="sr-only">Winner: </span>}{label}</span>
+      {score !== undefined ? <span className="slot-score num">{score}</span> : isWinner ? <CheckIcon /> : null}
     </div>
   )
 }
@@ -148,7 +158,7 @@ function RoundRobinView({ bracket }: { bracket: BracketView }) {
   return (
     <div>
       {decided && rows.length > 0 && !levelAtTop && (
-        <p className="champion">Winner: {participantName(rows[0].participant)}</p>
+        <ChampionBanner label="Winner" name={participantName(rows[0].participant)} />
       )}
       {decided && levelAtTop && <p className="muted">The top places are level on points, goal difference and goals scored.</p>}
       <h3 className="bracket-section-heading">Standings</h3>
@@ -243,7 +253,7 @@ function DoubleElimBracket({ bracket }: { bracket: BracketView }) {
 
   return (
     <div>
-      {champ && <p className="champion">Champion: {champ}</p>}
+      {champ && <ChampionBanner name={champ} />}
       <Standings bracket={bracket} />
       <h3 className="bracket-section-heading">Winners bracket</h3>
       <SectionView nodes={winners} groups={wGroups} names={wNames} nodeLabels={nodeLabels} linksAvailable={bracket.linksAvailable} />
@@ -296,6 +306,52 @@ function TreeBracket({ tree, totalRounds, names, nodeLabels }: { tree: TreeLayou
     </div>
   )
 }
+// Phones, single elimination: one round at a time. Same NodeCard, no bracket logic.
+function RoundSwitcher({
+  groups,
+  totalRounds,
+  nodeLabels,
+  thirdPlace,
+}: {
+  groups: RoundGroup[]
+  totalRounds: number
+  nodeLabels: Map<number, string>
+  thirdPlace: BracketNode | null
+}) {
+  const [picked, setPicked] = useState<number | null>(null)
+  const last = groups[groups.length - 1]
+  const current = groups.find((g) =>
+    g.nodes.some((n) => {
+      const s = cardState(n)
+      return s !== 'completed' && s !== 'bye'
+    }),
+  )
+  const round =
+    picked !== null && groups.some((g) => g.round === picked) ? picked : (current ?? last).round
+  const group = groups.find((g) => g.round === round) ?? last
+  return (
+    <div>
+      <Tabs<string>
+        label="Bracket rounds"
+        active={String(round)}
+        onChange={(id) => setPicked(Number(id))}
+        tabs={groups.map((g) => ({ id: String(g.round), label: roundName(g.round, totalRounds) }))}
+      />
+      <div role="tabpanel" id={'panel-' + round} aria-labelledby={'tab-' + round} className="round-list">
+        {group.nodes.map((n) => (
+          <NodeCard key={n.nodeId} node={n} nodeLabels={nodeLabels} />
+        ))}
+        {thirdPlace && group.round === last.round && (
+          <>
+            <h3 className="bracket-round-heading">Third place</h3>
+            <NodeCard node={thirdPlace} nodeLabels={nodeLabels} />
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
 const CancelledContext = createContext(false)
 
 export default function Bracket({ bracket, tournamentState }: { bracket: BracketView; tournamentState?: string }) {
@@ -307,6 +363,7 @@ export default function Bracket({ bracket, tournamentState }: { bracket: Bracket
 }
 
 function BracketInner({ bracket }: { bracket: BracketView }) {
+  const phone = useMediaQuery('(max-width: 600px)')
   if (bracket.grandFinalNodeId != null) return <DoubleElimBracket bracket={bracket} />
   if (bracket.format === 'RoundRobin') return <RoundRobinView bracket={bracket} />
   const { main, thirdPlace } = splitThirdPlace(bracket)
@@ -322,9 +379,11 @@ function BracketInner({ bracket }: { bracket: BracketView }) {
 
   return (
     <div>
-      {champ && <p className="champion">Champion: {champ}</p>}
+      {champ && <ChampionBanner name={champ} />}
       <Standings bracket={bracket} />
-      {tree ? (
+      {phone ? (
+        <RoundSwitcher groups={groups} totalRounds={totalRounds} nodeLabels={nodeLabels} thirdPlace={thirdPlace} />
+      ) : tree ? (
         <TreeBracket tree={tree} totalRounds={totalRounds} nodeLabels={nodeLabels} />
       ) : (
       <div className="bracket-scroll">
@@ -342,7 +401,7 @@ function BracketInner({ bracket }: { bracket: BracketView }) {
         </div>
       </div>
       )}
-      {thirdPlace && (
+      {!phone && thirdPlace && (
         <div className="third-place">
           <h3 className="bracket-round-heading">Third place</h3>
           <NodeCard node={thirdPlace} nodeLabels={nodeLabels} />

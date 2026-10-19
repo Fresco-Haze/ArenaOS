@@ -22,10 +22,28 @@ module Shell.Persistence.SQLite.Schema
   ( initializeSchema
   ) where
 
-import Database.SQLite.Simple (Connection, Query, execute_)
+import Control.Monad (when)
+import Database.SQLite.Simple (Connection, Query, execute_, query_)
 
 initializeSchema :: Connection -> IO ()
-initializeSchema conn = mapM_ (execute_ conn) statements
+initializeSchema conn = do
+  mapM_ (execute_ conn) statements
+  migrateTournamentColumns conn
+
+-- v0.11: CREATE TABLE IF NOT EXISTS never adds columns to an existing
+-- database, so add any missing tournament columns here. Safe on every start.
+newTournamentColumns :: [(String, Query)]
+newTournamentColumns =
+  [ ("game", "ALTER TABLE tournaments ADD COLUMN game TEXT CHECK (game IS NULL OR game IN ('eFootball', 'PubgMobile', 'CallOfDuty', 'Other'))")
+  , ("start_time", "ALTER TABLE tournaments ADD COLUMN start_time TEXT")
+  , ("prize", "ALTER TABLE tournaments ADD COLUMN prize TEXT")
+  ]
+
+migrateTournamentColumns :: Connection -> IO ()
+migrateTournamentColumns conn = do
+  cols <- query_ conn "PRAGMA table_info(tournaments)" :: IO [(Int, String, String, Int, Maybe String, Int)]
+  let present = [ n | (_, n, _, _, _, _) <- cols ]
+  mapM_ (\(n, ddl) -> when (n `notElem` present) (execute_ conn ddl)) newTournamentColumns
 
 statements :: [Query]
 statements =
@@ -74,7 +92,10 @@ statements =
     \  participant_mode   TEXT NOT NULL DEFAULT 'IndividualOnly' \
     \                        CHECK (participant_mode IN ('IndividualOnly', 'SquadOnly')), \
     \  max_participants   INTEGER NOT NULL CHECK (max_participants >= 2), \
-    \  bracket_id         INTEGER REFERENCES brackets(id) \
+    \  bracket_id         INTEGER REFERENCES brackets(id), \
+    \  game               TEXT CHECK (game IS NULL OR game IN ('eFootball', 'PubgMobile', 'CallOfDuty', 'Other')), \
+    \  start_time         TEXT, \
+    \  prize              TEXT \
     \)"
     -- Circular FK with brackets.tournament_id below -- SQLite allows
     -- the forward reference at CREATE TABLE time; the insert-order
