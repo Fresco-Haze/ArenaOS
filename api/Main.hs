@@ -583,6 +583,28 @@ instance FromJSON DetailsReq where
     pz <- o .:? "prize"
     pure (DetailsReq (TournamentDetails g st pz))
 
+-- ?q= (name contains), ?game= (eFootball | PubgMobile | CallOfDuty | Other), ?limit= (1..100)
+parseListFilter :: Maybe Text -> Maybe Text -> Maybe Text -> Either ApiError ListPublic.PublicFilter
+parseListFilter mq mg ml = do
+  game <- case fmap T.strip mg of
+    Nothing -> Right Nothing
+    Just g
+      | T.null g  -> Right Nothing
+      | otherwise -> maybe (Left (badParam "game")) (Right . Just) (gameFromText g)
+  limit <- case fmap T.strip ml of
+    Nothing -> Right (ListPublic.pfLimit ListPublic.defaultPublicFilter)
+    Just l -> case readMaybe (T.unpack l) of
+      Just n | n >= 1 -> Right (min 100 n)
+      _               -> Left (badParam "limit")
+  let q = case fmap T.strip mq of
+        Just s | not (T.null s) -> Just (T.unpack s)
+        _                       -> Nothing
+  Right (ListPublic.PublicFilter q game limit)
+  where
+    badParam :: Text -> ApiError
+    badParam f = ApiError status400 "VALIDATION_FAILED" "Invalid query parameter"
+      (object ["field" .= f])
+
 statsJson :: PublicStats -> Value
 statsJson s = object
   [ "tournaments"       .= statsTournaments s
@@ -1321,7 +1343,12 @@ main = do
       case mv of
         Left err -> sendError err
         Right _  -> do
-          result <- runUseCase lock ((,) <$> ListPublic.listPublicTournaments <*> Repo.countRegistrationsByTournament)
+          qRaw <- (queryParamMaybe "q" :: ActionM (Maybe Text))
+          gRaw <- (queryParamMaybe "game" :: ActionM (Maybe Text))
+          lRaw <- (queryParamMaybe "limit" :: ActionM (Maybe Text))
+          result <- case parseListFilter qRaw gRaw lRaw of
+            Left apiErr -> pure (Left apiErr)
+            Right flt   -> runUseCase lock ((,) <$> ListPublic.listPublicTournamentsFiltered flt <*> Repo.countRegistrationsByTournament)
           case result of
             Left apiErr -> sendError apiErr
             Right ts    -> json (object ["tournaments" .= map (\t -> tournamentJsonCounted (countFor (snd ts) t) t) (fst ts)])

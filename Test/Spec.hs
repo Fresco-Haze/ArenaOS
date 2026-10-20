@@ -287,6 +287,7 @@ spec = before_ resetTestDb $ do
   bracketLinksViewSpec
   detailsSpec
   statsSpec
+  publicFilterSpec
   describe "Tournament Lifecycle (4-participant golden scenario)" $
     it "runs the full pipeline from creation to completion" $ do
       result <- runSQLiteM testDbPath $ do
@@ -8543,3 +8544,62 @@ statsSpec = describe "Public stats (v0.12)" $ do
     case result of
       Left err -> expectationFailure (show err)
       Right s  -> statsByGame s `shouldMatchList` [(GameEFootball, 2), (GameCallOfDuty, 1)]
+
+-- ---------------------------------------------------------------------
+-- v0.12: server-side filtering of the public list (pure selection).
+-- ---------------------------------------------------------------------
+
+plT :: Int -> String -> Maybe Game -> Tournament
+plT i name g = Tournament
+  { tournamentId = TournamentId i, tournamentName = TournamentName name
+  , tournamentOrganizer = OrganizerName "x", tournamentFormat = SingleElimination
+  , tournamentState = Published, tournamentVisibility = Public
+  , tournamentMaxParticipants = 2, tournamentBracket = Nothing
+  , tournamentOwner = UserId 1, tournamentThirdPlaceMatch = False
+  , tournamentParticipantMode = IndividualOnly
+  , tournamentGame = g, tournamentStartTime = Nothing, tournamentPrize = Nothing }
+
+-- ids 1..60; id 3 is "Zebra Open" (Call of Duty); other even ids are eFootball
+plAll :: [Tournament]
+plAll = [ plT i (if i == 3 then "Zebra Open" else "Cup " ++ show i) (plGame i) | i <- [1 .. 60] ]
+  where
+    plGame i
+      | i == 3         = Just GameCallOfDuty
+      | i `mod` 2 == 0 = Just GameEFootball
+      | otherwise      = Nothing
+
+plHidden :: [Tournament]
+plHidden =
+  [ (plT 100 "Cup hidden" (Just GameEFootball)) { tournamentState = Draft }
+  , (plT 101 "Cup hidden" (Just GameEFootball)) { tournamentVisibility = Private }
+  ]
+
+plIds :: [Tournament] -> [Int]
+plIds = map (unTournamentId . tournamentId)
+
+publicFilterSpec :: Spec
+publicFilterSpec = describe "Public list filtering (v0.12)" $ do
+
+  it "defaults behave exactly like the old selection" $
+    LP.selectPublicFiltered LP.defaultPublicFilter plAll `shouldBe` LP.selectPublic 50 plAll
+
+  it "matches names case-insensitively and finds tournaments older than the newest 50" $
+    plIds (LP.selectPublicFiltered (LP.defaultPublicFilter { LP.pfQuery = Just "  zEbRa " }) plAll)
+      `shouldBe` [3]
+
+  it "filters by game before applying the cap" $
+    plIds (LP.selectPublicFiltered (LP.defaultPublicFilter { LP.pfGame = Just GameCallOfDuty }) plAll)
+      `shouldBe` [3]
+
+  it "combines the name and game filters" $
+    plIds (LP.selectPublicFiltered
+             (LP.defaultPublicFilter { LP.pfQuery = Just "cup", LP.pfGame = Just GameEFootball }) plAll)
+      `shouldBe` [60, 58 .. 2]
+
+  it "returns newest first and respects the limit" $
+    plIds (LP.selectPublicFiltered (LP.defaultPublicFilter { LP.pfLimit = 3 }) plAll)
+      `shouldBe` [60, 59, 58]
+
+  it "never shows Draft or Private tournaments, whatever the filters" $
+    plIds (LP.selectPublicFiltered (LP.defaultPublicFilter { LP.pfQuery = Just "hidden" }) plHidden)
+      `shouldBe` []
