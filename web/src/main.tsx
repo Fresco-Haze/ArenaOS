@@ -6,6 +6,7 @@ import '@fontsource/barlow/latin-700.css'
 import './index.css'
 import './shell.css'
 import './cards.css'
+import './home.css'
 import App from './App'
 import { AuthProvider } from './auth/AuthProvider'
 

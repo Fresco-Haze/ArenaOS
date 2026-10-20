@@ -1,0 +1,87 @@
+/* ===== v0.12 home: hero and panels ===== */
+.hero {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-height: 17rem;
+  margin-bottom: var(--space-6);
+  padding: var(--space-8);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background-color: var(--surface);
+  /* dark scrim keeps the text readable over whatever image is dropped in web/public/art/hero.jpg */
+  background-image:
+    linear-gradient(90deg, rgba(2, 13, 26, 0.94) 0%, rgba(2, 13, 26, 0.6) 50%, rgba(2, 13, 26, 0) 80%),
+    url('/art/hero.jpg');
+  background-size: cover;
+  background-position: right center;
+  overflow: hidden;
+}
+.hero-copy { max-width: 34rem; }
+.hero-eyebrow {
+  margin: 0 0 var(--space-2);
+  color: var(--accent);
+  font-family: var(--font-heading);
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+}
+.hero-title {
+  display: grid;
+  margin: 0;
+  font-family: var(--font-heading);
+  font-size: clamp(2rem, 4.2vw, 3.25rem);
+  font-weight: 700;
+  line-height: 1.02;
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+}
+.hero-accent { color: var(--accent); }
+.hero-text {
+  max-width: 30rem;
+  margin: var(--space-4) 0 var(--space-6);
+}
+
+.panel {
+  margin-bottom: var(--space-6);
+  padding: var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+.panel-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: 1.25rem;
+}
+.panel-icon {
+  flex: none;
+  width: 1.375rem;
+  height: 1.375rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.panel-link {
+  color: var(--accent);
+  font-size: var(--font-sm);
+  text-decoration: none;
+}
+.panel-link:hover { text-decoration: underline; }
+
+@media (max-width: 600px) {
+  .hero { min-height: 0; padding: var(--space-6) var(--space-4); }
+  .panel { padding: var(--space-3); }
+}
