@@ -40,11 +40,11 @@ data TournamentFormat = SingleElimination | DoubleElimination | RoundRobin
 
 data Visibility = Public | Private deriving (Show, Eq)
 
--- v0.11: optional tournament tag. Stored as text; see Schema CHECK.
+-- v0.12: optional tournament tag. Stored as text; see Schema CHECK.
 data Game = GameEFootball | GamePubgMobile | GameCallOfDuty | GameOther
     deriving (Show, Eq)
 
--- v0.11: optional, organizer-editable descriptive fields.
+-- v0.12: optional, organizer-editable descriptive fields.
 -- startTime is the scheduled start (UTC); it never starts the tournament.
 data TournamentDetails = TournamentDetails
     { detailsGame      :: Maybe Game

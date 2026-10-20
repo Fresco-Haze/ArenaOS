@@ -8217,7 +8217,7 @@ rrLongestStreak n pairs =
       | otherwise = go best 0 xs
 
 -- ---------------------------------------------------------------------
--- v0.11: optional game / start time / prize, and registered counts.
+-- v0.12: optional game / start time / prize, and registered counts.
 -- ---------------------------------------------------------------------
 
 dtNew :: UserId -> String -> NewTournament
@@ -8250,7 +8250,7 @@ dtChanged tid = do
   pure [ f | TournamentHistoryEntry { historyEvent = ConfigurationChanged f } <- entries ]
 
 detailsSpec :: Spec
-detailsSpec = describe "Tournament details: game, start time, prize (v0.11)" $ do
+detailsSpec = describe "Tournament details: game, start time, prize (v0.12)" $ do
 
   it "creates with details and reads them back, trimming the prize" $ do
     result <- runSQLiteM testDbPath $ do

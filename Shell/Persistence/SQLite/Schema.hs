@@ -30,7 +30,7 @@ initializeSchema conn = do
   mapM_ (execute_ conn) statements
   migrateTournamentColumns conn
 
--- v0.11: CREATE TABLE IF NOT EXISTS never adds columns to an existing
+-- v0.12: CREATE TABLE IF NOT EXISTS never adds columns to an existing
 -- database, so add any missing tournament columns here. Safe on every start.
 newTournamentColumns :: [(String, Query)]
 newTournamentColumns =

@@ -71,7 +71,7 @@ participantMatchesMode IndividualOnly (Individual _) = True
 participantMatchesMode SquadOnly      (Squad _)      = True
 participantMatchesMode _              _              = False
 
--- v0.11: game is validated by its type; prize is trimmed and capped,
+-- v0.12: game is validated by its type; prize is trimmed and capped,
 -- start time is truncated to whole seconds (storage precision).
 data DetailsValidationError = PrizeTooLong Int
   deriving (Eq, Show)

@@ -52,7 +52,7 @@ data CreateWithDetailsError
   | CreateInvalidDetails DetailsValidationError
   deriving (Eq, Show)
 
--- v0.11: create with optional game / start time / prize, one transaction.
+-- v0.12: create with optional game / start time / prize, one transaction.
 createTournamentWithDetails
   :: (TournamentRepository m, TournamentHistoryRepository m, Transactional m)
   => NewTournament

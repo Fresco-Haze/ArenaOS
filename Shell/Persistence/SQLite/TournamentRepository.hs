@@ -92,7 +92,7 @@ textToParticipantMode "SquadOnly"      = pure SquadOnly
 textToParticipantMode other            =
     throwIO (StorageFailure ("Unknown participant mode in storage: " ++ other))
 
--- v0.11. Values must match the CHECK on tournaments.game in Schema.hs.
+-- v0.12. Values must match the CHECK on tournaments.game in Schema.hs.
 gameToText :: Game -> String
 gameToText GameEFootball   = "eFootball"
 gameToText GamePubgMobile  = "PubgMobile"

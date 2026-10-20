@@ -1,4 +1,4 @@
-import { Link, NavLink, Route, Routes, useParams } from 'react-router'
+import { Link, Route, Routes, useParams } from 'react-router'
 import { useAuth } from './auth/context'
 import HomePage from './pages/HomePage'
 import LoginPage from './pages/LoginPage'
@@ -8,27 +8,7 @@ import ProtectedRoute from './components/ProtectedRoute'
 import MyTournamentsPage from './pages/MyTournamentsPage'
 import CreateTournamentPage from './pages/CreateTournamentPage'
 import CreateTeamPage from './pages/CreateTeamPage'
-import Logo from './components/Logo'
-
-function Header() {
-  const { user, logout } = useAuth()
-  return (
-    <header className="site-header">
-      <Link to="/" className="brand" aria-label="ArenaOS home"><Logo /></Link>
-      <nav className="nav">
-        {user ? (
-          <>
-            <NavLink to="/me">My tournaments</NavLink>
-            <span className="muted">{user.username}</span>
-            <button onClick={logout}>Sign out</button>
-          </>
-        ) : (
-          <Link to="/login">Sign in</Link>
-        )}
-      </nav>
-    </header>
-  )
-}
+import AppShell from './components/AppShell'
 
 function ExpiredNotice() {
   const { expired, dismissExpired } = useAuth()
@@ -63,12 +43,11 @@ function TournamentRoute() {
 
 export default function App() {
   return (
-    <div className="page">
-      <Header />
+    <AppShell>
       <ExpiredNotice />
-      <main>
-        <Routes>
+      <Routes>
           <Route path="/" element={<HomePage />} />
+          <Route path="/tournaments" element={<HomePage />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
           <Route
@@ -97,8 +76,7 @@ export default function App() {
               </ProtectedRoute>
            }
          />
-        </Routes>
-      </main>
-    </div>
+      </Routes>
+    </AppShell>
   )
 }
