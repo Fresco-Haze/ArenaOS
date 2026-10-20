@@ -1,5 +1,8 @@
+import { useState } from 'react'
+import type { ReactNode } from 'react'
 import { Link } from 'react-router'
 import { useApi } from '../hooks/useApi'
+import { startsIn } from '../lib/cardDate'
 import { gameLabel, PublicStatsView, TournamentList } from '../model'
 import type { Game } from '../model'
 import EmptyState from '../components/EmptyState'
@@ -18,9 +21,12 @@ const PATHS = {
   pulse: 'M3 12h4l2-6 4 12 2-6h6',
   players: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21c0-4 4-6 8-6s8 2 8 6',
   teams: 'M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM3 20c0-3 3-5 6-5s6 2 6 5M17 11a2.5 2.5 0 1 0 0-5M16 15c3 0 5 2 5 5',
+  calendar: 'M4 6h16v14H4zM4 10h16M8 3v4M16 3v4',
 } as const
 
-function Svg({ name }: { name: keyof typeof PATHS }) {
+type IconName = keyof typeof PATHS
+
+function Svg({ name }: { name: IconName }) {
   return (
     <svg className="panel-icon" viewBox="0 0 24 24" aria-hidden="true">
       <path d={PATHS[name]} />
@@ -47,7 +53,7 @@ function Hero() {
   )
 }
 
-function BandItem({ icon, label, value }: { icon: keyof typeof PATHS; label: string; value: number }) {
+function BandItem({ icon, label, value }: { icon: IconName; label: string; value: number }) {
   return (
     <li className="band-item">
       <span className="band-icon"><Svg name={icon} /></span>
@@ -56,6 +62,63 @@ function BandItem({ icon, label, value }: { icon: keyof typeof PATHS; label: str
         <p className="band-value num">{value.toLocaleString('en-US')}</p>
       </div>
     </li>
+  )
+}
+
+function RailPanel({
+  id, icon, title, soon, link, children,
+}: { id: string; icon: IconName; title: string; soon?: boolean; link?: ReactNode; children: ReactNode }) {
+  return (
+    <section className="panel" aria-labelledby={id}>
+      <div className="panel-head">
+        <h2 id={id} className="panel-title panel-title-sm">
+          <Svg name={icon} />
+          {title}
+        </h2>
+        {soon && <span className="soon-tag">Soon</span>}
+        {link}
+      </div>
+      {children}
+    </section>
+  )
+}
+
+function UpcomingPanel() {
+  const up = useApi('/tournaments?upcoming=1&limit=4', TournamentList, true)
+  const [now] = useState(() => Date.now())
+  const items = up.data ? up.data.tournaments : null
+  return (
+    <RailPanel
+      id="upcoming-heading"
+      icon="calendar"
+      title="Upcoming Tournaments"
+      link={<Link to="/tournaments" className="panel-link">View All &rarr;</Link>}
+    >
+      {up.error ? (
+        <ErrorBanner message={up.error} onRetry={up.retry} />
+      ) : items === null ? (
+        <LoadingBlock label="Loading upcoming tournaments" />
+      ) : items.length === 0 ? (
+        <p className="muted rail-empty">Tournaments with a start time show up here.</p>
+      ) : (
+        <ul className="urows">
+          {items.map((t) => {
+            const mode = t.participantMode === 'SquadOnly' ? 'Squad' : '1v1'
+            const game = t.game && t.game !== 'Other' ? gameLabel[t.game] : null
+            return (
+              <li key={t.tournamentId} className="urow">
+                <div className="urow-art" data-game={t.game ?? 'none'} aria-hidden="true" />
+                <div className="urow-main">
+                  <Link to={`/tournaments/${t.tournamentId}`} className="urow-name">{t.name}</Link>
+                  <p className="urow-sub">{game ? `${game} \u2022 ${mode}` : mode}</p>
+                </div>
+                <span className="urow-when">{t.startTime ? startsIn(t.startTime, now) : ''}</span>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </RailPanel>
   )
 }
 
@@ -72,88 +135,103 @@ export default function HomePage() {
   const s = stats.data
 
   return (
-    <>
-      <Hero />
+    <div className="home-grid">
+      <div className="home-main">
+        <Hero />
 
-      <section className="panel" aria-labelledby="featured-heading">
-        <div className="panel-head">
-          <h2 id="featured-heading" className="panel-title">
-            <Svg name="trophy" />
-            Featured Tournaments
-          </h2>
-          <Link to="/tournaments" className="panel-link">View All &rarr;</Link>
-        </div>
-        {list.error ? (
-          <ErrorBanner message={list.error} onRetry={list.retry} />
-        ) : featured === null ? (
-          <LoadingBlock label="Loading tournaments" />
-        ) : featured.length === 0 ? (
-          <EmptyState
-            title="Nothing open right now"
-            action={<Link to="/tournaments" className="button-link">Browse all tournaments</Link>}
-          >
-            Tournaments that are open for registration or running show up here.
-          </EmptyState>
-        ) : (
-          <ul className="tcards">
-            {featured.map((t) => (
-              <TournamentCard key={t.tournamentId} tournament={t} />
-            ))}
-          </ul>
-        )}
-      </section>
+        <section className="panel" aria-labelledby="featured-heading">
+          <div className="panel-head">
+            <h2 id="featured-heading" className="panel-title">
+              <Svg name="trophy" />
+              Featured Tournaments
+            </h2>
+            <Link to="/tournaments" className="panel-link">View All &rarr;</Link>
+          </div>
+          {list.error ? (
+            <ErrorBanner message={list.error} onRetry={list.retry} />
+          ) : featured === null ? (
+            <LoadingBlock label="Loading tournaments" />
+          ) : featured.length === 0 ? (
+            <EmptyState
+              title="Nothing open right now"
+              action={<Link to="/tournaments" className="button-link">Browse all tournaments</Link>}
+            >
+              Tournaments that are open for registration or running show up here.
+            </EmptyState>
+          ) : (
+            <ul className="tcards tcards-featured">
+              {featured.map((t) => (
+                <TournamentCard key={t.tournamentId} tournament={t} />
+              ))}
+            </ul>
+          )}
+        </section>
 
-      <section className="panel" aria-labelledby="popular-heading">
-        <div className="panel-head">
-          <h2 id="popular-heading" className="panel-title">
-            <Svg name="gamepad" />
-            Popular Games
-          </h2>
-          <Link to="/tournaments" className="panel-link">View All &rarr;</Link>
-        </div>
-        {stats.error ? (
-          <ErrorBanner message={stats.error} onRetry={stats.retry} />
-        ) : s === null ? (
-          <LoadingBlock label="Loading games" />
-        ) : (
-          <ul className="gtiles">
-            {POPULAR.map((g) => {
-              const n = s.byGame.find((x) => x.game === g)?.count ?? 0
-              return (
-                <li key={g} className="gtile">
-                  <div className="gtile-art" data-game={g} />
-                  <div className="gtile-body">
-                    <h3 className="gtile-name">{gameLabel[g]}</h3>
-                    <p className="gtile-count">{n} {n === 1 ? 'tournament' : 'tournaments'}</p>
-                    <Link to={`/tournaments?game=${g}`} className="gtile-cta">Explore &rarr;</Link>
-                  </div>
-                </li>
-              )
-            })}
-            <li className="gtile gtile-soon">
-              <div className="gtile-body">
-                <h3 className="gtile-name">More games</h3>
-                <p className="gtile-count">Coming soon</p>
-              </div>
-            </li>
-          </ul>
-        )}
-      </section>
+        <section className="panel" aria-labelledby="popular-heading">
+          <div className="panel-head">
+            <h2 id="popular-heading" className="panel-title">
+              <Svg name="gamepad" />
+              Popular Games
+            </h2>
+            <Link to="/tournaments" className="panel-link">View All &rarr;</Link>
+          </div>
+          {stats.error ? (
+            <ErrorBanner message={stats.error} onRetry={stats.retry} />
+          ) : s === null ? (
+            <LoadingBlock label="Loading games" />
+          ) : (
+            <ul className="gtiles">
+              {POPULAR.map((g) => {
+                const n = s.byGame.find((x) => x.game === g)?.count ?? 0
+                return (
+                  <li key={g} className="gtile">
+                    <div className="gtile-art" data-game={g} />
+                    <div className="gtile-body">
+                      <h3 className="gtile-name">{gameLabel[g]}</h3>
+                      <p className="gtile-count">{n} {n === 1 ? 'tournament' : 'tournaments'}</p>
+                      <Link to={`/tournaments?game=${g}`} className="gtile-cta">Explore &rarr;</Link>
+                    </div>
+                  </li>
+                )
+              })}
+              <li className="gtile gtile-soon">
+                <div className="gtile-body">
+                  <h3 className="gtile-name">More games</h3>
+                  <p className="gtile-count">Coming soon</p>
+                </div>
+              </li>
+            </ul>
+          )}
+        </section>
 
-      <section className="stats-band" aria-label="Platform totals">
-        {stats.error ? (
-          <ErrorBanner message={stats.error} onRetry={stats.retry} />
-        ) : s === null ? (
-          <LoadingBlock label="Loading totals" />
-        ) : (
-          <ul className="band-list">
-            <BandItem icon="trophy" label="Total Tournaments" value={s.tournaments} />
-            <BandItem icon="pulse" label="Active Tournaments" value={s.activeTournaments} />
-            <BandItem icon="players" label="Players" value={s.players} />
-            <BandItem icon="teams" label="Registered Teams" value={s.teams} />
-          </ul>
-        )}
-      </section>
-    </>
+        <section className="stats-band" aria-label="Platform totals">
+          {stats.error ? (
+            <ErrorBanner message={stats.error} onRetry={stats.retry} />
+          ) : s === null ? (
+            <LoadingBlock label="Loading totals" />
+          ) : (
+            <ul className="band-list">
+              <BandItem icon="trophy" label="Total Tournaments" value={s.tournaments} />
+              <BandItem icon="pulse" label="Active Tournaments" value={s.activeTournaments} />
+              <BandItem icon="players" label="Players" value={s.players} />
+              <BandItem icon="teams" label="Registered Teams" value={s.teams} />
+            </ul>
+          )}
+        </section>
+      </div>
+
+      <aside className="home-rail" aria-label="Side panels">
+        <RailPanel id="next-match-heading" icon="calendar" title="Next Match" soon>
+          <p className="muted rail-empty">Not available yet. This will show your next scheduled match.</p>
+        </RailPanel>
+        <UpcomingPanel />
+        <RailPanel id="activity-heading" icon="pulse" title="Recent Activity" soon>
+          <p className="muted rail-empty">Not available yet. Tournament activity will appear here.</p>
+        </RailPanel>
+        <RailPanel id="top-players-heading" icon="trophy" title="Top Players (Global)" soon>
+          <p className="muted rail-empty">Not available yet. Rankings will appear here.</p>
+        </RailPanel>
+      </aside>
+    </div>
   )
 }

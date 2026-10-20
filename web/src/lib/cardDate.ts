@@ -9,3 +9,15 @@ export function formatCardDate(value: string): string {
   const mm = ('0' + d.getMinutes()).slice(-2)
   return `${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()} \u2022 ${h12}:${mm} ${h < 12 ? 'AM' : 'PM'}`
 }
+
+// "Starts in 45m", "Starts in 12h", "Starts in 2d": relative to `now` (ms), rounded down.
+export function startsIn(value: string, now: number): string {
+  const at = new Date(value).getTime()
+  if (Number.isNaN(at)) return ''
+  const mins = Math.floor((at - now) / 60000)
+  if (mins < 1) return 'Starting now'
+  if (mins < 60) return `Starts in ${mins}m`
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return `Starts in ${hours}h`
+  return `Starts in ${Math.floor(hours / 24)}d`
+}

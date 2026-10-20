@@ -179,3 +179,65 @@
 @media (max-width: 600px) {
   .stats-band { padding: var(--space-3); }
 }
+
+/* home layout: main column + right rail */
+.home-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-6);
+  align-items: start;
+}
+.home-main, .home-rail { min-width: 0; }
+.home-rail .panel { margin-bottom: var(--space-4); }
+.home-rail { margin-bottom: var(--space-6); }
+@media (min-width: 1280px) {
+  .home-grid { grid-template-columns: minmax(0, 1fr) 20rem; }
+}
+
+/* four featured cards fit beside the rail */
+.tcards-featured { grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr)); }
+
+.panel-title-sm { font-size: 1.0625rem; }
+.rail-empty { margin: 0; font-size: var(--font-sm); }
+
+/* upcoming rows */
+.urows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-3);
+}
+.urow {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.urow-art {
+  flex: none;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: var(--radius);
+  background-color: var(--shell-search);
+  background-image: url('/art/default.jpg');
+  background-size: cover;
+  background-position: center;
+}
+.urow-art[data-game='eFootball'] { background-image: url('/art/efootball.jpg'); }
+.urow-art[data-game='PubgMobile'] { background-image: url('/art/pubg-mobile.jpg'); }
+.urow-art[data-game='CallOfDuty'] { background-image: url('/art/call-of-duty.jpg'); }
+.urow-main { flex: 1; min-width: 0; }
+.urow-name {
+  display: block;
+  overflow: hidden;
+  color: var(--text);
+  font-weight: 600;
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.urow-name::after { content: ''; position: absolute; inset: 0; }
+.urow-name:hover { text-decoration: underline; }
+.urow-sub { margin: 0; color: var(--muted); font-size: 0.8125rem; }
+.urow-when { flex: none; color: var(--muted); font-size: 0.8125rem; }
