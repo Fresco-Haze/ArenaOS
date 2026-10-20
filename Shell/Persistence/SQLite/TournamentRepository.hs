@@ -26,6 +26,7 @@ import Domain.Tournament
     , ParticipantMode(..)
     , Game(..)
     , TournamentDetails(..)
+    , PublicStats(..)
     )
 import Domain.TournamentHistory (TournamentHistoryEvent(..), TournamentHistoryEntry(..), ChangedField(..))
 import Shell.Persistence.Port (TournamentRepository(..), NewTournament(..),UserId(..))
@@ -220,6 +221,43 @@ decodeTournamentRow
         , tournamentPrize           = prizeMaybe
         }
 
+-- v0.12: public stats. "Public" = Public and past Draft (same set as the list).
+publicWhere :: Query
+publicWhere = "t.visibility = 'Public' AND t.state <> 'Draft'"
+
+statsTournamentsSql, statsActiveSql, statsTeamsSql, statsPlayersSql, statsByGameSql :: Query
+statsTournamentsSql = "SELECT COUNT(*) FROM tournaments t WHERE " <> publicWhere
+statsActiveSql =
+    "SELECT COUNT(*) FROM tournaments t WHERE " <> publicWhere
+    <> " AND t.state IN ('RegistrationOpen', 'InProgress')"
+statsTeamsSql =
+    "SELECT COUNT(DISTINCT p.team_id) FROM registrations r \
+    \JOIN tournaments t ON t.id = r.tournament_id \
+    \JOIN participants p ON p.id = r.participant_id \
+    \WHERE p.kind = 'Squad' AND " <> publicWhere
+-- distinct people: individuals, plus squad members and captains (UNION dedups)
+statsPlayersSql =
+    "SELECT COUNT(*) FROM ( \
+    \SELECT p.player_id AS pid FROM registrations r \
+    \JOIN tournaments t ON t.id = r.tournament_id \
+    \JOIN participants p ON p.id = r.participant_id \
+    \WHERE p.kind = 'Individual' AND " <> publicWhere <> " \
+    \UNION \
+    \SELECT tm.player_id FROM registrations r \
+    \JOIN tournaments t ON t.id = r.tournament_id \
+    \JOIN participants p ON p.id = r.participant_id \
+    \JOIN team_members tm ON tm.team_id = p.team_id \
+    \WHERE p.kind = 'Squad' AND " <> publicWhere <> " \
+    \UNION \
+    \SELECT tt.captain_player_id FROM registrations r \
+    \JOIN tournaments t ON t.id = r.tournament_id \
+    \JOIN participants p ON p.id = r.participant_id \
+    \JOIN teams tt ON tt.id = p.team_id \
+    \WHERE p.kind = 'Squad' AND " <> publicWhere <> ")"
+statsByGameSql =
+    "SELECT t.game, COUNT(*) FROM tournaments t WHERE " <> publicWhere
+    <> " AND t.game IS NOT NULL GROUP BY t.game"
+
 instance TournamentRepository SQLiteM where
 
     createTournament :: NewTournament -> SQLiteM TournamentId
@@ -394,3 +432,26 @@ instance TournamentRepository SQLiteM where
         n <- liftIO $ changes conn
         when (n == 0) $
             liftIO $ throwIO (NotFound ("Tournament not found: " ++ show tidInt))
+
+    publicStats :: SQLiteM PublicStats
+    publicStats = do
+        conn <- asks envConnection
+        let count :: Query -> SQLiteM Int
+            count q = liftIO $ do
+                rows <- query_ conn q :: IO [Only Int]
+                case rows of
+                    [Only n] -> pure n
+                    _        -> throwIO (StorageFailure "Unexpected public stats result")
+        total   <- count statsTournamentsSql
+        active  <- count statsActiveSql
+        players <- count statsPlayersSql
+        teams   <- count statsTeamsSql
+        gameRows <- liftIO (query_ conn statsByGameSql :: IO [(String, Int)])
+        byGame <- liftIO (mapM (\(g, n) -> (\gm -> (gm, n)) <$> textToGame g) gameRows)
+        pure PublicStats
+            { statsTournaments       = total
+            , statsActiveTournaments = active
+            , statsPlayers           = players
+            , statsTeams             = teams
+            , statsByGame            = byGame
+            }

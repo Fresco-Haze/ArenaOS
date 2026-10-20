@@ -42,7 +42,7 @@ import Domain.Tournament
   , Visibility(..), TournamentState(..), Tournament(..), TournamentId(..)
   )
 import Domain.Tournament (ParticipantMode(..))
-import Domain.Tournament (Game(..), TournamentDetails(..), noDetails)
+import Domain.Tournament (Game(..), TournamentDetails(..), noDetails, PublicStats(..))
 import qualified Application.UseCases.CreateTournament as CTD
 import qualified Application.UseCases.UpdateTournamentDetails as UTD
 import qualified Engine.TournamentValidation as DV
@@ -286,6 +286,7 @@ spec = before_ resetTestDb $ do
   doubleElimParitySpec
   bracketLinksViewSpec
   detailsSpec
+  statsSpec
   describe "Tournament Lifecycle (4-participant golden scenario)" $
     it "runs the full pipeline from creation to completion" $ do
       result <- runSQLiteM testDbPath $ do
@@ -8456,3 +8457,89 @@ detailsSpec = describe "Tournament details: game, start time, prize (v0.12)" $ d
       Right t -> do
         tournamentName t `shouldBe` TournamentName "Old Cup"
         dtTriple t `shouldBe` (Nothing, Nothing, Nothing)
+
+-- ---------------------------------------------------------------------
+-- v0.12: public stats for the home page.
+-- ---------------------------------------------------------------------
+
+stPublish :: UserId -> String -> Maybe Game -> SQLiteM TournamentId
+stPublish owner name g = do
+  tid <- dtCreate owner name (noDetails { detailsGame = g })
+  _ <- unwrap =<< publishTournament owner tid
+  pure tid
+
+statsSpec :: Spec
+statsSpec = describe "Public stats (v0.12)" $ do
+
+  it "is all zeros on an empty database" $ do
+    result <- runSQLiteM testDbPath $ do
+      setupSchema
+      Repo.publicStats
+    case result of
+      Left err -> expectationFailure (show err)
+      Right s  -> s `shouldBe` PublicStats 0 0 0 0 []
+
+  it "counts only Public tournaments past Draft; active means open or running" $ do
+    result <- runSQLiteM testDbPath $ do
+      setupSchema
+      owner <- createTestUser "st-owner-1"
+      _ <- dtCreate owner "Still Draft" noDetails
+      _ <- createOpenTournament owner "Open Public" 4
+      priv <- createTournament ((dtNew owner "Open Private") { newTournamentVisibility = Private })
+      advanceToRegistrationOpen owner priv
+      cancelled <- dtCreate owner "Cancelled Public" noDetails
+      _ <- unwrap =<< cancelTournament owner cancelled "no longer needed"
+      Repo.publicStats
+    case result of
+      Left err -> expectationFailure (show err)
+      Right s  -> do
+        statsTournaments s `shouldBe` 2
+        statsActiveTournaments s `shouldBe` 1
+
+  it "counts distinct players and teams across public tournaments only" $ do
+    result <- runSQLiteM testDbPath $ do
+      setupSchema
+      owner <- createTestUser "st-owner-2"
+      let alice = Player (PlayerName "StatsAlice")
+          bob   = Player (PlayerName "StatsBob")
+          zed   = Player (PlayerName "StatsZed")
+          falcons = Team
+            { teamName    = TeamName "StatsFalcons"
+            , teamCaptain = Player (PlayerName "StatsCap")
+            , teamMembers = [Player (PlayerName "StatsCap"), Player (PlayerName "StatsMate")]
+            }
+      mapM_ Repo.savePlayer [alice, bob, zed]
+      one <- createOpenTournament owner "Solo One" 4
+      two <- createOpenTournament owner "Solo Two" 4
+      forM_ [alice, bob] (\p -> unwrap =<< registerParticipant one (Individual p))
+      _ <- unwrap =<< registerParticipant two (Individual alice)
+      squadT <- createOpenTournamentWithMode owner "Squad One" 4 SquadOnly
+      _ <- unwrap =<< createTeam falcons
+      _ <- unwrap =<< registerParticipant squadT (Squad falcons)
+      priv <- createTournament ((dtNew owner "Hidden") { newTournamentVisibility = Private })
+      advanceToRegistrationOpen owner priv
+      _ <- unwrap =<< registerParticipant priv (Individual zed)
+      Repo.publicStats
+    case result of
+      Left err -> expectationFailure (show err)
+      Right s  -> do
+        statsPlayers s `shouldBe` 4
+        statsTeams s `shouldBe` 1
+
+  it "counts public non-draft tournaments per game" $ do
+    result <- runSQLiteM testDbPath $ do
+      setupSchema
+      owner <- createTestUser "st-owner-3"
+      _ <- stPublish owner "E1" (Just GameEFootball)
+      _ <- stPublish owner "E2" (Just GameEFootball)
+      _ <- stPublish owner "C1" (Just GameCallOfDuty)
+      _ <- stPublish owner "No Game" Nothing
+      _ <- dtCreate owner "E Draft" (noDetails { detailsGame = Just GameEFootball })
+      priv <- unwrap =<< CTD.createTournamentWithDetails
+                ((dtNew owner "E Private") { newTournamentVisibility = Private })
+                (noDetails { detailsGame = Just GameEFootball })
+      _ <- unwrap =<< publishTournament owner priv
+      Repo.publicStats
+    case result of
+      Left err -> expectationFailure (show err)
+      Right s  -> statsByGame s `shouldMatchList` [(GameEFootball, 2), (GameCallOfDuty, 1)]

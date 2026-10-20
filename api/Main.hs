@@ -57,7 +57,7 @@ import Domain.BracketLinks (BracketLinks, NodeDestination(..), NodeLinks(..), Sl
 import Domain.Tournament
   ( Tournament(..), TournamentName(..), OrganizerName(..)
   , TournamentFormat(..), Visibility(..), ParticipantMode(..)
-  , Game(..), TournamentDetails(..) )
+  , Game(..), TournamentDetails(..), PublicStats(..) )
 import Shell.Persistence.Port (NewTournament(..))
 import qualified Application.UseCases.CreateTournament as Create
 import Engine.TournamentValidation
@@ -582,6 +582,15 @@ instance FromJSON DetailsReq where
     st <- o .:? "startTime"
     pz <- o .:? "prize"
     pure (DetailsReq (TournamentDetails g st pz))
+
+statsJson :: PublicStats -> Value
+statsJson s = object
+  [ "tournaments"       .= statsTournaments s
+  , "activeTournaments" .= statsActiveTournaments s
+  , "players"           .= statsPlayers s
+  , "teams"             .= statsTeams s
+  , "byGame"            .= [ object ["game" .= gameText g, "count" .= n] | (g, n) <- statsByGame s ]
+  ]
 
 tournamentPairs :: Tournament -> [Pair]
 tournamentPairs t =
@@ -1299,6 +1308,13 @@ main = do
     get "/tournaments/:id" $
       runViewAction lock GetT.getTournament fromGetTournament $ \v ->
         json (tournamentViewJson v)
+
+    -- public, no login: counts over public tournaments past Draft
+    get "/stats" $ do
+      result <- runUseCase lock Repo.publicStats
+      case result of
+        Left apiErr -> sendError apiErr
+        Right s     -> json (statsJson s)
 
     get "/tournaments" $ do
       mv <- viewer lock

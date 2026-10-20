@@ -14,6 +14,7 @@ module Domain.Tournament
     , Game(..)
     , TournamentDetails(..)
     , noDetails
+    , PublicStats(..)
     ) where
 
 import Data.Time (UTCTime)
@@ -54,6 +55,16 @@ data TournamentDetails = TournamentDetails
 
 noDetails :: TournamentDetails
 noDetails = TournamentDetails Nothing Nothing Nothing
+
+-- v0.12: public counts for the home page. "Public" means visibility Public
+-- and past Draft, the same set the public list shows.
+data PublicStats = PublicStats
+    { statsTournaments       :: Int
+    , statsActiveTournaments :: Int
+    , statsPlayers           :: Int
+    , statsTeams             :: Int
+    , statsByGame            :: [(Game, Int)]
+    } deriving (Show, Eq)
 
 data ParticipantMode = IndividualOnly | SquadOnly
     deriving (Show, Eq)
