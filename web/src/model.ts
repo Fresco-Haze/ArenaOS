@@ -167,3 +167,12 @@ export const gameLabel: Record<Game, string> = {
   CallOfDuty: 'Call of Duty',
   Other: 'Other',
 }
+
+export const PublicStatsView = z.object({
+  tournaments: z.number(),
+  activeTournaments: z.number(),
+  players: z.number(),
+  teams: z.number(),
+  byGame: z.array(z.object({ game: Game, count: z.number() })),
+})
+export type PublicStatsView = z.infer<typeof PublicStatsView>

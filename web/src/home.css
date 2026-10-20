@@ -85,3 +85,97 @@
   .hero { min-height: 0; padding: var(--space-6) var(--space-4); }
   .panel { padding: var(--space-3); }
 }
+
+/* popular games */
+.gtiles {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  gap: var(--space-4);
+}
+.gtile {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--bg);
+  overflow: hidden;
+}
+.gtile-art {
+  height: 5.5rem;
+  background-color: var(--shell-search);
+  background-image: url('/art/default.jpg');
+  background-size: cover;
+  background-position: center;
+}
+.gtile-art[data-game='eFootball'] { background-image: url('/art/efootball.jpg'); }
+.gtile-art[data-game='PubgMobile'] { background-image: url('/art/pubg-mobile.jpg'); }
+.gtile-art[data-game='CallOfDuty'] { background-image: url('/art/call-of-duty.jpg'); }
+.gtile-body { padding: var(--space-3) var(--space-4) var(--space-4); }
+.gtile-name { margin: 0; font-size: 1.0625rem; }
+.gtile-count { margin: 2px 0 var(--space-3); color: var(--muted); font-size: var(--font-sm); }
+.gtile-cta {
+  display: block;
+  padding: var(--space-2);
+  border-radius: var(--radius);
+  background: var(--brand-solid);
+  color: #ffffff;
+  font-size: var(--font-sm);
+  font-weight: 600;
+  text-align: center;
+  text-decoration: none;
+}
+.gtile-cta:hover { filter: brightness(1.1); }
+.gtile-soon {
+  justify-content: center;
+  border-style: dashed;
+  background: transparent;
+  text-align: center;
+}
+.gtile-soon .gtile-count { margin-bottom: 0; }
+
+/* stats band */
+.stats-band {
+  margin-bottom: var(--space-6);
+  padding: var(--space-4) var(--space-6);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+.band-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: var(--space-4) var(--space-6);
+}
+.band-item { display: flex; align-items: center; gap: var(--space-3); }
+.band-icon { display: grid; place-items: center; color: var(--accent); }
+.band-icon .panel-icon { width: 2rem; height: 2rem; }
+.band-label { margin: 0; color: var(--muted); font-size: var(--font-sm); }
+.band-value { margin: 0; font-size: 1.5rem; line-height: 1.2; }
+
+/* game filter chips */
+.chips { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: 0 0 var(--space-4); }
+.chip {
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: var(--font-sm);
+  text-decoration: none;
+}
+.chip:hover { color: var(--text); border-color: var(--accent); }
+.chip[aria-current='true'] {
+  border-color: transparent;
+  background: var(--brand-solid);
+  color: #ffffff;
+  font-weight: 600;
+}
+
+@media (max-width: 600px) {
+  .stats-band { padding: var(--space-3); }
+}
