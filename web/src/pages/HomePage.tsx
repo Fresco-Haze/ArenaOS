@@ -44,7 +44,7 @@ export default function HomePage() {
       ) : items.length === 0 ? (
         <EmptyState title="No public tournaments yet">Tournaments show up here once an organizer publishes one.</EmptyState>
       ) : (
-        <ul className="cards">
+        <ul className="tcards">
           {items.map((t) => (
             <TournamentCard key={t.tournamentId} tournament={t} showOrganizer />
           ))}

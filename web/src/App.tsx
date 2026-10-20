@@ -1,6 +1,7 @@
 import { Link, Route, Routes, useParams } from 'react-router'
 import { useAuth } from './auth/context'
 import HomePage from './pages/HomePage'
+import TournamentsPage from './pages/TournamentsPage'
 import LoginPage from './pages/LoginPage'
 import TournamentPage from './pages/TournamentPage'
 import RegisterPage from './pages/RegisterPage'
@@ -47,7 +48,7 @@ export default function App() {
       <ExpiredNotice />
       <Routes>
           <Route path="/" element={<HomePage />} />
-          <Route path="/tournaments" element={<HomePage />} />
+          <Route path="/tournaments" element={<TournamentsPage />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
           <Route

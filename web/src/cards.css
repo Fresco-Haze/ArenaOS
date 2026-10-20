@@ -1,0 +1,98 @@
+/* ===== v0.12 tournament cards ===== */
+.tcards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+  gap: var(--space-4);
+}
+
+.tcard {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  overflow: hidden;
+  cursor: pointer;
+  transition: border-color 0.12s ease;
+}
+.tcard:hover { border-color: var(--brand); }
+.tcard:has(h2 a:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* art slot: drop images into web/public/art/ to fill it */
+.tcard-art {
+  position: relative;
+  height: 7.5rem;
+  background-color: var(--shell-search);
+  background-image: url('/art/default.jpg');
+  background-size: cover;
+  background-position: center;
+}
+.tcard-art[data-game='eFootball'] { background-image: url('/art/efootball.jpg'); }
+.tcard-art[data-game='PubgMobile'] { background-image: url('/art/pubg-mobile.jpg'); }
+.tcard-art[data-game='CallOfDuty'] { background-image: url('/art/call-of-duty.jpg'); }
+
+.tcard-chip {
+  position: absolute;
+  top: var(--space-2);
+  left: var(--space-2);
+  padding: 2px var(--space-2);
+  border-radius: var(--radius);
+  background: rgba(2, 13, 26, 0.78);
+  color: var(--text);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.tcard-status.badge {
+  position: absolute;
+  left: var(--space-2);
+  bottom: var(--space-2);
+  border-color: transparent;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.6875rem;
+}
+.status-neutral { background: var(--shell-pill); color: var(--text); }
+.status-open { background: #00e684; color: #03140c; }
+.status-live { background: var(--brand-solid); color: #ffffff; }
+.status-done { background: rgba(125, 220, 154, 0.16); color: var(--success); }
+.status-warning { background: rgba(255, 200, 87, 0.16); color: var(--warning); }
+.status-danger { background: rgba(255, 138, 128, 0.16); color: var(--danger); }
+
+.tcard-body { flex: 1; padding: var(--space-4); }
+.tcard h2 { margin: 0 0 var(--space-3); font-size: 1.125rem; }
+.tcard h2 a { color: var(--text); text-decoration: none; }
+.tcard h2 a::after { content: ''; position: absolute; inset: 0; }
+.tcard h2 a:focus-visible { outline: none; }
+
+.tcard-meta {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-2);
+  color: var(--muted);
+  font-size: var(--font-sm);
+}
+.tcard-meta li { display: flex; align-items: center; gap: var(--space-2); }
+.tcard-prize { color: var(--text); font-weight: 600; }
+.tcard-organizer { margin: var(--space-3) 0 0; color: var(--muted); font-size: var(--font-sm); }
+
+.tcard-cta {
+  margin: 0 var(--space-4) var(--space-4);
+  padding: var(--space-2);
+  border-radius: var(--radius);
+  background: var(--brand-solid);
+  color: #ffffff;
+  font-size: var(--font-sm);
+  font-weight: 600;
+  text-align: center;
+}
+.tcard:hover .tcard-cta { filter: brightness(1.1); }

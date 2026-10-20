@@ -58,7 +58,7 @@ export default function MyTournamentsPage() {
           Tournaments you create appear here.
         </EmptyState>
       ) : (
-        <ul className="cards">
+        <ul className="tcards">
           {items.map((t) => (
             <TournamentCard key={t.tournamentId} tournament={t} />
           ))}

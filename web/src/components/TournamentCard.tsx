@@ -1,7 +1,18 @@
 import { Link } from 'react-router'
-import { stateBadge } from '../badges'
-import { formatLabel, stateLabel } from '../model'
-import type { Tournament } from '../model'
+import { formatCardDate } from '../lib/cardDate'
+import { formatLabel, gameLabel, stateLabel } from '../model'
+import type { Tournament, TournamentState } from '../model'
+
+const statusClass: Record<TournamentState, string> = {
+  Draft: 'status-neutral',
+  Published: 'status-neutral',
+  RegistrationOpen: 'status-open',
+  RegistrationClosed: 'status-neutral',
+  InProgress: 'status-live',
+  Paused: 'status-warning',
+  Completed: 'status-done',
+  Cancelled: 'status-danger',
+}
 
 function FormatIcon() {
   return (
@@ -22,21 +33,48 @@ function PeopleIcon() {
   )
 }
 
-export default function TournamentCard({ tournament: t, showOrganizer = false }: { tournament: Tournament; showOrganizer?: boolean }) {
-  const unit = t.participantMode === 'SquadOnly' ? 'teams' : 'players'
+function CalendarIcon() {
   return (
-    <li className="card tournament-card">
-      <div className="card-title-row">
+    <svg className="meta-icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+      <rect x="2.5" y="3.5" width="11" height="10" rx="1.5" />
+      <path d="M2.5 6.5h11M5.5 2v3M10.5 2v3" />
+    </svg>
+  )
+}
+
+function TrophyIcon() {
+  return (
+    <svg className="meta-icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+      <path d="M5 2.5h6v3a3 3 0 0 1-6 0v-3zM5 4H2.5v1a2 2 0 0 0 2 2M11 4h2.5v1a2 2 0 0 1-2 2M8 8.5v3M5.5 13.5h5" />
+    </svg>
+  )
+}
+
+export default function TournamentCard({ tournament: t, showOrganizer = false }: { tournament: Tournament; showOrganizer?: boolean }) {
+  const mode = t.participantMode === 'SquadOnly' ? 'Squad' : '1v1'
+  const gameName = t.game && t.game !== 'Other' ? gameLabel[t.game] : null
+  const when = t.startTime ? formatCardDate(t.startTime) : ''
+  return (
+    <li className="tcard">
+      <div className="tcard-art" data-game={t.game ?? 'none'}>
+        {gameName && <span className="tcard-chip">{gameName}</span>}
+        <span className={'badge tcard-status ' + statusClass[t.state]}>{stateLabel[t.state]}</span>
+      </div>
+      <div className="tcard-body">
         <h2>
           <Link to={`/tournaments/${t.tournamentId}`}>{t.name}</Link>
         </h2>
-        <span className={'badge ' + stateBadge[t.state]}>{stateLabel[t.state]}</span>
+        <ul className="tcard-meta">
+          <li><FormatIcon />{mode}{' \u2022 '}{formatLabel[t.format]}</li>
+          {when && <li><CalendarIcon />{when}</li>}
+          {t.prize && <li className="tcard-prize"><TrophyIcon />{t.prize}</li>}
+          {t.registeredCount != null && (
+            <li><PeopleIcon />{t.registeredCount}/{t.maxParticipants} registered</li>
+          )}
+        </ul>
+        {showOrganizer && <p className="tcard-organizer">Organized by {t.organizer}</p>}
       </div>
-      <p className="card-meta">
-        <span className="card-meta-item"><FormatIcon />{formatLabel[t.format]}</span>
-        <span className="card-meta-item"><PeopleIcon />Up to {t.maxParticipants} {unit}</span>
-      </p>
-      {showOrganizer && <p className="meta">Organized by {t.organizer}</p>}
+      <span className="tcard-cta" aria-hidden="true">View details &rarr;</span>
     </li>
   )
 }

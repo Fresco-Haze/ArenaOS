@@ -15,6 +15,9 @@ export type TournamentFormat = z.infer<typeof TournamentFormat>
 export const ParticipantMode = z.enum(['IndividualOnly', 'SquadOnly'])
 export type ParticipantMode = z.infer<typeof ParticipantMode>
 
+export const Game = z.enum(['eFootball', 'PubgMobile', 'CallOfDuty', 'Other'])
+export type Game = z.infer<typeof Game>
+
 export const Tournament = z.object({
   tournamentId: z.number(),
   name: z.string(),
@@ -25,6 +28,10 @@ export const Tournament = z.object({
   maxParticipants: z.number(),
   thirdPlaceMatch: z.boolean(),
   participantMode: ParticipantMode,
+  game: Game.nullish(),
+  startTime: z.string().nullish(),
+  prize: z.string().nullish(),
+  registeredCount: z.number().nullish(),
   bracketId: z.number().nullable(),
 })
 export type Tournament = z.infer<typeof Tournament>
@@ -153,3 +160,10 @@ export const Team = z.object({
 export type Team = z.infer<typeof Team>
 export const CreateTeamResponse = Team
 export const TeamList = z.object({ teams: z.array(Team) })
+
+export const gameLabel: Record<Game, string> = {
+  eFootball: 'eFootball',
+  PubgMobile: 'PUBG Mobile',
+  CallOfDuty: 'Call of Duty',
+  Other: 'Other',
+}
