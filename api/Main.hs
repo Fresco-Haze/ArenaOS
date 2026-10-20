@@ -584,8 +584,8 @@ instance FromJSON DetailsReq where
     pure (DetailsReq (TournamentDetails g st pz))
 
 -- ?q= (name contains), ?game= (eFootball | PubgMobile | CallOfDuty | Other), ?limit= (1..100)
-parseListFilter :: Maybe Text -> Maybe Text -> Maybe Text -> Either ApiError ListPublic.PublicFilter
-parseListFilter mq mg ml = do
+parseListFilter :: UTCTime -> Maybe Text -> Maybe Text -> Maybe Text -> Maybe Text -> Either ApiError ListPublic.PublicFilter
+parseListFilter now mq mg ml mu = do
   game <- case fmap T.strip mg of
     Nothing -> Right Nothing
     Just g
@@ -596,10 +596,16 @@ parseListFilter mq mg ml = do
     Just l -> case readMaybe (T.unpack l) of
       Just n | n >= 1 -> Right (min 100 n)
       _               -> Left (badParam "limit")
+  upcoming <- case fmap T.strip mu of
+    Nothing -> Right Nothing
+    Just u
+      | T.null u || u == "0" || u == "false" -> Right Nothing
+      | u == "1" || u == "true"              -> Right (Just now)
+      | otherwise                            -> Left (badParam "upcoming")
   let q = case fmap T.strip mq of
         Just s | not (T.null s) -> Just (T.unpack s)
         _                       -> Nothing
-  Right (ListPublic.PublicFilter q game limit)
+  Right (ListPublic.PublicFilter q game limit upcoming)
   where
     badParam :: Text -> ApiError
     badParam f = ApiError status400 "VALIDATION_FAILED" "Invalid query parameter"
@@ -1346,7 +1352,9 @@ main = do
           qRaw <- (queryParamMaybe "q" :: ActionM (Maybe Text))
           gRaw <- (queryParamMaybe "game" :: ActionM (Maybe Text))
           lRaw <- (queryParamMaybe "limit" :: ActionM (Maybe Text))
-          result <- case parseListFilter qRaw gRaw lRaw of
+          uRaw <- (queryParamMaybe "upcoming" :: ActionM (Maybe Text))
+          nowT <- liftIO getCurrentTime
+          result <- case parseListFilter nowT qRaw gRaw lRaw uRaw of
             Left apiErr -> pure (Left apiErr)
             Right flt   -> runUseCase lock ((,) <$> ListPublic.listPublicTournamentsFiltered flt <*> Repo.countRegistrationsByTournament)
           case result of

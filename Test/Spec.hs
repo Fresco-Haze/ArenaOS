@@ -288,6 +288,7 @@ spec = before_ resetTestDb $ do
   detailsSpec
   statsSpec
   publicFilterSpec
+  upcomingFilterSpec
   describe "Tournament Lifecycle (4-participant golden scenario)" $
     it "runs the full pipeline from creation to completion" $ do
       result <- runSQLiteM testDbPath $ do
@@ -8602,4 +8603,57 @@ publicFilterSpec = describe "Public list filtering (v0.12)" $ do
 
   it "never shows Draft or Private tournaments, whatever the filters" $
     plIds (LP.selectPublicFiltered (LP.defaultPublicFilter { LP.pfQuery = Just "hidden" }) plHidden)
+      `shouldBe` []
+
+-- ---------------------------------------------------------------------
+-- v0.12: "upcoming" filter on the public list (pure selection).
+-- ---------------------------------------------------------------------
+
+ucfNow :: UTCTime
+ucfNow = UTCTime (fromGregorian 2026 10 20) 0
+
+ucfDay :: Int -> Int -> UTCTime
+ucfDay m d = UTCTime (fromGregorian 2026 m d) 0
+
+ucfT :: Int -> Maybe Game -> Maybe UTCTime -> TournamentState -> Tournament
+ucfT i g st s = (plT i ("Up " ++ show i) g) { tournamentStartTime = st, tournamentState = s }
+
+ucfFilter :: LP.PublicFilter
+ucfFilter = LP.defaultPublicFilter { LP.pfUpcomingFrom = Just ucfNow }
+
+upcomingFilterSpec :: Spec
+upcomingFilterSpec = describe "Upcoming filter (v0.12)" $ do
+
+  it "keeps only future start times, soonest first, ties broken by id" $
+    plIds (LP.selectPublicFiltered ucfFilter
+      [ ucfT 1 Nothing (Just (ucfDay 11 10)) RegistrationOpen
+      , ucfT 2 Nothing (Just (ucfDay 11 5)) RegistrationOpen
+      , ucfT 3 Nothing (Just (ucfDay 11 5)) Published
+      , ucfT 4 Nothing (Just (ucfDay 10 1)) RegistrationOpen
+      , ucfT 5 Nothing Nothing RegistrationOpen ])
+      `shouldBe` [2, 3, 1]
+
+  it "drops Completed and Cancelled tournaments even with a future start" $
+    plIds (LP.selectPublicFiltered ucfFilter
+      [ ucfT 6 Nothing (Just (ucfDay 11 6)) Completed
+      , ucfT 7 Nothing (Just (ucfDay 11 7)) Cancelled
+      , ucfT 8 Nothing (Just (ucfDay 11 8)) InProgress ])
+      `shouldBe` [8]
+
+  it "combines with the game filter and the limit" $
+    plIds (LP.selectPublicFiltered (ucfFilter { LP.pfGame = Just GameEFootball, LP.pfLimit = 2 })
+      [ ucfT 10 (Just GameEFootball) (Just (ucfDay 11 3)) RegistrationOpen
+      , ucfT 11 (Just GameCallOfDuty) (Just (ucfDay 11 2)) RegistrationOpen
+      , ucfT 12 (Just GameEFootball) (Just (ucfDay 11 1)) RegistrationOpen
+      , ucfT 13 (Just GameEFootball) (Just (ucfDay 11 4)) RegistrationOpen ])
+      `shouldBe` [12, 10]
+
+  it "counts a start exactly at the current time as upcoming" $
+    plIds (LP.selectPublicFiltered ucfFilter [ ucfT 20 Nothing (Just ucfNow) RegistrationOpen ])
+      `shouldBe` [20]
+
+  it "still hides Draft and Private tournaments" $
+    plIds (LP.selectPublicFiltered ucfFilter
+      [ ucfT 30 Nothing (Just (ucfDay 11 1)) Draft
+      , (ucfT 31 Nothing (Just (ucfDay 11 1)) RegistrationOpen) { tournamentVisibility = Private } ])
       `shouldBe` []
