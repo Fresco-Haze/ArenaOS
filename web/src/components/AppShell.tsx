@@ -29,7 +29,7 @@ function Icon({ name }: { name: IconName }) {
   )
 }
 
-function SearchBar() {
+function SearchBar({ open, onDone }: { open: boolean; onDone: () => void }) {
   const navigate = useNavigate()
   const { search } = useLocation()
   const current = new URLSearchParams(search).get('q') ?? ''
@@ -38,10 +38,11 @@ function SearchBar() {
     e.preventDefault()
     const q = String(new FormData(e.currentTarget).get('q') ?? '').trim()
     navigate(q ? `/tournaments?q=${encodeURIComponent(q)}` : '/tournaments')
+    onDone()
   }
 
   return (
-    <form key={current} className="shell-search" role="search" onSubmit={submit}>
+    <form key={current} className={'shell-search' + (open ? ' open' : '')} role="search" onSubmit={submit}>
       <Icon name="search" />
       <label className="sr-only" htmlFor="shell-search-input">Search tournaments</label>
       <input
@@ -195,6 +196,10 @@ function TabBar() {
 }
 
 export default function AppShell({ children }: { children: ReactNode }) {
+  const [searchOpen, setSearchOpen] = useState(false)
+  useEffect(() => {
+    if (searchOpen) document.getElementById('shell-search-input')?.focus()
+  }, [searchOpen])
   return (
     <div className="shell">
       <a className="skip-link" href="#main">Skip to content</a>
@@ -203,8 +208,17 @@ export default function AppShell({ children }: { children: ReactNode }) {
           <Logo />
           <span className="brand-tag">Play &middot; Compete &middot; Win</span>
         </Link>
-        <SearchBar />
+        <SearchBar open={searchOpen} onDone={() => setSearchOpen(false)} />
         <div className="shell-top-right">
+          <button
+            type="button"
+            className="shell-search-toggle"
+            aria-label="Search tournaments"
+            aria-expanded={searchOpen}
+            onClick={() => setSearchOpen((o) => !o)}
+          >
+            <Icon name="search" />
+          </button>
           <UserMenu />
         </div>
       </header>
