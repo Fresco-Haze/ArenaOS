@@ -4,12 +4,15 @@ import type { FormEvent } from 'react'
 import { ApiError } from '../api'
 import ConfirmDialog from './ConfirmDialog'
 import MatchActions from './MatchActions'
+import DetailsFields from './DetailsFields'
+import { detailsChanged, detailsFromTournament, toPayload } from '../lib/details'
+import type { DetailsValues } from '../lib/details'
 import { actionableMatches, isBracketDecided } from '../lib/bracket'
 import {
   publish, openRegistration, addParticipant, registerSquad, closeRegistration,
   generateBracket, startTournament, completeTournament, cancelTournament,
   setThirdPlaceMatch, listTeams, updateName, updateVisibility, updateMaxParticipants,
-  pauseTournament, resumeTournament, reopenTournament,
+  pauseTournament, resumeTournament, reopenTournament, updateDetails,
 } from '../lib/tournamentActions'
 import type { BracketView, Team, Tournament } from '../model'
 
@@ -325,6 +328,7 @@ function EditDetails({ tournament, registeredCount, onDone }: {
   const [name, setName] = useState(tournament.name)
   const [visibility, setVisibility] = useState<'Public' | 'Private'>(tournament.visibility)
   const [max, setMax] = useState(String(tournament.maxParticipants))
+  const [details, setDetails] = useState<DetailsValues>(() => detailsFromTournament(tournament))
   const [busy, setBusy] = useState(false)
   const [problems, setProblems] = useState<string[]>([])
   const [saved, setSaved] = useState(false)
@@ -332,7 +336,8 @@ function EditDetails({ tournament, registeredCount, onDone }: {
   const changed =
     name.trim() !== tournament.name ||
     visibility !== tournament.visibility ||
-    (canEditMax && Number(max) !== tournament.maxParticipants)
+    (canEditMax && Number(max) !== tournament.maxParticipants) ||
+    detailsChanged(details, tournament)
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -356,6 +361,9 @@ function EditDetails({ tournament, registeredCount, onDone }: {
     if (canEditMax && Number(max) !== tournament.maxParticipants) {
       if (!Number.isInteger(Number(max))) found.push('Maximum: enter a whole number')
       else await attempt('Maximum', () => updateMaxParticipants(tournament.tournamentId, Number(max)))
+    }
+    if (detailsChanged(details, tournament)) {
+      await attempt('Details', () => updateDetails(tournament.tournamentId, toPayload(details, tournament)))
     }
     setProblems(found)
     setSaved(found.length === 0)
@@ -383,6 +391,7 @@ function EditDetails({ tournament, registeredCount, onDone }: {
             <option value="Private">Private</option>
           </select>
         </label>
+        <DetailsFields values={details} onChange={setDetails} />
         {canEditMax && (
           <>
             <label>

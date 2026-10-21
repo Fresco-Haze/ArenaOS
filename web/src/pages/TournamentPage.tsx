@@ -7,7 +7,8 @@ import { useTournament } from '../hooks/useTournament'
 
 import { participantName } from '../lib/participants'
 import { currentRoundName, matchStats } from '../lib/tournamentStats'
-import { formatLabel, stateLabel } from '../model'
+import { formatCardDate } from '../lib/cardDate'
+import { formatLabel, gameLabel, stateLabel } from '../model'
 
 import Bracket from '../components/Bracket'
 import EmptyState from '../components/EmptyState'
@@ -74,6 +75,11 @@ export default function TournamentPage({ id }: { id: string }) {
       sub: `/ ${t.maxParticipants}`,
     },
   ]
+  if (t.startTime) {
+    const when = formatCardDate(t.startTime)
+    if (when) stats.push({ label: 'Starts', value: when, text: true })
+  }
+  if (t.prize) stats.push({ label: 'Prize', value: t.prize, text: true })
   if (bracket) {
     const m = matchStats(bracket)
     stats.push({
@@ -93,7 +99,7 @@ export default function TournamentPage({ id }: { id: string }) {
           status={<span className={'badge ' + stateBadge[t.state]}>{stateLabel[t.state]}</span>}
           meta={
             <>
-              {formatLabel[t.format]} &middot; up to {t.maxParticipants} {unit}
+              {t.game && t.game !== 'Other' && <>{gameLabel[t.game]} &middot; </>}{formatLabel[t.format]} &middot; up to {t.maxParticipants} {unit}
               {t.thirdPlaceMatch && <> &middot; third-place match</>} &middot; Organized by{' '}
               {t.organizer}
             </>

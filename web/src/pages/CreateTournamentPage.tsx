@@ -4,8 +4,11 @@ import { useNavigate } from 'react-router'
 import { ApiError } from '../api'
 import { useAuth } from '../auth/context'
 import { createTournament } from '../lib/tournamentActions'
+import DetailsFields from '../components/DetailsFields'
+import { emptyDetails, toPayload } from '../lib/details'
+import type { DetailsValues } from '../lib/details'
 
-type Field = 'name' | 'organizer' | 'maxParticipants'
+type Field = 'name' | 'organizer' | 'maxParticipants' | 'prize'
 
 function fieldOf(err: ApiError): Field | null {
   const d = err.details
@@ -43,6 +46,7 @@ export default function CreateTournamentPage() {
   const [busy, setBusy] = useState(false)
   const [format, setFormat] = useState<'SingleElimination' | 'DoubleElimination' | 'RoundRobin'>('SingleElimination')
   const [participantMode, setParticipantMode] = useState<'IndividualOnly' | 'SquadOnly'>('IndividualOnly')
+  const [details, setDetails] = useState<DetailsValues>(emptyDetails)
 
   // ProtectedRoute guarantees this, but keep TypeScript honest.
   if (!user) return null
@@ -69,6 +73,7 @@ export default function CreateTournamentPage() {
         thirdPlaceMatch: format === 'SingleElimination',
         format,
         participantMode,
+        ...toPayload(details),
       })
       navigate(`/tournaments/${res.tournamentId}`)
     } catch (err) {
@@ -188,6 +193,11 @@ export default function CreateTournamentPage() {
             Private
           </label>
         </fieldset>
+
+        <DetailsFields values={details} onChange={setDetails} />
+        {fieldErrors.prize && (
+          <span role="alert" className="form-error">{fieldErrors.prize}</span>
+        )}
 
         <label>
           Maximum participants

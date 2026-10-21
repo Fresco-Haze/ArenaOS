@@ -1,5 +1,5 @@
 import { api, apiVoid } from '../api'
-import { Match, Tournament, RegistrationResult, BracketIdResult, CreateTournamentResponse, CreateTeamResponse, TeamList } from '../model'
+import { Match, Tournament, RegistrationResult, BracketIdResult, CreateTournamentResponse, CreateTeamResponse, TeamList, type Game } from '../model'
 
 export function publish(id: number) {
   return apiVoid(`/tournaments/${id}/publish`, { method: 'POST' })
@@ -61,6 +61,9 @@ export function createTournament(input: {
   thirdPlaceMatch: boolean
   participantMode?: 'IndividualOnly' | 'SquadOnly'
   format?: 'SingleElimination' | 'DoubleElimination' | 'RoundRobin'
+  game?: Game | null
+  startTime?: string | null
+  prize?: string | null
 }) {
   return api('/tournaments', CreateTournamentResponse, {
     method: 'POST',
@@ -157,5 +160,16 @@ export function createTeam(input: { name: string; captain: string; members: stri
   return api('/teams', CreateTeamResponse, {
     method: 'POST',
     body: JSON.stringify(input),
+  })
+}
+
+// Replaces game, start time and prize; null clears a field.
+export function updateDetails(
+  id: number,
+  details: { game: Game | null; startTime: string | null; prize: string | null },
+) {
+  return apiVoid(`/tournaments/${id}/details`, {
+    method: 'PUT',
+    body: JSON.stringify(details),
   })
 }
