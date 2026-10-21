@@ -617,6 +617,7 @@ statsJson s = object
   , "activeTournaments" .= statsActiveTournaments s
   , "players"           .= statsPlayers s
   , "teams"             .= statsTeams s
+  , "prizePool"         .= statsPrizePool s
   , "byGame"            .= [ object ["game" .= gameText g, "count" .= n] | (g, n) <- statsByGame s ]
   ]
 
@@ -704,10 +705,9 @@ fromValidation ThirdPlaceMatchRequiresSingleElimination =
     (object ["field" .= ("thirdPlaceMatch" :: Text)])
 
 fromDetailsValidation :: DetailsValidationError -> ApiError
-fromDetailsValidation (PrizeTooLong n) =
-  ApiError status400 "VALIDATION_FAILED" "Prize is too long"
-    (object ["field" .= ("prize" :: Text), "maximum" .= (100 :: Int), "actual" .= n])
-
+fromDetailsValidation (PrizeOutOfRange n) =
+  ApiError status400 "VALIDATION_FAILED" "Prize must be a whole number of KSh, up to 1,000,000,000"
+    (object ["field" .= ("prize" :: Text), "maximum" .= (1000000000 :: Int), "actual" .= n])
 fromUpdateDetails :: UTD.UpdateTournamentDetailsError -> ApiError
 fromUpdateDetails (UTD.Unauthorized a)     = fromAuthorization a
 fromUpdateDetails (UTD.InvalidLifecycle l) = fromLifecycle l

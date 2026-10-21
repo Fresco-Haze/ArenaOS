@@ -37,6 +37,7 @@ newTournamentColumns =
   [ ("game", "ALTER TABLE tournaments ADD COLUMN game TEXT CHECK (game IS NULL OR game IN ('eFootball', 'PubgMobile', 'CallOfDuty', 'Other'))")
   , ("start_time", "ALTER TABLE tournaments ADD COLUMN start_time TEXT")
   , ("prize", "ALTER TABLE tournaments ADD COLUMN prize TEXT")
+  , ("prize_kes", "ALTER TABLE tournaments ADD COLUMN prize_kes INTEGER CHECK (prize_kes IS NULL OR prize_kes > 0)")
   ]
 
 migrateTournamentColumns :: Connection -> IO ()

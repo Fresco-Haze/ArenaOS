@@ -289,6 +289,7 @@ spec = before_ resetTestDb $ do
   statsSpec
   publicFilterSpec
   upcomingFilterSpec
+  prizePoolSpec
   describe "Tournament Lifecycle (4-participant golden scenario)" $
     it "runs the full pipeline from creation to completion" $ do
       result <- runSQLiteM testDbPath $ do
@@ -8239,12 +8240,12 @@ dtTime :: UTCTime
 dtTime = UTCTime (fromGregorian 2026 12 12) 64800
 
 dtDetails :: TournamentDetails
-dtDetails = TournamentDetails (Just GameEFootball) (Just dtTime) (Just "KSh 50,000")
+dtDetails = TournamentDetails (Just GameEFootball) (Just dtTime) (Just 50000)
 
 dtCreate :: UserId -> String -> TournamentDetails -> SQLiteM TournamentId
 dtCreate owner name d = unwrap =<< CTD.createTournamentWithDetails (dtNew owner name) d
 
-dtTriple :: Tournament -> (Maybe Game, Maybe UTCTime, Maybe String)
+dtTriple :: Tournament -> (Maybe Game, Maybe UTCTime, Maybe Int)
 dtTriple t = (tournamentGame t, tournamentStartTime t, tournamentPrize t)
 
 dtChanged :: TournamentId -> SQLiteM [TournamentHistory.ChangedField]
@@ -8253,17 +8254,17 @@ dtChanged tid = do
   pure [ f | TournamentHistoryEntry { historyEvent = ConfigurationChanged f } <- entries ]
 
 detailsSpec :: Spec
-detailsSpec = describe "Tournament details: game, start time, prize (v0.12)" $ do
+detailsSpec = describe "Tournament details: game, start time, prize in KSh (v0.12)" $ do
 
-  it "creates with details and reads them back, trimming the prize" $ do
+  it "creates with details and reads them back" $ do
     result <- runSQLiteM testDbPath $ do
       setupSchema
       owner <- createTestUser "dt-owner-1"
-      tid <- dtCreate owner "Details Cup" (dtDetails { detailsPrize = Just "  KSh 50,000  " })
+      tid <- dtCreate owner "Details Cup" dtDetails
       Repo.getTournament tid
     case result of
       Left err -> expectationFailure (show err)
-      Right t  -> dtTriple t `shouldBe` (Just GameEFootball, Just dtTime, Just "KSh 50,000")
+      Right t  -> dtTriple t `shouldBe` (Just GameEFootball, Just dtTime, Just 50000)
 
   it "creates without details: all three fields are absent" $ do
     result <- runSQLiteM testDbPath $ do
@@ -8285,37 +8286,39 @@ detailsSpec = describe "Tournament details: game, start time, prize (v0.12)" $ d
       Left err -> expectationFailure (show err)
       Right t  -> tournamentStartTime t `shouldBe` Just dtTime
 
-  it "turns a blank prize into no prize" $ do
+  it "treats a zero prize as no prize" $ do
     result <- runSQLiteM testDbPath $ do
       setupSchema
       owner <- createTestUser "dt-owner-4"
-      tid <- dtCreate owner "Blank Prize Cup" (noDetails { detailsPrize = Just "   " })
+      tid <- dtCreate owner "Zero Prize Cup" (noDetails { detailsPrize = Just 0 })
       Repo.getTournament tid
     case result of
       Left err -> expectationFailure (show err)
       Right t  -> tournamentPrize t `shouldBe` Nothing
 
-  it "accepts a 100-character prize and rejects 101, creating nothing" $ do
+  it "accepts the largest prize and rejects anything outside the range, creating nothing" $ do
     result <- runSQLiteM testDbPath $ do
       setupSchema
       owner <- createTestUser "dt-owner-5"
-      ok  <- CTD.createTournamentWithDetails (dtNew owner "Ok") (noDetails { detailsPrize = Just (replicate 100 'x') })
-      bad <- CTD.createTournamentWithDetails (dtNew owner "Bad") (noDetails { detailsPrize = Just (replicate 101 'x') })
+      ok   <- CTD.createTournamentWithDetails (dtNew owner "Ok") (noDetails { detailsPrize = Just 1000000000 })
+      high <- CTD.createTournamentWithDetails (dtNew owner "High") (noDetails { detailsPrize = Just 1000000001 })
+      neg  <- CTD.createTournamentWithDetails (dtNew owner "Negative") (noDetails { detailsPrize = Just (-5) })
       everything <- Repo.listAllTournaments
-      pure (isRight ok, bad, map tournamentName everything)
+      pure (isRight ok, high, neg, map tournamentName everything)
     case result of
       Left err -> expectationFailure (show err)
-      Right (okRight, bad, names) -> do
+      Right (okRight, high, neg, names) -> do
         okRight `shouldBe` True
-        bad `shouldBe` Left (CTD.CreateInvalidDetails (DV.PrizeTooLong 101))
+        high `shouldBe` Left (CTD.CreateInvalidDetails (DV.PrizeOutOfRange 1000000001))
+        neg `shouldBe` Left (CTD.CreateInvalidDetails (DV.PrizeOutOfRange (-5)))
         names `shouldBe` [TournamentName "Ok"]
 
   it "update replaces the details and logs one history entry per changed field" $ do
     result <- runSQLiteM testDbPath $ do
       setupSchema
       owner <- createTestUser "dt-owner-6"
-      tid <- dtCreate owner "Edit Cup" (TournamentDetails (Just GameEFootball) Nothing (Just "A"))
-      r <- UTD.updateTournamentDetails owner tid (TournamentDetails (Just GameEFootball) (Just dtTime) (Just "B"))
+      tid <- dtCreate owner "Edit Cup" (TournamentDetails (Just GameEFootball) Nothing (Just 10000))
+      r <- UTD.updateTournamentDetails owner tid (TournamentDetails (Just GameEFootball) (Just dtTime) (Just 20000))
       t <- Repo.getTournament tid
       changed <- dtChanged tid
       pure (r, t, changed)
@@ -8323,7 +8326,7 @@ detailsSpec = describe "Tournament details: game, start time, prize (v0.12)" $ d
       Left err -> expectationFailure (show err)
       Right (r, t, changed) -> do
         r `shouldBe` Right ()
-        dtTriple t `shouldBe` (Just GameEFootball, Just dtTime, Just "B")
+        dtTriple t `shouldBe` (Just GameEFootball, Just dtTime, Just 20000)
         changed `shouldMatchList` [TournamentHistory.FieldStartTime, TournamentHistory.FieldPrize]
 
   it "an update that changes nothing logs nothing" $ do
@@ -8391,19 +8394,19 @@ detailsSpec = describe "Tournament details: game, start time, prize (v0.12)" $ d
           other -> expectationFailure ("expected InvalidLifecycle, got: " ++ show other)
         after `shouldBe` before
 
-  it "a too-long prize on update is rejected and nothing changes" $ do
+  it "a prize out of range on update is rejected and nothing changes" $ do
     result <- runSQLiteM testDbPath $ do
       setupSchema
       owner <- createTestUser "dt-owner-11"
-      tid <- dtCreate owner "Long Prize Cup" dtDetails
+      tid <- dtCreate owner "Range Cup" dtDetails
       before <- Repo.getTournament tid
-      r <- UTD.updateTournamentDetails owner tid (dtDetails { detailsPrize = Just (replicate 101 'x') })
+      r <- UTD.updateTournamentDetails owner tid (dtDetails { detailsPrize = Just 1000000001 })
       after <- Repo.getTournament tid
       pure (r, before, after)
     case result of
       Left err -> expectationFailure (show err)
       Right (r, before, after) -> do
-        r `shouldBe` Left (UTD.InvalidDetails (DV.PrizeTooLong 101))
+        r `shouldBe` Left (UTD.InvalidDetails (DV.PrizeOutOfRange 1000000001))
         after `shouldBe` before
 
   it "saveTournament and publishing keep the details" $ do
@@ -8460,8 +8463,23 @@ detailsSpec = describe "Tournament details: game, start time, prize (v0.12)" $ d
         tournamentName t `shouldBe` TournamentName "Old Cup"
         dtTriple t `shouldBe` (Nothing, Nothing, Nothing)
 
--- ---------------------------------------------------------------------
--- v0.12: public stats for the home page.
+  it "migrates a database that still has the old free-text prize and ignores that text" $ do
+    let path = "test/arenaos-migrate-test.db"
+    exists <- doesFileExist path
+    if exists then removeFile path else pure ()
+    conn <- SQLite.open path
+    SQLite.execute_ conn "CREATE TABLE tournaments ( id INTEGER PRIMARY KEY, name TEXT NOT NULL, organizer_name TEXT NOT NULL, owner_id INTEGER NOT NULL, format TEXT NOT NULL, state TEXT NOT NULL, visibility TEXT NOT NULL, third_place_match INTEGER NOT NULL DEFAULT 0, participant_mode TEXT NOT NULL DEFAULT 'IndividualOnly', max_participants INTEGER NOT NULL, bracket_id INTEGER, game TEXT, start_time TEXT, prize TEXT )"
+    SQLite.execute_ conn "INSERT INTO tournaments (id, name, organizer_name, owner_id, format, state, visibility, max_participants, game, prize) VALUES (1, 'Text Prize Cup', 'Org', 1, 'SingleElimination', 'Draft', 'Public', 4, 'eFootball', 'KSh 10,000 and a trophy')"
+    initializeSchema conn
+    SQLite.close conn
+    result <- runSQLiteM path (Repo.getTournament (TournamentId 1))
+    removeFile path
+    case result of
+      Left err -> expectationFailure (show err)
+      Right t -> dtTriple t `shouldBe` (Just GameEFootball, Nothing, Nothing)
+
+
+-- ----------------------------------------------------------------------- v0.12: public stats for the home page.
 -- ---------------------------------------------------------------------
 
 stPublish :: UserId -> String -> Maybe Game -> SQLiteM TournamentId
@@ -8479,7 +8497,7 @@ statsSpec = describe "Public stats (v0.12)" $ do
       Repo.publicStats
     case result of
       Left err -> expectationFailure (show err)
-      Right s  -> s `shouldBe` PublicStats 0 0 0 0 []
+      Right s  -> s `shouldBe` PublicStats 0 0 0 0 0 []
 
   it "counts only Public tournaments past Draft; active means open or running" $ do
     result <- runSQLiteM testDbPath $ do
@@ -8657,3 +8675,29 @@ upcomingFilterSpec = describe "Upcoming filter (v0.12)" $ do
       [ ucfT 30 Nothing (Just (ucfDay 11 1)) Draft
       , (ucfT 31 Nothing (Just (ucfDay 11 1)) RegistrationOpen) { tournamentVisibility = Private } ])
       `shouldBe` []
+
+-- ---------------------------------------------------------------------
+-- v0.12: total prize pool for the home page.
+-- ---------------------------------------------------------------------
+
+prizePoolSpec :: Spec
+prizePoolSpec = describe "Prize pool stat (v0.12)" $ do
+
+  it "sums prizes over public tournaments past Draft, excluding Cancelled" $ do
+    result <- runSQLiteM testDbPath $ do
+      setupSchema
+      owner <- createTestUser "pp-owner-1"
+      let withPrize n = noDetails { detailsPrize = Just n }
+      a <- dtCreate owner "PP A" (withPrize 50000)
+      b <- dtCreate owner "PP B" (withPrize 20000)
+      _ <- dtCreate owner "PP Draft" (withPrize 7000)
+      d <- dtCreate owner "PP Cancelled" (withPrize 9000)
+      p <- unwrap =<< CTD.createTournamentWithDetails
+             ((dtNew owner "PP Private") { newTournamentVisibility = Private }) (withPrize 4000)
+      f <- dtCreate owner "PP None" noDetails
+      mapM_ (\t -> unwrap =<< publishTournament owner t) [a, b, d, p, f]
+      _ <- unwrap =<< cancelTournament owner d "no longer needed"
+      Repo.publicStats
+    case result of
+      Left err -> expectationFailure (show err)
+      Right s  -> statsPrizePool s `shouldBe` 70000

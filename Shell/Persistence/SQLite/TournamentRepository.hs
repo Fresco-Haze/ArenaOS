@@ -187,12 +187,12 @@ tournamentSelect :: Query
 tournamentSelect =
     "SELECT id, name, organizer_name, owner_id, format, state, visibility, \
     \max_participants, third_place_match, bracket_id, \
-    \participant_mode, game, start_time, prize \
+    \participant_mode, game, start_time, prize_kes \
     \FROM tournaments"
 
 type TournamentRow =
     (Int, String, String, Int, String, String, String, Int, Int, Maybe Int)
-    :. (String, Maybe String, Maybe String, Maybe String)
+    :. (String, Maybe String, Maybe String, Maybe Int)
 
 decodeTournamentRow :: TournamentRow -> IO Tournament
 decodeTournamentRow
@@ -258,6 +258,11 @@ statsByGameSql =
     "SELECT t.game, COUNT(*) FROM tournaments t WHERE " <> publicWhere
     <> " AND t.game IS NOT NULL GROUP BY t.game"
 
+statsPrizePoolSql :: Query
+statsPrizePoolSql =
+    "SELECT COALESCE(SUM(t.prize_kes), 0) FROM tournaments t WHERE " <> publicWhere
+    <> " AND t.state <> 'Cancelled'"
+
 instance TournamentRepository SQLiteM where
 
     createTournament :: NewTournament -> SQLiteM TournamentId
@@ -302,7 +307,7 @@ instance TournamentRepository SQLiteM where
             UserId owner_id         = tournamentOwner t
             bracketIdMaybe          = (\(BracketId bid) -> bid) <$> tournamentBracket t
         liftIO $ execute conn
-            "INSERT INTO tournaments (id, name, organizer_name, owner_id, format, state, visibility, max_participants, third_place_match, bracket_id, participant_mode, game, start_time, prize) \
+            "INSERT INTO tournaments (id, name, organizer_name, owner_id, format, state, visibility, max_participants, third_place_match, bracket_id, participant_mode, game, start_time, prize_kes) \
             \VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
             \ON CONFLICT(id) DO UPDATE SET \
             \  name = excluded.name, \
@@ -316,7 +321,7 @@ instance TournamentRepository SQLiteM where
             \  bracket_id = excluded.bracket_id, \
             \  game = excluded.game, \
             \  start_time = excluded.start_time, \
-            \  prize = excluded.prize"
+            \  prize_kes = excluded.prize_kes"
             ( ( tidInt
               , tname
               , organizer
@@ -423,7 +428,7 @@ instance TournamentRepository SQLiteM where
     updateTournamentDetails (TournamentId tidInt) d = do
         conn <- asks envConnection
         liftIO $ execute conn
-            "UPDATE tournaments SET game = ?, start_time = ?, prize = ? WHERE id = ?"
+            "UPDATE tournaments SET game = ?, start_time = ?, prize_kes = ? WHERE id = ?"
             ( gameToText <$> detailsGame d
             , timeToText <$> detailsStartTime d
             , detailsPrize d
@@ -446,6 +451,7 @@ instance TournamentRepository SQLiteM where
         active  <- count statsActiveSql
         players <- count statsPlayersSql
         teams   <- count statsTeamsSql
+        prize   <- count statsPrizePoolSql
         gameRows <- liftIO (query_ conn statsByGameSql :: IO [(String, Int)])
         byGame <- liftIO (mapM (\(g, n) -> (\gm -> (gm, n)) <$> textToGame g) gameRows)
         pure PublicStats
@@ -453,5 +459,6 @@ instance TournamentRepository SQLiteM where
             , statsActiveTournaments = active
             , statsPlayers           = players
             , statsTeams             = teams
+            , statsPrizePool         = prize
             , statsByGame            = byGame
             }

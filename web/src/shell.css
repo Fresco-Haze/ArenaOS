@@ -321,3 +321,5 @@
     overflow-y: auto;
   }
 }
+
+.shell-side { scrollbar-width: thin; scrollbar-color: var(--line) transparent; }

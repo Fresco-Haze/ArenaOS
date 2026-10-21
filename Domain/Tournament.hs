@@ -50,7 +50,7 @@ data Game = GameEFootball | GamePubgMobile | GameCallOfDuty | GameOther
 data TournamentDetails = TournamentDetails
     { detailsGame      :: Maybe Game
     , detailsStartTime :: Maybe UTCTime
-    , detailsPrize     :: Maybe String
+    , detailsPrize     :: Maybe Int
     } deriving (Show, Eq)
 
 noDetails :: TournamentDetails
@@ -63,6 +63,7 @@ data PublicStats = PublicStats
     , statsActiveTournaments :: Int
     , statsPlayers           :: Int
     , statsTeams             :: Int
+    , statsPrizePool         :: Int
     , statsByGame            :: [(Game, Int)]
     } deriving (Show, Eq)
 
@@ -85,6 +86,6 @@ data Tournament = Tournament
     , tournamentParticipantMode :: ParticipantMode
     , tournamentGame :: Maybe Game
     , tournamentStartTime :: Maybe UTCTime
-    , tournamentPrize :: Maybe String
+    , tournamentPrize :: Maybe Int
     } deriving (Show, Eq)
 
