@@ -135,3 +135,18 @@
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
+
+/* art crops: keep the subject in frame in wide, short slots */
+.tcard-art[data-game='eFootball'], .gtile-art[data-game='eFootball'],
+.tp-art[data-game='eFootball'], .urow-art[data-game='eFootball'] { background-position: center 20%; }
+.tcard-art[data-game='CallOfDuty'], .gtile-art[data-game='CallOfDuty'],
+.tp-art[data-game='CallOfDuty'], .urow-art[data-game='CallOfDuty'] { background-position: 20% 12%; }
+.tcard-art[data-game='PubgMobile'], .gtile-art[data-game='PubgMobile'],
+.tp-art[data-game='PubgMobile'], .urow-art[data-game='PubgMobile'] { background-position: 30% center; }
+
+/* desktop: art on the left of the tournament header, details on the right */
+@media (min-width: 861px) {
+  .tp-head { display: grid; grid-template-columns: 22rem minmax(0, 1fr); }
+  .tp-art { height: auto; min-height: 13rem; }
+  .tp-info { display: flex; flex-direction: column; justify-content: center; }
+}
