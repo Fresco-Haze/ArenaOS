@@ -7,10 +7,15 @@ import type { SessionUser } from './context'
 
 const USER_KEY = 'arenaos.user'
 
+function clearStoredUser() {
+  localStorage.removeItem(USER_KEY)
+  sessionStorage.removeItem(USER_KEY)
+}
+
 function loadUser(): SessionUser | null {
   if (!auth.get()) return null
   try {
-    const raw = localStorage.getItem(USER_KEY)
+    const raw = localStorage.getItem(USER_KEY) ?? sessionStorage.getItem(USER_KEY)
     if (!raw) return null
     const parsed = LoginResponse.shape.user.safeParse(JSON.parse(raw))
     return parsed.success ? parsed.data : null
@@ -26,19 +31,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     // api.ts calls this when the server says a token we sent is dead.
     return auth.onSessionExpired(() => {
-      localStorage.removeItem(USER_KEY)
+      clearStoredUser()
       setUser(null)
       setExpired(true)
     })
   }, [])
 
-  async function login(username: string, password: string) {
+  async function login(username: string, password: string, remember = true) {
     const res = await api('/login', LoginResponse, {
       method: 'POST',
       body: JSON.stringify({ username, password }),
     })
-    auth.set(res.token)
-    localStorage.setItem(USER_KEY, JSON.stringify(res.user))
+    auth.set(res.token, remember)
+    clearStoredUser()
+    if (remember) localStorage.setItem(USER_KEY, JSON.stringify(res.user))
+    else sessionStorage.setItem(USER_KEY, JSON.stringify(res.user))
     setUser(res.user)
     setExpired(false)
   }
@@ -50,7 +57,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // The local session ends whether or not the server answered.
     }
     auth.clear()
-    localStorage.removeItem(USER_KEY)
+    clearStoredUser()
     setUser(null)
     setExpired(false)
   }

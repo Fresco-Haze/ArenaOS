@@ -6,6 +6,8 @@ import { useAuth } from '../auth/context'
 import { registerUser } from '../auth/authActions'
 import { safeNext } from '../lib/safeNext'
 import { retrySeconds, useCooldown } from '../lib/rateLimit'
+import AuthBrand from '../components/AuthBrand'
+import AuthField from '../components/AuthField'
 
 type Field = 'username' | 'email' | 'password'
 
@@ -62,7 +64,7 @@ export default function RegisterPage() {
       await login(username, password)
     } catch {
       navigate(`/login?next=${encodeURIComponent(next)}`, {
-        state: { notice: 'Account created — sign in below.' },
+        state: { notice: 'Account created. Sign in below.' },
       })
     } finally {
       setBusy(false)
@@ -70,57 +72,56 @@ export default function RegisterPage() {
   }
 
   return (
-    <div className="auth-card">
-      <h1>Create an account</h1>
-      <form onSubmit={onSubmit} className="form">
-        <label>
-          Username
-          <input
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            autoComplete="username"
-            autoFocus
-            required
-          />
-          {fieldErrors.username && (
-            <span role="alert" className="form-error">{fieldErrors.username}</span>
-          )}
-        </label>
-        <label>
-          Email
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            autoComplete="email"
-            required
-          />
-          {fieldErrors.email && (
-            <span role="alert" className="form-error">{fieldErrors.email}</span>
-          )}
-        </label>
-        <label>
-          Password
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoComplete="new-password"
-            required
-          />
-          {fieldErrors.password && (
-            <span role="alert" className="form-error">{fieldErrors.password}</span>
-          )}
-        </label>
+    <div className="auth-page">
+      <Link to={`/login?next=${encodeURIComponent(next)}`} className="auth-back" aria-label="Back to sign in">
+        &larr; Back
+      </Link>
+      <AuthBrand />
+      <h1 className="auth-title">Create Your Account</h1>
+      <p className="muted auth-sub">Join the ArenaOS community</p>
+      <form onSubmit={onSubmit} className="auth-form">
+        <AuthField
+          label="Email"
+          icon="mail"
+          type="email"
+          placeholder="you@example.com"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          autoComplete="email"
+          autoFocus
+          required
+          error={fieldErrors.email}
+        />
+        <AuthField
+          label="Username"
+          icon="user"
+          placeholder="Choose a username"
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+          autoComplete="username"
+          required
+          error={fieldErrors.username}
+        />
+        <AuthField
+          label="Password"
+          icon="lock"
+          password
+          placeholder="Create a password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          autoComplete="new-password"
+          required
+          error={fieldErrors.password}
+        />
         {cooldown.message && <p role="alert" className="form-error">{cooldown.message}</p>}
         {error && <p role="alert" className="form-error">{error}</p>}
-        <button type="submit" className="btn-primary" disabled={busy || cooldown.cooling}>
-          {busy ? 'Creating account' : 'Create account'}
+        <button type="submit" className="btn-primary auth-submit" disabled={busy || cooldown.cooling}>
+          {busy ? 'Creating account' : 'Create Account'}
         </button>
       </form>
-      <p>
+      <p className="auth-switch">
         Already have an account?{' '}
-        <Link to={`/login?next=${encodeURIComponent(next)}`}>Sign in</Link>
+        <Link to={`/login?next=${encodeURIComponent(next)}`}>Sign In</Link>
       </p>
     </div>
   )

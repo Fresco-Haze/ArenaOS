@@ -17,3 +17,82 @@
 .form-row-2 label { min-width: 0; }
 .form-actions-full { flex-direction: column; }
 .form-actions-full button { width: 100%; }
+
+/* ===== sign in and register ===== */
+.bare {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6) var(--space-4);
+}
+.bare > .notice { width: 100%; max-width: 24rem; }
+.auth-page { width: 100%; max-width: 24rem; }
+.auth-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-6);
+  font-size: 2.25rem;
+}
+.auth-title { margin: 0 0 var(--space-1); font-size: 1.75rem; }
+.auth-sub { margin: 0 0 var(--space-6); }
+.auth-form { display: grid; gap: var(--space-4); }
+.afield { display: grid; gap: var(--space-1); }
+.afield > label { font-size: var(--font-sm); font-weight: 600; }
+.afield-box { position: relative; }
+.afield-box input {
+  width: 100%;
+  min-height: 3rem;
+  padding-left: 2.75rem;
+  padding-right: 2.75rem;
+  background: var(--shell-search);
+}
+.afield-icon {
+  position: absolute;
+  left: var(--space-3);
+  top: 50%;
+  width: 1.25rem;
+  height: 1.25rem;
+  transform: translateY(-50%);
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+.afield-eye {
+  position: absolute;
+  right: var(--space-1);
+  top: 50%;
+  display: inline-flex;
+  transform: translateY(-50%);
+  padding: var(--space-2);
+  border: 0;
+  background: none;
+  color: var(--muted);
+}
+.afield-eye:hover { color: var(--text); }
+.afield-icon-eye {
+  width: 1.25rem;
+  height: 1.25rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.remember { display: flex; align-items: center; gap: var(--space-2); font-size: var(--font-sm); }
+.auth-submit { width: 100%; min-height: 3rem; }
+.auth-switch { margin: var(--space-6) 0 0; text-align: center; }
+.auth-back {
+  display: inline-block;
+  margin-bottom: var(--space-4);
+  color: var(--muted);
+  text-decoration: none;
+}
+.auth-back:hover { color: var(--text); }

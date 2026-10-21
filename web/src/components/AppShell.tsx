@@ -200,6 +200,10 @@ export default function AppShell({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (searchOpen) document.getElementById('shell-search-input')?.focus()
   }, [searchOpen])
+  const { pathname } = useLocation()
+  if (pathname === '/login' || pathname === '/register') {
+    return <main id="main" className="bare">{children}</main>
+  }
   return (
     <div className="shell">
       <a className="skip-link" href="#main">Skip to content</a>

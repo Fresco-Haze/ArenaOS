@@ -7,7 +7,7 @@ export type AuthValue = {
   user: SessionUser | null
   expired: boolean
   dismissExpired: () => void
-  login: (username: string, password: string) => Promise<void>
+  login: (username: string, password: string, remember?: boolean) => Promise<void>
   logout: () => Promise<void>
 }
 

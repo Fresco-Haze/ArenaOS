@@ -6,9 +6,18 @@ type Listener = () => void
 const expiredListeners = new Set<Listener>()
 
 export const auth = {
-  get: () => localStorage.getItem(TOKEN_KEY),
-  set: (token: string) => localStorage.setItem(TOKEN_KEY, token),
-  clear: () => localStorage.removeItem(TOKEN_KEY),
+  get: () => localStorage.getItem(TOKEN_KEY) ?? sessionStorage.getItem(TOKEN_KEY),
+  // remember = false keeps the session in this tab only (gone when it closes).
+  set: (token: string, remember = true) => {
+    localStorage.removeItem(TOKEN_KEY)
+    sessionStorage.removeItem(TOKEN_KEY)
+    if (remember) localStorage.setItem(TOKEN_KEY, token)
+    else sessionStorage.setItem(TOKEN_KEY, token)
+  },
+  clear: () => {
+    localStorage.removeItem(TOKEN_KEY)
+    sessionStorage.removeItem(TOKEN_KEY)
+  },
   // AuthContext registers here so api.ts can say "the session died"
   // without knowing anything about React.
   onSessionExpired: (fn: Listener) => {
