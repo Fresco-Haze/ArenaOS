@@ -308,3 +308,16 @@
 @media (max-width: 860px) {
   .shell-foot { display: none; }
 }
+
+/* desktop: header and sidebar stay in place while the page scrolls */
+@media (min-width: 861px) {
+  .shell-top { height: 4.75rem; }
+  .shell-side {
+    position: sticky;
+    top: 4.75rem;
+    align-self: start;
+    height: calc(100vh - 4.75rem);
+    height: calc(100dvh - 4.75rem);
+    overflow-y: auto;
+  }
+}

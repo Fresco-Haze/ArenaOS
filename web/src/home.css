@@ -241,3 +241,21 @@
 .urow-name:hover { text-decoration: underline; }
 .urow-sub { margin: 0; color: var(--muted); font-size: 0.8125rem; }
 .urow-when { flex: none; color: var(--muted); font-size: 0.8125rem; }
+
+/* hero: keep the headline over the dark side of the image */
+.hero {
+  background-image:
+    linear-gradient(90deg, rgba(2, 13, 26, 0.97) 0%, rgba(2, 13, 26, 0.92) 50%, rgba(2, 13, 26, 0.6) 72%, rgba(2, 13, 26, 0) 95%),
+    url('/art/hero.jpg');
+  background-position: 70% center;
+}
+.hero-copy { max-width: none; }
+.hero-title {
+  font-size: clamp(1.75rem, 2.7vw, 2.5rem);
+  text-shadow: 0 2px 12px rgba(2, 13, 26, 0.7);
+}
+.hero-title span { white-space: nowrap; }
+.hero-text {
+  max-width: 26rem;
+  text-shadow: 0 1px 8px rgba(2, 13, 26, 0.8);
+}
