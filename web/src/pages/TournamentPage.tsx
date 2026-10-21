@@ -1,12 +1,11 @@
 import { useState } from 'react'
 import { Link } from 'react-router'
 
-import { stateBadge } from '../badges'
+import { statusClass } from '../badges'
 import { useAuth } from '../auth/context'
 import { useTournament } from '../hooks/useTournament'
 
 import { participantName } from '../lib/participants'
-import { currentRoundName, matchStats } from '../lib/tournamentStats'
 import { formatCardDate } from '../lib/cardDate'
 import { formatLabel, gameLabel, stateLabel } from '../model'
 
@@ -15,13 +14,38 @@ import EmptyState from '../components/EmptyState'
 import ErrorBanner from '../components/ErrorBanner'
 import LoadingBlock from '../components/LoadingBlock'
 import OrganizerPanel from '../components/OrganizerPanel'
-import PageHeader from '../components/PageHeader'
 import PlayerLookup from '../components/PlayerLookup'
-import StatStrip from '../components/StatStrip'
-import type { Stat } from '../components/StatStrip'
 import Tabs from '../components/Tabs'
 
 type TabId = 'bracket' | 'players'
+
+function PeopleIcon() {
+  return (
+    <svg className="meta-icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+      <circle cx="6" cy="5.5" r="2.25" />
+      <path d="M2 13c0-2.2 1.8-4 4-4s4 1.8 4 4" />
+      <circle cx="11.5" cy="6" r="1.75" />
+      <path d="M11 9.2c1.8.1 3 1.5 3 3.3" />
+    </svg>
+  )
+}
+
+function CalendarIcon() {
+  return (
+    <svg className="meta-icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+      <rect x="2.5" y="3.5" width="11" height="10" rx="1.5" />
+      <path d="M2.5 6.5h11M5.5 2v3M10.5 2v3" />
+    </svg>
+  )
+}
+
+function TrophyIcon() {
+  return (
+    <svg className="meta-icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+      <path d="M5 2.5h6v3a3 3 0 0 1-6 0v-3zM5 4H2.5v1a2 2 0 0 0 2 2M11 4h2.5v1a2 2 0 0 1-2 2M8 8.5v3M5.5 13.5h5" />
+    </svg>
+  )
+}
 
 export default function TournamentPage({ id }: { id: string }) {
   const { user } = useAuth()
@@ -67,101 +91,99 @@ export default function TournamentPage({ id }: { id: string }) {
   const t = view.tournament
   const squads = t.participantMode === 'SquadOnly'
   const unit = squads ? 'teams' : 'players'
-
-  const stats: Stat[] = [
-    {
-      label: squads ? 'Teams registered' : 'Players registered',
-      value: String(view.participants.length),
-      sub: `/ ${t.maxParticipants}`,
-    },
-  ]
-  if (t.startTime) {
-    const when = formatCardDate(t.startTime)
-    if (when) stats.push({ label: 'Starts', value: when, text: true })
-  }
-  if (t.prize) stats.push({ label: 'Prize', value: t.prize, text: true })
-  if (bracket) {
-    const m = matchStats(bracket)
-    stats.push({
-      label: 'Matches played',
-      value: String(m.played),
-      sub: m.total === null ? undefined : `/ ${m.total}`,
-    })
-    const round = currentRoundName(bracket)
-    if (round) stats.push({ label: 'Current round', value: round, text: true })
-  }
+  const mode = squads ? 'Squad' : '1v1'
+  const gameName = t.game && t.game !== 'Other' ? gameLabel[t.game] : null
+  const when = t.startTime ? formatCardDate(t.startTime) : ''
 
   return (
-    <>
-      <div className="stage">
-        <PageHeader
-          title={t.name}
-          status={<span className={'badge ' + stateBadge[t.state]}>{stateLabel[t.state]}</span>}
-          meta={
-            <>
-              {t.game && t.game !== 'Other' && <>{gameLabel[t.game]} &middot; </>}{formatLabel[t.format]} &middot; up to {t.maxParticipants} {unit}
-              {t.thirdPlaceMatch && <> &middot; third-place match</>} &middot; Organized by{' '}
-              {t.organizer}
-            </>
-          }
-        />
+    <div className="tp">
+      <Link to="/tournaments" className="tp-back">&larr; Tournaments</Link>
 
-        <StatStrip stats={stats} />
+      <section className="tp-head" aria-labelledby="tp-title">
+        <div className="tp-art" data-game={t.game ?? 'none'}>
+          <span className={'badge tp-status ' + statusClass[t.state]}>{stateLabel[t.state]}</span>
+        </div>
+        <div className="tp-info">
+          <h1 id="tp-title" className="tp-title">{t.name}</h1>
+          <ul className="tp-meta">
+            {gameName && <li>{gameName}</li>}
+            <li>
+              <PeopleIcon />
+              {mode} &bull; {formatLabel[t.format]}
+              {t.thirdPlaceMatch && <> &bull; third-place match</>}
+            </li>
+            <li>Up to {t.maxParticipants} {unit}</li>
+            <li>Organized by {t.organizer}</li>
+          </ul>
+          {(when || t.prize) && (
+            <ul className="tp-facts">
+              {when && <li><CalendarIcon />{when}</li>}
+              {t.prize && <li className="tp-prize"><TrophyIcon />{t.prize}</li>}
+            </ul>
+          )}
+        </div>
+      </section>
 
-        <Tabs<TabId>
-          label="Tournament sections"
-          active={tab}
-          onChange={setTab}
-          tabs={[
-            { id: 'bracket', label: 'Bracket' },
-            { id: 'players', label: squads ? 'Teams' : 'Players', count: view.participants.length },
-          ]}
-        />
+      <Tabs<TabId>
+        label="Tournament sections"
+        active={tab}
+        onChange={setTab}
+        tabs={[
+          { id: 'bracket', label: 'Bracket' },
+          { id: 'players', label: squads ? 'Teams' : 'Players', count: view.participants.length },
+        ]}
+      />
 
-        {tab === 'bracket' ? (
-          <div role="tabpanel" id="panel-bracket" aria-labelledby="tab-bracket">
-            {t.state === 'Cancelled' && (
-              <p role="status" className="muted">
-                This tournament was cancelled. Matches that had not finished were not completed.
-              </p>
-            )}
+      {tab === 'bracket' ? (
+        <div role="tabpanel" id="panel-bracket" aria-labelledby="tab-bracket">
+          <h2 className="tp-section-title">Bracket</h2>
+          {t.state === 'Cancelled' && (
+            <p role="status" className="muted">
+              This tournament was cancelled. Matches that had not finished were not completed.
+            </p>
+          )}
 
-            {bracket && t.state !== 'Cancelled' && (
-              <PlayerLookup bracket={bracket} participants={view.participants} squads={squads} />
-            )}
+          {bracket && t.state !== 'Cancelled' && (
+            <PlayerLookup bracket={bracket} participants={view.participants} squads={squads} />
+          )}
 
-            {bracket ? (
-              <Bracket bracket={bracket} tournamentState={t.state} />
-            ) : (
-              <EmptyState title="No bracket yet">
-                The bracket appears here once the organizer generates it.
-              </EmptyState>
-            )}
-          </div>
-        ) : (
-          <div role="tabpanel" id="panel-players" aria-labelledby="tab-players">
-            <h2>
-              {squads ? 'Teams' : 'Players'} ({view.participants.length} of {t.maxParticipants})
-            </h2>
-            {view.participants.length === 0 ? (
-              <EmptyState title={squads ? 'No teams registered yet' : 'No players registered yet'}>
-                Registered {unit} will appear here.
-              </EmptyState>
-            ) : (
-              <ul className="participants">
-                {view.participants.map((p, i) => (
-                  <li key={i}>
-                    <span className="participant-name">{participantName(p)}</span>
+          {bracket ? (
+            <Bracket bracket={bracket} tournamentState={t.state} />
+          ) : (
+            <EmptyState title="No bracket yet">
+              The bracket appears here once the organizer generates it.
+            </EmptyState>
+          )}
+        </div>
+      ) : (
+        <div role="tabpanel" id="panel-players" aria-labelledby="tab-players">
+          <h2 className="tp-section-title">
+            Registered {squads ? 'Teams' : 'Players'} ({view.participants.length}/{t.maxParticipants})
+          </h2>
+          {view.participants.length === 0 ? (
+            <EmptyState title={squads ? 'No teams registered yet' : 'No players registered yet'}>
+              Registered {unit} will appear here.
+            </EmptyState>
+          ) : (
+            <ol className="plist">
+              {view.participants.map((p, i) => (
+                <li key={i} className="prow">
+                  <span className="prow-rank num">{i + 1}</span>
+                  <span className="prow-avatar" aria-hidden="true">
+                    {participantName(p).charAt(0).toUpperCase()}
+                  </span>
+                  <span className="prow-main">
+                    <span className="prow-name">{participantName(p)}</span>
                     {p.type === 'Squad' && (
-                      <span className="participant-members">{p.team.members.join(', ')}</span>
+                      <span className="prow-members">{p.team.members.join(', ')}</span>
                     )}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        )}
-      </div>
+                  </span>
+                </li>
+              ))}
+            </ol>
+          )}
+        </div>
+      )}
 
       {view.viewerIsOwner && (
         <OrganizerPanel
@@ -186,6 +208,6 @@ export default function TournamentPage({ id }: { id: string }) {
           Couldn't refresh, retrying.
         </p>
       )}
-    </>
+    </div>
   )
 }

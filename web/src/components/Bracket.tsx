@@ -78,7 +78,10 @@ function SlotRow({ label, isWinner, isLoser, pending, score }: { label: string; 
   const cls = 'slot' + (isWinner ? ' slot-winner' : '') + (isLoser ? ' slot-loser' : '') + (pending ? ' slot-pending' : '')
   return (
     <div className={cls}>
-      <span className="slot-name" title={pending ? fullLabel(label) : undefined}>{isWinner && <span className="sr-only">Winner: </span>}{label}</span>
+      <span className="slot-who">
+        {!pending && label !== 'Bye' && label !== '' && <span className="slot-badge" aria-hidden="true">{label.charAt(0).toUpperCase()}</span>}
+        <span className="slot-name" title={pending ? fullLabel(label) : undefined}>{isWinner && <span className="sr-only">Winner: </span>}{label}</span>
+      </span>
       {score !== undefined ? <span className="slot-score num">{score}</span> : isWinner ? <CheckIcon /> : null}
     </div>
   )
@@ -381,7 +384,7 @@ function BracketInner({ bracket }: { bracket: BracketView }) {
     <div>
       {champ && <ChampionBanner name={champ} />}
       <Standings bracket={bracket} />
-      {phone ? (
+      {phone && !tree ? (
         <RoundSwitcher groups={groups} totalRounds={totalRounds} nodeLabels={nodeLabels} thirdPlace={thirdPlace} />
       ) : tree ? (
         <TreeBracket tree={tree} totalRounds={totalRounds} nodeLabels={nodeLabels} />
@@ -401,7 +404,7 @@ function BracketInner({ bracket }: { bracket: BracketView }) {
         </div>
       </div>
       )}
-      {!phone && thirdPlace && (
+      {(!phone || tree) && thirdPlace && (
         <div className="third-place">
           <h3 className="bracket-round-heading">Third place</h3>
           <NodeCard node={thirdPlace} nodeLabels={nodeLabels} />

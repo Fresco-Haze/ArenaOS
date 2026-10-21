@@ -1,0 +1,131 @@
+/* ===== v0.12 tournament page ===== */
+.tp { max-width: 64rem; margin: 0 auto; }
+.tp-back {
+  display: inline-block;
+  margin-bottom: var(--space-3);
+  color: var(--muted);
+  font-size: var(--font-sm);
+  text-decoration: none;
+}
+.tp-back:hover { color: var(--text); }
+
+.tp-head {
+  margin-bottom: var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  overflow: hidden;
+}
+/* art slot: web/public/art/<game>.jpg */
+.tp-art {
+  position: relative;
+  height: 9rem;
+  background-color: var(--shell-search);
+  background-image: url('/art/default.jpg');
+  background-size: cover;
+  background-position: center;
+}
+.tp-art[data-game='eFootball'] { background-image: url('/art/efootball.jpg'); }
+.tp-art[data-game='PubgMobile'] { background-image: url('/art/pubg-mobile.jpg'); }
+.tp-art[data-game='CallOfDuty'] { background-image: url('/art/call-of-duty.jpg'); }
+.tp-status.badge {
+  position: absolute;
+  top: var(--space-3);
+  right: var(--space-3);
+  border-color: transparent;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.6875rem;
+}
+
+.tp-info { padding: var(--space-4); }
+.tp-title { margin: 0 0 var(--space-2); font-size: 1.75rem; line-height: 1.15; }
+.tp-meta, .tp-facts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  color: var(--muted);
+  font-size: var(--font-sm);
+}
+.tp-facts { margin-top: var(--space-3); justify-content: space-between; }
+.tp-meta li, .tp-facts li { display: flex; align-items: center; gap: var(--space-2); }
+.tp-prize { color: var(--text); font-weight: 600; }
+
+.tp .tabs { margin-bottom: var(--space-2); }
+.tp .tab { flex: 1; text-align: center; }
+.tp .tab[aria-selected='true'] {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+.tp-section-title { margin: var(--space-4) 0 var(--space-3); font-size: 1.125rem; }
+
+/* players list */
+.plist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  overflow: hidden;
+}
+.prow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--line);
+}
+.prow:last-child { border-bottom: 0; }
+.prow-rank { flex: none; width: 1.5rem; color: var(--muted); }
+.prow-avatar {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  background: var(--shell-pill);
+  font-weight: 700;
+}
+.prow-main { display: flex; flex-direction: column; min-width: 0; }
+.prow-name { font-weight: 600; }
+.prow-members { color: var(--muted); font-size: 0.8125rem; }
+
+/* bracket cards */
+.match-card { background: var(--surface); }
+.slot-who { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.slot-badge {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 1.25rem;
+  height: 1.25rem;
+  border-radius: 50%;
+  background: var(--shell-pill);
+  color: var(--text);
+  font-size: 0.6875rem;
+  font-weight: 700;
+}
+.slot-winner { background: rgba(11, 110, 245, 0.16); }
+.slot-pending { font-style: italic; }
+.match-live { border-color: var(--live); }
+
+/* organizer controls as a panel */
+.organizer-panel {
+  margin-top: var(--space-6);
+  padding: var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+.organizer-panel h2 { margin-top: 0; font-size: 1.125rem; }
+
+@media (max-width: 600px) {
+  .tp-title { font-size: 1.5rem; }
+  .tp-art { height: 7rem; }
+  .tp-facts { justify-content: flex-start; }
+}

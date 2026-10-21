@@ -1,18 +1,8 @@
 import { Link } from 'react-router'
 import { formatCardDate } from '../lib/cardDate'
 import { formatLabel, gameLabel, stateLabel } from '../model'
-import type { Tournament, TournamentState } from '../model'
-
-const statusClass: Record<TournamentState, string> = {
-  Draft: 'status-neutral',
-  Published: 'status-neutral',
-  RegistrationOpen: 'status-open',
-  RegistrationClosed: 'status-neutral',
-  InProgress: 'status-live',
-  Paused: 'status-warning',
-  Completed: 'status-done',
-  Cancelled: 'status-danger',
-}
+import type { Tournament } from '../model'
+import { statusClass } from '../badges'
 
 function FormatIcon() {
   return (
