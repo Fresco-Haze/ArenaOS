@@ -1,14 +1,34 @@
+import type { ReactNode } from 'react'
 import { Game, gameLabel } from '../model'
 import { PRIZE_MAX } from '../lib/details'
 import type { DetailsValues } from '../lib/details'
 
+// start is "YYYY-MM-DDTHH:mm" in the device's time zone ("" when unset).
+function splitStart(v: string): { date: string; time: string } {
+  const [date = '', time = ''] = v.split('T')
+  return { date, time }
+}
+
 export default function DetailsFields({
   values,
   onChange,
+  afterGame,
 }: {
   values: DetailsValues
   onChange: (next: DetailsValues) => void
+  afterGame?: ReactNode
 }) {
+  const { date, time } = splitStart(values.start)
+
+  function setStart(nextDate: string, nextTime: string) {
+    if (!nextDate && !nextTime) {
+      onChange({ ...values, start: '' })
+      return
+    }
+    // A date with no time starts at midnight; a time with no date is kept but incomplete.
+    onChange({ ...values, start: `${nextDate}T${nextDate ? nextTime || '00:00' : nextTime}` })
+  }
+
   return (
     <>
       <label>
@@ -20,14 +40,17 @@ export default function DetailsFields({
           ))}
         </select>
       </label>
-      <label>
-        Start date and time (optional)
-        <input
-          type="datetime-local"
-          value={values.start}
-          onChange={(e) => onChange({ ...values, start: e.target.value })}
-        />
-      </label>
+      {afterGame}
+      <div className="form-row-2">
+        <label>
+          Start date (optional)
+          <input type="date" value={date} onChange={(e) => setStart(e.target.value, time)} />
+        </label>
+        <label>
+          Start time
+          <input type="time" value={time} onChange={(e) => setStart(date, e.target.value)} />
+        </label>
+      </div>
       <p className="muted">Uses this device&rsquo;s time zone. Everyone sees it in their own.</p>
       <label>
         Prize (optional)

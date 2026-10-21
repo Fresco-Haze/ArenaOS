@@ -304,3 +304,7 @@
 @media (max-width: 860px) and (max-height: 700px) {
   .shell-top { position: static; }
 }
+
+@media (max-width: 860px) {
+  .shell-foot { display: none; }
+}

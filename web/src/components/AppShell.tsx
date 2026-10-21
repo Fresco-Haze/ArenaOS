@@ -190,7 +190,7 @@ function TabBar() {
       <TabLink to="/tournaments" icon="trophy">Tournaments</TabLink>
       <TabLink to="/me/new" icon="plus">Create</TabLink>
       <TabLink to="/teams/new" icon="teams">Teams</TabLink>
-      <TabLink to={user ? '/me' : '/login'} icon="players">{user ? 'Account' : 'Sign in'}</TabLink>
+      <TabLink to={user ? '/me' : '/login'} icon="players" end>{user ? 'Account' : 'Sign in'}</TabLink>
     </nav>
   )
 }

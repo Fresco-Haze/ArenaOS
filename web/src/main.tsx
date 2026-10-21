@@ -8,6 +8,7 @@ import './shell.css'
 import './cards.css'
 import './home.css'
 import './tournament.css'
+import './forms.css'
 import App from './App'
 import { AuthProvider } from './auth/AuthProvider'
 

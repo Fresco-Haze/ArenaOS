@@ -1,0 +1,19 @@
+/* ===== v0.12 create and edit forms ===== */
+.create-form { gap: var(--space-4); }
+.form-section-title { margin: var(--space-2) 0 0; font-size: 1.0625rem; }
+.create-form label { font-size: var(--font-sm); font-weight: 600; }
+.create-form input:not([type='radio']):not([type='checkbox']),
+.create-form select {
+  background: var(--shell-search);
+  font-size: var(--font-base);
+  font-weight: 400;
+}
+.create-form .req { color: var(--accent); }
+.form-row-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+}
+.form-row-2 label { min-width: 0; }
+.form-actions-full { flex-direction: column; }
+.form-actions-full button { width: 100%; }

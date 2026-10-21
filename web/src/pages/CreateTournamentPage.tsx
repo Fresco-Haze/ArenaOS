@@ -9,6 +9,7 @@ import { emptyDetails, toPayload } from '../lib/details'
 import type { DetailsValues } from '../lib/details'
 
 type Field = 'name' | 'organizer' | 'maxParticipants' | 'prize'
+type Format = 'SingleElimination' | 'DoubleElimination' | 'RoundRobin'
 
 function fieldOf(err: ApiError): Field | null {
   const d = err.details
@@ -18,11 +19,7 @@ function fieldOf(err: ApiError): Field | null {
   return null
 }
 
-function matchCountLine(
-  format: 'SingleElimination' | 'DoubleElimination' | 'RoundRobin',
-  n: number,
-  unit: string,
-): string | null {
+function matchCountLine(format: Format, n: number, unit: string): string | null {
   if (!Number.isInteger(n) || n < 2 || n > 512) return null
   if (format === 'SingleElimination') {
     if (n < 4) return null
@@ -32,6 +29,14 @@ function matchCountLine(
     return `With ${n} ${unit}: ${2 * n - 2} to ${2 * n - 1} matches in total (one extra only if a reset match is needed).`
   }
   return `With ${n} ${unit}: ${(n * (n - 1)) / 2} matches in total.`
+}
+
+const FORMAT_HINT: Record<Format, string> = {
+  SingleElimination: 'One loss and you are out.',
+  DoubleElimination:
+    'A first loss sends you to the losers bracket, so everyone plays at least twice. If the losers-bracket winner wins the grand final, one extra match settles it.',
+  RoundRobin:
+    'Everyone plays everyone once. Points decide the table: 3 for a win, 1 for a draw. Ties go to goal difference, then goals scored.',
 }
 
 export default function CreateTournamentPage() {
@@ -44,13 +49,15 @@ export default function CreateTournamentPage() {
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<Field, string>>>({})
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const [format, setFormat] = useState<'SingleElimination' | 'DoubleElimination' | 'RoundRobin'>('SingleElimination')
+  const [format, setFormat] = useState<Format>('SingleElimination')
   const [participantMode, setParticipantMode] = useState<'IndividualOnly' | 'SquadOnly'>('IndividualOnly')
   const [details, setDetails] = useState<DetailsValues>(emptyDetails)
 
   // ProtectedRoute guarantees this, but keep TypeScript honest.
   if (!user) return null
   const username = user.username
+  const unit = participantMode === 'SquadOnly' ? 'teams' : 'players'
+  const matchLine = matchCountLine(format, Number(maxParticipants), unit)
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
@@ -80,7 +87,7 @@ export default function CreateTournamentPage() {
       setBusy(false)
       if (err instanceof ApiError) {
         const field = fieldOf(err)
-        if (field) setFieldErrors({ [field]: err.message })
+        if (field && field !== 'organizer') setFieldErrors({ [field]: err.message })
         else setError(err.message)
       } else {
         setError('Could not reach the server')
@@ -91,12 +98,15 @@ export default function CreateTournamentPage() {
   return (
     <>
       <h1>Create tournament</h1>
-      <form onSubmit={onSubmit} className="form">
+      <form onSubmit={onSubmit} className="form create-form">
+        <h2 className="form-section-title">Basic information</h2>
+
         <label>
-          Name
+          <span>Tournament name <span className="req" aria-hidden="true">*</span></span>
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
+            placeholder="e.g. Rising Stars Cup"
             autoFocus
             required
           />
@@ -105,51 +115,29 @@ export default function CreateTournamentPage() {
           )}
         </label>
 
-        <label>
-          Organizer
-          <input value={user.username} disabled />
-        </label>
-        {fieldErrors.organizer && (
-          <span role="alert" className="form-error">{fieldErrors.organizer}</span>
+        <DetailsFields
+          values={details}
+          onChange={setDetails}
+          afterGame={
+            <>
+              <label>
+                Format
+                <select value={format} onChange={(e) => setFormat(e.target.value as Format)}>
+                  <option value="SingleElimination">Single elimination</option>
+                  <option value="DoubleElimination">Double elimination</option>
+                  <option value="RoundRobin">Round robin</option>
+                </select>
+              </label>
+              <p className="muted">{FORMAT_HINT[format]}</p>
+            </>
+          }
+        />
+        {fieldErrors.prize && (
+          <span role="alert" className="form-error">{fieldErrors.prize}</span>
         )}
 
-        <fieldset>
-          <legend>Format</legend>
-          <label>
-            <input
-              type="radio"
-              name="format"
-              checked={format === 'SingleElimination'}
-              onChange={() => setFormat('SingleElimination')}
-            />
-            Single elimination
-          </label>
-          <label>
-            <input
-              type="radio"
-              name="format"
-              checked={format === 'DoubleElimination'}
-              onChange={() => setFormat('DoubleElimination')}
-            />
-            Double elimination
-          </label>
-          <label>
-            <input
-              type="radio"
-              name="format"
-              checked={format === 'RoundRobin'}
-              onChange={() => setFormat('RoundRobin')}
-            />
-            Round robin
-          </label>
-          <p className="muted">
-            {format === 'DoubleElimination'
-              ? 'A first loss sends you to the losers bracket, so everyone plays at least twice. If the losers-bracket winner wins the grand final, one extra match settles it.'
-              : format === 'RoundRobin'
-              ? 'Everyone plays everyone once. Points decide the table: 3 for a win, 1 for a draw. Ties go to goal difference, then goals scored.'
-              : 'One loss and you are out.'}
-          </p>
-        </fieldset>
+        <h2 className="form-section-title">Participants and visibility</h2>
+
         <fieldset>
           <legend>Who is competing?</legend>
           <label>
@@ -172,6 +160,7 @@ export default function CreateTournamentPage() {
           </label>
           <p className="muted">Can't be changed after the tournament is created.</p>
         </fieldset>
+
         <fieldset>
           <legend>Visibility</legend>
           <label>
@@ -194,11 +183,6 @@ export default function CreateTournamentPage() {
           </label>
         </fieldset>
 
-        <DetailsFields values={details} onChange={setDetails} />
-        {fieldErrors.prize && (
-          <span role="alert" className="form-error">{fieldErrors.prize}</span>
-        )}
-
         <label>
           Maximum participants
           <input
@@ -214,23 +198,19 @@ export default function CreateTournamentPage() {
         </label>
         <p className="muted">
           {format === 'SingleElimination'
-            ? `A third-place match is always played, so 1st to 4th are decided (needs 4 or more ${participantMode === 'SquadOnly' ? 'teams' : 'players'}).`
+            ? `A third-place match is always played, so 1st to 4th are decided (needs 4 or more ${unit}).`
             : format === 'DoubleElimination'
             ? 'Double elimination decides the top four by itself.'
             : 'Round robin ranks everyone by points, then goal difference, then goals scored.'}
         </p>
-        {matchCountLine(format, Number(maxParticipants), participantMode === 'SquadOnly' ? 'teams' : 'players') && (
-          <p className="muted">
-            {matchCountLine(format, Number(maxParticipants), participantMode === 'SquadOnly' ? 'teams' : 'players')}
-          </p>
-        )}
+        {matchLine && <p className="muted">{matchLine}</p>}
 
         {error && <p role="alert" className="form-error">{error}</p>}
-        <div className="form-actions">
-        <button type="submit" className="btn-primary" disabled={busy}>
-          {busy ? 'Creating' : 'Create tournament'}
-        </button>
-        <button type="button" onClick={() => navigate('/me')}>Cancel</button>
+        <div className="form-actions form-actions-full">
+          <button type="submit" className="btn-primary" disabled={busy}>
+            {busy ? 'Creating' : 'Create tournament'}
+          </button>
+          <button type="button" onClick={() => navigate('/me')}>Cancel</button>
         </div>
       </form>
     </>
