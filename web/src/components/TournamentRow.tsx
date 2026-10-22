@@ -1,14 +1,12 @@
 import { Link } from 'react-router'
 import { statusClass } from '../badges'
 import { formatCardDate } from '../lib/cardDate'
-import { formatKes } from '../lib/money'
-import { formatLabel, gameLabel, stateLabel } from '../model'
+import { formatLabel, stateLabel } from '../model'
 import type { Tournament } from '../model'
-import { CalendarIcon, FormatIcon, PeopleIcon, TrophyIcon } from './MetaIcons'
+import { CalendarIcon, FormatIcon, PeopleIcon } from './MetaIcons'
 
 export default function TournamentRow({ tournament: t }: { tournament: Tournament }) {
   const mode = t.participantMode === 'SquadOnly' ? 'Squad' : '1v1'
-  const gameName = t.game && t.game !== 'Other' ? gameLabel[t.game] : null
   const when = t.startTime ? formatCardDate(t.startTime) : ''
   return (
     <li className="trow">
@@ -21,13 +19,8 @@ export default function TournamentRow({ tournament: t }: { tournament: Tournamen
           <span className={'badge ' + statusClass[t.state]}>{stateLabel[t.state]}</span>
         </div>
         <ul className="trow-meta">
-          <li>
-            <FormatIcon />
-            {gameName && <>{gameName} &bull; </>}
-            {mode} &bull; {formatLabel[t.format]}
-          </li>
+          <li><FormatIcon />{mode} &bull; {formatLabel[t.format]}</li>
           {when && <li><CalendarIcon />{when}</li>}
-          {t.prize != null && <li className="trow-prize"><TrophyIcon />{formatKes(t.prize)}</li>}
           {t.registeredCount != null && (
             <li><PeopleIcon />{t.registeredCount}/{t.maxParticipants} registered</li>
           )}
