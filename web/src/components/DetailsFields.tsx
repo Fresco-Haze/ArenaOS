@@ -26,8 +26,8 @@ export default function DetailsFields({
       onChange({ ...values, start: '' })
       return
     }
-    // A date with no time starts at midnight; a time with no date is kept but incomplete.
-    onChange({ ...values, start: `${nextDate}T${nextDate ? nextTime || '00:00' : nextTime}` })
+    // A date with no time starts at 6:00 PM; a time with no date is kept but incomplete.
+    onChange({ ...values, start: `${nextDate}T${nextDate ? nextTime || '18:00' : nextTime}` })
   }
 
   return (
