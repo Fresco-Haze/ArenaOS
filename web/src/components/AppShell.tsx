@@ -96,6 +96,7 @@ function UserMenu() {
       </button>
       {open && (
         <div className="user-dropdown">
+          <Link to="/profile" className="menu-item" onClick={() => setOpen(false)}>Profile</Link>
           <Link to="/me" className="menu-item" onClick={() => setOpen(false)}>My tournaments</Link>
           <button
             type="button"
@@ -188,13 +189,12 @@ function TabBar() {
     <nav className="shell-tabbar" aria-label="Primary">
       <TabLink to="/" icon="home" end>Home</TabLink>
       <TabLink to="/tournaments" icon="trophy">Tournaments</TabLink>
-      <TabLink to="/me/new" icon="plus">Create</TabLink>
+      <TabLink to="/me" icon="list" end>My Tournaments</TabLink>
       <TabLink to="/teams/new" icon="teams">Teams</TabLink>
-      <TabLink to={user ? '/me' : '/login'} icon="players" end>{user ? 'Account' : 'Sign in'}</TabLink>
+      <TabLink to={user ? '/profile' : '/login'} icon="players" end>{user ? 'Profile' : 'Sign in'}</TabLink>
     </nav>
   )
 }
-
 export default function AppShell({ children }: { children: ReactNode }) {
   const [searchOpen, setSearchOpen] = useState(false)
   useEffect(() => {

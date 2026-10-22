@@ -1,41 +1,25 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Link } from 'react-router'
-import { api, ApiError } from '../api'
+import { useApi } from '../hooks/useApi'
 import { TournamentList } from '../model'
-import type { Tournament } from '../model'
 
 import EmptyState from '../components/EmptyState'
 import ErrorBanner from '../components/ErrorBanner'
 import LoadingBlock from '../components/LoadingBlock'
 import PageHeader from '../components/PageHeader'
-import TournamentCard from '../components/TournamentCard'
+import Tabs from '../components/Tabs'
+import TournamentRow from '../components/TournamentRow'
+
+type TabId = 'created' | 'completed'
 
 export default function MyTournamentsPage() {
-  const [items, setItems] = useState<Tournament[] | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [attempt, setAttempt] = useState(0)
+  const list = useApi('/me/tournaments', TournamentList)
+  const [tab, setTab] = useState<TabId>('created')
 
-  useEffect(() => {
-    let cancelled = false
-    api('/me/tournaments', TournamentList)
-      .then((d) => {
-        if (!cancelled) setItems(d.tournaments)
-      })
-      .catch((e: unknown) => {
-        if (!cancelled) {
-          setError(e instanceof ApiError ? e.message : 'Could not reach the server')
-        }
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [attempt])
-
-  function retry() {
-    setError(null)
-    setItems(null)
-    setAttempt((n) => n + 1)
-  }
+  const items = list.data ? list.data.tournaments : null
+  const created = items ? items.filter((t) => t.state !== 'Completed') : []
+  const completed = items ? items.filter((t) => t.state === 'Completed') : []
+  const shown = tab === 'created' ? created : completed
 
   const createLink = (label: string) => (
     <Link to="/me/new" className="button-link btn-primary">
@@ -44,26 +28,43 @@ export default function MyTournamentsPage() {
   )
 
   return (
-    <>
+    <div className="mt">
       <PageHeader
         title="My tournaments"
         actions={items !== null && items.length === 0 ? undefined : createLink('Create tournament')}
       />
-      {error ? (
-        <ErrorBanner message={error} onRetry={retry} />
-      ) : items === null ? (
-        <LoadingBlock label="Loading tournaments" />
-      ) : items.length === 0 ? (
-        <EmptyState title="No tournaments yet" action={createLink('Create your first tournament')}>
-          Tournaments you create appear here.
-        </EmptyState>
-      ) : (
-        <ul className="tcards">
-          {items.map((t) => (
-            <TournamentCard key={t.tournamentId} tournament={t} />
-          ))}
-        </ul>
-      )}
-    </>
+      <Tabs<TabId>
+        label="My tournaments"
+        active={tab}
+        onChange={setTab}
+        tabs={[
+          { id: 'created', label: 'Created', ...(items ? { count: created.length } : {}) },
+          { id: 'completed', label: 'Completed', ...(items ? { count: completed.length } : {}) },
+        ]}
+      />
+      <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`} className="mt-panel">
+        {list.error ? (
+          <ErrorBanner message={list.error} onRetry={list.retry} />
+        ) : items === null ? (
+          <LoadingBlock label="Loading tournaments" />
+        ) : shown.length === 0 ? (
+          tab === 'created' ? (
+            <EmptyState title="No tournaments yet" action={createLink('Create your first tournament')}>
+              Tournaments you create appear here.
+            </EmptyState>
+          ) : (
+            <EmptyState title="Nothing completed yet">
+              Finished tournaments show up here.
+            </EmptyState>
+          )
+        ) : (
+          <ul className="trows">
+            {shown.map((t) => (
+              <TournamentRow key={t.tournamentId} tournament={t} />
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
   )
 }

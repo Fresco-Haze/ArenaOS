@@ -2,6 +2,7 @@ import { Link, Route, Routes, useParams } from 'react-router'
 import { useAuth } from './auth/context'
 import HomePage from './pages/HomePage'
 import TournamentsPage from './pages/TournamentsPage'
+import ProfilePage from './pages/ProfilePage'
 import LoginPage from './pages/LoginPage'
 import TournamentPage from './pages/TournamentPage'
 import RegisterPage from './pages/RegisterPage'
@@ -49,6 +50,14 @@ export default function App() {
       <Routes>
           <Route path="/" element={<HomePage />} />
           <Route path="/tournaments" element={<TournamentsPage />} />
+          <Route
+            path="/profile"
+            element={
+              <ProtectedRoute>
+                <ProfilePage />
+              </ProtectedRoute>
+            }
+          />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
           <Route

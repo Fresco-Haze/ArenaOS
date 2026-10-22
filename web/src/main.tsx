@@ -9,6 +9,7 @@ import './cards.css'
 import './home.css'
 import './tournament.css'
 import './forms.css'
+import './lists.css'
 import App from './App'
 import { AuthProvider } from './auth/AuthProvider'
 
