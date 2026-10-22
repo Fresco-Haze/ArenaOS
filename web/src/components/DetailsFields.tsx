@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { Game, gameLabel } from '../model'
-import { PRIZE_MAX } from '../lib/details'
+import { prizeError } from '../lib/details'
 import type { DetailsValues } from '../lib/details'
 
 // start is "YYYY-MM-DDTHH:mm" in the device's time zone ("" when unset).
@@ -19,6 +19,7 @@ export default function DetailsFields({
   afterGame?: ReactNode
 }) {
   const { date, time } = splitStart(values.start)
+  const prizeProblem = values.prize.trim() === '' ? null : prizeError(values.prize)
 
   function setStart(nextDate: string, nextTime: string) {
     if (!nextDate && !nextTime) {
@@ -53,14 +54,17 @@ export default function DetailsFields({
       </div>
       <p className="muted">Uses this device&rsquo;s time zone. Everyone sees it in their own.</p>
       <label>
-        Prize (optional)
-        <input
-          value={values.prize}
-          maxLength={PRIZE_MAX}
-          placeholder="For example: KSh 50,000 and a trophy"
-          onChange={(e) => onChange({ ...values, prize: e.target.value })}
-        />
-        <span className="muted">{values.prize.length}/{PRIZE_MAX}</span>
+        Prize pool (optional)
+        <span className="kes-input">
+          <span className="kes-prefix" aria-hidden="true">KSh</span>
+          <input
+            inputMode="numeric"
+            value={values.prize}
+            placeholder="e.g. 50,000"
+            onChange={(e) => onChange({ ...values, prize: e.target.value })}
+          />
+        </span>
+        {prizeProblem && <span role="alert" className="form-error">{prizeProblem}</span>}
       </label>
     </>
   )

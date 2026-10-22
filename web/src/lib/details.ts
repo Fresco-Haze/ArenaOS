@@ -1,15 +1,29 @@
 import { Game } from '../model'
 import type { Tournament } from '../model'
 
-export const PRIZE_MAX = 100
+export const PRIZE_MAX = 1000000000
 
 // What the form holds: strings only. `start` is a datetime-local value in the device's time zone.
 export type DetailsValues = { game: string; start: string; prize: string }
-export type DetailsPayload = { game: Game | null; startTime: string | null; prize: string | null }
+export type DetailsPayload = { game: Game | null; startTime: string | null; prize: number | null }
 
 export const emptyDetails: DetailsValues = { game: '', start: '', prize: '' }
 
 const pad = (n: number) => ('0' + n).slice(-2)
+
+// '' -> null (no prize); '50,000' -> 50000; 0 -> null; anything else -> undefined (invalid).
+export function parsePrize(raw: string): number | null | undefined {
+  const s = raw.replace(/[\s,]/g, '')
+  if (s === '') return null
+  if (!/^\d+$/.test(s)) return undefined
+  const n = Number(s)
+  if (n > PRIZE_MAX) return undefined
+  return n === 0 ? null : n
+}
+
+export function prizeError(raw: string): string | null {
+  return parsePrize(raw) === undefined ? 'Enter a whole number of KSh, up to 1,000,000,000.' : null
+}
 
 // "2026-11-08T19:00" (device time zone) -> "2026-11-08T16:00:00Z" (UTC, whole seconds)
 export function localInputToIso(value: string): string | null {
@@ -27,20 +41,23 @@ export function isoToLocalInput(value: string | null | undefined): string {
 }
 
 export function detailsFromTournament(t: Tournament): DetailsValues {
-  return { game: t.game ?? '', start: isoToLocalInput(t.startTime), prize: t.prize ?? '' }
+  return {
+    game: t.game ?? '',
+    start: isoToLocalInput(t.startTime),
+    prize: t.prize != null ? String(t.prize) : '',
+  }
 }
 
 // If the start field still shows what the server has, send the server's exact value back
 // (the picker has minute precision, the server may hold seconds).
 export function toPayload(v: DetailsValues, original?: Tournament): DetailsPayload {
   const game = Game.safeParse(v.game)
-  const prize = v.prize.trim()
   let startTime = localInputToIso(v.start)
   if (original?.startTime && v.start === isoToLocalInput(original.startTime)) startTime = original.startTime
   return {
     game: game.success ? game.data : null,
     startTime,
-    prize: prize === '' ? null : prize,
+    prize: parsePrize(v.prize) ?? null,
   }
 }
 

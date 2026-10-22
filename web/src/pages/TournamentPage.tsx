@@ -7,6 +7,7 @@ import { useTournament } from '../hooks/useTournament'
 
 import { participantName } from '../lib/participants'
 import { formatCardDate } from '../lib/cardDate'
+import { formatKes } from '../lib/money'
 import { formatLabel, gameLabel, stateLabel } from '../model'
 
 import Bracket from '../components/Bracket'
@@ -115,10 +116,10 @@ export default function TournamentPage({ id }: { id: string }) {
             <li>Up to {t.maxParticipants} {unit}</li>
             <li>Organized by {t.organizer}</li>
           </ul>
-          {(when || t.prize) && (
+          {(when || t.prize != null) && (
             <ul className="tp-facts">
               {when && <li><CalendarIcon />{when}</li>}
-              {t.prize && <li className="tp-prize"><TrophyIcon />{t.prize}</li>}
+              {t.prize != null && <li className="tp-prize"><TrophyIcon />{formatKes(t.prize)}</li>}
             </ul>
           )}
         </div>

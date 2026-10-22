@@ -1,5 +1,6 @@
 import { Link } from 'react-router'
 import { formatCardDate } from '../lib/cardDate'
+import { formatKes } from '../lib/money'
 import { formatLabel, gameLabel, stateLabel } from '../model'
 import type { Tournament } from '../model'
 import { statusClass } from '../badges'
@@ -57,7 +58,7 @@ export default function TournamentCard({ tournament: t, showOrganizer = false }:
         <ul className="tcard-meta">
           <li><FormatIcon />{mode}{' \u2022 '}{formatLabel[t.format]}</li>
           {when && <li><CalendarIcon />{when}</li>}
-          {t.prize && <li className="tcard-prize"><TrophyIcon />{t.prize}</li>}
+          {t.prize != null && <li className="tcard-prize"><TrophyIcon />{formatKes(t.prize)}</li>}
           {t.registeredCount != null && (
             <li><PeopleIcon />{t.registeredCount}/{t.maxParticipants} registered</li>
           )}

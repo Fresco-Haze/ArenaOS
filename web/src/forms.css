@@ -96,3 +96,17 @@
   text-decoration: none;
 }
 .auth-back:hover { color: var(--text); }
+
+/* KSh prize field */
+.kes-input { position: relative; display: block; }
+.kes-prefix {
+  position: absolute;
+  left: var(--space-3);
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--muted);
+  font-size: var(--font-sm);
+  font-weight: 600;
+  pointer-events: none;
+}
+.kes-input input { width: 100%; padding-left: 3.25rem; }

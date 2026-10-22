@@ -30,7 +30,7 @@ export const Tournament = z.object({
   participantMode: ParticipantMode,
   game: Game.nullish(),
   startTime: z.string().nullish(),
-  prize: z.string().nullish(),
+  prize: z.number().nullish(),
   registeredCount: z.number().nullish(),
   bracketId: z.number().nullable(),
 })
@@ -173,6 +173,7 @@ export const PublicStatsView = z.object({
   activeTournaments: z.number(),
   players: z.number(),
   teams: z.number(),
+  prizePool: z.number(),
   byGame: z.array(z.object({ game: Game, count: z.number() })),
 })
 export type PublicStatsView = z.infer<typeof PublicStatsView>

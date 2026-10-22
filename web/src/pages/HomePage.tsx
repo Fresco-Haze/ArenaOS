@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import { Link } from 'react-router'
 import { useApi } from '../hooks/useApi'
 import { startsIn } from '../lib/cardDate'
+import { formatKes } from '../lib/money'
 import { gameLabel, PublicStatsView, TournamentList } from '../model'
 import type { Game } from '../model'
 import EmptyState from '../components/EmptyState'
@@ -53,13 +54,15 @@ function Hero() {
   )
 }
 
-function BandItem({ icon, label, value }: { icon: IconName; label: string; value: number }) {
+const num = (n: number) => n.toLocaleString('en-US')
+
+function BandItem({ icon, label, value }: { icon: IconName; label: string; value: string }) {
   return (
     <li className="band-item">
       <span className="band-icon"><Svg name={icon} /></span>
       <div>
         <p className="band-label">{label}</p>
-        <p className="band-value num">{value.toLocaleString('en-US')}</p>
+        <p className="band-value num">{value}</p>
       </div>
     </li>
   )
@@ -211,10 +214,10 @@ export default function HomePage() {
             <LoadingBlock label="Loading totals" />
           ) : (
             <ul className="band-list">
-              <BandItem icon="trophy" label="Total Tournaments" value={s.tournaments} />
-              <BandItem icon="pulse" label="Active Tournaments" value={s.activeTournaments} />
-              <BandItem icon="players" label="Players" value={s.players} />
-              <BandItem icon="teams" label="Registered Teams" value={s.teams} />
+              <BandItem icon="trophy" label="Total Tournaments" value={num(s.tournaments)} />
+              <BandItem icon="players" label="Players" value={num(s.players)} />
+              <BandItem icon="teams" label="Registered Teams" value={num(s.teams)} />
+              <BandItem icon="trophy" label="Total Prize Pool" value={formatKes(s.prizePool)} />
             </ul>
           )}
         </section>
