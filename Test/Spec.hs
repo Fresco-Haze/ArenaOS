@@ -290,6 +290,7 @@ spec = before_ resetTestDb $ do
   publicFilterSpec
   upcomingFilterSpec
   prizePoolSpec
+  descriptionSpec
   describe "Tournament Lifecycle (4-participant golden scenario)" $
     it "runs the full pipeline from creation to completion" $ do
       result <- runSQLiteM testDbPath $ do
@@ -1419,7 +1420,7 @@ spec = before_ resetTestDb $ do
             , tournamentVisibility = Public
             , tournamentMaxParticipants = 2
             , tournamentBracket = Nothing
-            , tournamentOwner = UserId 1, tournamentThirdPlaceMatch = False, tournamentParticipantMode = IndividualOnly, tournamentGame = Nothing, tournamentStartTime = Nothing, tournamentPrize = Nothing
+            , tournamentOwner = UserId 1, tournamentThirdPlaceMatch = False, tournamentParticipantMode = IndividualOnly, tournamentGame = Nothing, tournamentStartTime = Nothing, tournamentPrize = Nothing, tournamentDescription = Nothing
             }
           tournaments = map mkT [Draft, Draft, Published, InProgress, Completed, Completed, Completed, Cancelled]
           overview = buildTournamentOverview tournaments
@@ -6340,7 +6341,7 @@ spec = before_ resetTestDb $ do
           , tournamentOrganizer = OrganizerName "x", tournamentFormat = SingleElimination
           , tournamentState = st, tournamentVisibility = vis
           , tournamentMaxParticipants = 2, tournamentBracket = Nothing
-          , tournamentOwner = UserId 1, tournamentThirdPlaceMatch = False, tournamentParticipantMode = IndividualOnly, tournamentGame = Nothing, tournamentStartTime = Nothing, tournamentPrize = Nothing }
+          , tournamentOwner = UserId 1, tournamentThirdPlaceMatch = False, tournamentParticipantMode = IndividualOnly, tournamentGame = Nothing, tournamentStartTime = Nothing, tournamentPrize = Nothing, tournamentDescription = Nothing }
         owner    = Just (UserId 1)
         stranger = Just (UserId 2)
 
@@ -6396,7 +6397,7 @@ spec = before_ resetTestDb $ do
           , tournamentOrganizer = OrganizerName "x", tournamentFormat = SingleElimination
           , tournamentState = st, tournamentVisibility = vis
           , tournamentMaxParticipants = 2, tournamentBracket = Nothing
-          , tournamentOwner = UserId 1, tournamentThirdPlaceMatch = False, tournamentParticipantMode = IndividualOnly, tournamentGame = Nothing, tournamentStartTime = Nothing, tournamentPrize = Nothing }
+          , tournamentOwner = UserId 1, tournamentThirdPlaceMatch = False, tournamentParticipantMode = IndividualOnly, tournamentGame = Nothing, tournamentStartTime = Nothing, tournamentPrize = Nothing, tournamentDescription = Nothing }
         ids = map (unTournamentId . tournamentId)
 
     it "keeps only Public tournaments past Draft, newest first" $
@@ -8240,7 +8241,7 @@ dtTime :: UTCTime
 dtTime = UTCTime (fromGregorian 2026 12 12) 64800
 
 dtDetails :: TournamentDetails
-dtDetails = TournamentDetails (Just GameEFootball) (Just dtTime) (Just 50000)
+dtDetails = TournamentDetails (Just GameEFootball) (Just dtTime) (Just 50000) Nothing
 
 dtCreate :: UserId -> String -> TournamentDetails -> SQLiteM TournamentId
 dtCreate owner name d = unwrap =<< CTD.createTournamentWithDetails (dtNew owner name) d
@@ -8317,8 +8318,8 @@ detailsSpec = describe "Tournament details: game, start time, prize in KSh (v0.1
     result <- runSQLiteM testDbPath $ do
       setupSchema
       owner <- createTestUser "dt-owner-6"
-      tid <- dtCreate owner "Edit Cup" (TournamentDetails (Just GameEFootball) Nothing (Just 10000))
-      r <- UTD.updateTournamentDetails owner tid (TournamentDetails (Just GameEFootball) (Just dtTime) (Just 20000))
+      tid <- dtCreate owner "Edit Cup" (TournamentDetails (Just GameEFootball) Nothing (Just 10000) Nothing)
+      r <- UTD.updateTournamentDetails owner tid (TournamentDetails (Just GameEFootball) (Just dtTime) (Just 20000) Nothing)
       t <- Repo.getTournament tid
       changed <- dtChanged tid
       pure (r, t, changed)
@@ -8576,7 +8577,7 @@ plT i name g = Tournament
   , tournamentMaxParticipants = 2, tournamentBracket = Nothing
   , tournamentOwner = UserId 1, tournamentThirdPlaceMatch = False
   , tournamentParticipantMode = IndividualOnly
-  , tournamentGame = g, tournamentStartTime = Nothing, tournamentPrize = Nothing }
+  , tournamentGame = g, tournamentStartTime = Nothing, tournamentPrize = Nothing, tournamentDescription = Nothing }
 
 -- ids 1..60; id 3 is "Zebra Open" (Call of Duty); other even ids are eFootball
 plAll :: [Tournament]
@@ -8701,3 +8702,110 @@ prizePoolSpec = describe "Prize pool stat (v0.12)" $ do
     case result of
       Left err -> expectationFailure (show err)
       Right s  -> statsPrizePool s `shouldBe` 70000
+
+-- ---------------------------------------------------------------------
+-- v0.12: tournament description.
+-- ---------------------------------------------------------------------
+
+descriptionSpec :: Spec
+descriptionSpec = describe "Tournament description (v0.12)" $ do
+
+  it "stores a trimmed description and reads it back" $ do
+    result <- runSQLiteM testDbPath $ do
+      setupSchema
+      owner <- createTestUser "ds-owner-1"
+      tid <- dtCreate owner "Described Cup" (noDetails { detailsDescription = Just "  Bring your own controller.  " })
+      Repo.getTournament tid
+    case result of
+      Left err -> expectationFailure (show err)
+      Right t  -> tournamentDescription t `shouldBe` Just "Bring your own controller."
+
+  it "treats a blank description as none" $ do
+    result <- runSQLiteM testDbPath $ do
+      setupSchema
+      owner <- createTestUser "ds-owner-2"
+      tid <- dtCreate owner "Blank Desc Cup" (noDetails { detailsDescription = Just "   " })
+      Repo.getTournament tid
+    case result of
+      Left err -> expectationFailure (show err)
+      Right t  -> tournamentDescription t `shouldBe` Nothing
+
+  it "accepts 500 characters and rejects 501, creating nothing" $ do
+    result <- runSQLiteM testDbPath $ do
+      setupSchema
+      owner <- createTestUser "ds-owner-3"
+      ok  <- CTD.createTournamentWithDetails (dtNew owner "Ok") (noDetails { detailsDescription = Just (replicate 500 'x') })
+      bad <- CTD.createTournamentWithDetails (dtNew owner "Bad") (noDetails { detailsDescription = Just (replicate 501 'x') })
+      everything <- Repo.listAllTournaments
+      pure (isRight ok, bad, map tournamentName everything)
+    case result of
+      Left err -> expectationFailure (show err)
+      Right (okRight, bad, names) -> do
+        okRight `shouldBe` True
+        bad `shouldBe` Left (CTD.CreateInvalidDetails (DV.DescriptionTooLong 501))
+        names `shouldBe` [TournamentName "Ok"]
+
+  it "update changes the description and logs exactly one history entry" $ do
+    result <- runSQLiteM testDbPath $ do
+      setupSchema
+      owner <- createTestUser "ds-owner-4"
+      tid <- dtCreate owner "Edit Desc Cup" dtDetails
+      r <- UTD.updateTournamentDetails owner tid (dtDetails { detailsDescription = Just "New rules" })
+      t <- Repo.getTournament tid
+      changed <- dtChanged tid
+      pure (r, t, changed)
+    case result of
+      Left err -> expectationFailure (show err)
+      Right (r, t, changed) -> do
+        r `shouldBe` Right ()
+        tournamentDescription t `shouldBe` Just "New rules"
+        changed `shouldBe` [TournamentHistory.FieldDescription]
+
+  it "an update without a description clears it" $ do
+    result <- runSQLiteM testDbPath $ do
+      setupSchema
+      owner <- createTestUser "ds-owner-5"
+      tid <- dtCreate owner "Clear Desc Cup" (dtDetails { detailsDescription = Just "Old text" })
+      r <- UTD.updateTournamentDetails owner tid dtDetails
+      t <- Repo.getTournament tid
+      changed <- dtChanged tid
+      pure (r, t, changed)
+    case result of
+      Left err -> expectationFailure (show err)
+      Right (r, t, changed) -> do
+        r `shouldBe` Right ()
+        tournamentDescription t `shouldBe` Nothing
+        changed `shouldBe` [TournamentHistory.FieldDescription]
+
+  it "saveTournament and publishing keep the description" $ do
+    result <- runSQLiteM testDbPath $ do
+      setupSchema
+      owner <- createTestUser "ds-owner-6"
+      tid <- dtCreate owner "Keep Desc Cup" (dtDetails { detailsDescription = Just "Keep me" })
+      t0 <- Repo.getTournament tid
+      Repo.saveTournament t0
+      _ <- unwrap =<< publishTournament owner tid
+      t1 <- Repo.getTournament tid
+      pure (t0, t1)
+    case result of
+      Left err -> expectationFailure (show err)
+      Right (t0, t1) -> do
+        tournamentDescription t0 `shouldBe` Just "Keep me"
+        tournamentDescription t1 `shouldBe` Just "Keep me"
+
+  it "migrates a database without the description column and keeps its other data" $ do
+    let path = "test/arenaos-migrate-test.db"
+    exists <- doesFileExist path
+    if exists then removeFile path else pure ()
+    conn <- SQLite.open path
+    SQLite.execute_ conn "CREATE TABLE tournaments ( id INTEGER PRIMARY KEY, name TEXT NOT NULL, organizer_name TEXT NOT NULL, owner_id INTEGER NOT NULL, format TEXT NOT NULL, state TEXT NOT NULL, visibility TEXT NOT NULL, third_place_match INTEGER NOT NULL DEFAULT 0, participant_mode TEXT NOT NULL DEFAULT 'IndividualOnly', max_participants INTEGER NOT NULL, bracket_id INTEGER, game TEXT, start_time TEXT, prize TEXT, prize_kes INTEGER )"
+    SQLite.execute_ conn "INSERT INTO tournaments (id, name, organizer_name, owner_id, format, state, visibility, max_participants, game, prize_kes) VALUES (1, 'Kept Cup', 'Org', 1, 'SingleElimination', 'Draft', 'Public', 4, 'eFootball', 5000)"
+    initializeSchema conn
+    SQLite.close conn
+    result <- runSQLiteM path (Repo.getTournament (TournamentId 1))
+    removeFile path
+    case result of
+      Left err -> expectationFailure (show err)
+      Right t -> do
+        dtTriple t `shouldBe` (Just GameEFootball, Nothing, Just 5000)
+        tournamentDescription t `shouldBe` Nothing

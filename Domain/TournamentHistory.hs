@@ -17,6 +17,7 @@ data ChangedField
     | FieldGame
     | FieldStartTime
     | FieldPrize
+    | FieldDescription
     deriving (Show, Eq)
 
 data TournamentHistoryEvent

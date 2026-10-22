@@ -401,6 +401,7 @@ dispatch args = case args of
       describeField FieldGame = "game"
       describeField FieldStartTime = "start time"
       describeField FieldPrize = "prize"
+      describeField FieldDescription = "description"
 
   ("create-team":teamNameStr:captainNameStr:memberStrs) -> do
     let team = Team

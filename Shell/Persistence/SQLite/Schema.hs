@@ -38,6 +38,7 @@ newTournamentColumns =
   , ("start_time", "ALTER TABLE tournaments ADD COLUMN start_time TEXT")
   , ("prize", "ALTER TABLE tournaments ADD COLUMN prize TEXT")
   , ("prize_kes", "ALTER TABLE tournaments ADD COLUMN prize_kes INTEGER CHECK (prize_kes IS NULL OR prize_kes > 0)")
+  , ("description", "ALTER TABLE tournaments ADD COLUMN description TEXT")
   ]
 
 migrateTournamentColumns :: Connection -> IO ()

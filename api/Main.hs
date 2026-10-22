@@ -581,7 +581,8 @@ instance FromJSON DetailsReq where
         Nothing -> fail "game must be eFootball, PubgMobile, CallOfDuty or Other"
     st <- o .:? "startTime"
     pz <- o .:? "prize"
-    pure (DetailsReq (TournamentDetails g st pz))
+    ds <- o .:? "description"
+    pure (DetailsReq (TournamentDetails g st pz ds))
 
 -- ?q= (name contains), ?game= (eFootball | PubgMobile | CallOfDuty | Other), ?limit= (1..100)
 parseListFilter :: UTCTime -> Maybe Text -> Maybe Text -> Maybe Text -> Maybe Text -> Either ApiError ListPublic.PublicFilter
@@ -626,6 +627,7 @@ tournamentPairs t =
   [ "game"      .= fmap gameText (tournamentGame t)
   , "startTime" .= tournamentStartTime t
   , "prize"     .= tournamentPrize t
+  , "description" .= tournamentDescription t
   , "tournamentId"    .= unTournamentId (tournamentId t)
   , "name"            .= unTournamentName (tournamentName t)
   , "organizer"       .= unOrganizerName (tournamentOrganizer t)
@@ -708,6 +710,9 @@ fromDetailsValidation :: DetailsValidationError -> ApiError
 fromDetailsValidation (PrizeOutOfRange n) =
   ApiError status400 "VALIDATION_FAILED" "Prize must be a whole number of KSh, up to 1,000,000,000"
     (object ["field" .= ("prize" :: Text), "maximum" .= (1000000000 :: Int), "actual" .= n])
+fromDetailsValidation (DescriptionTooLong n) =
+  ApiError status400 "VALIDATION_FAILED" "Description must be 500 characters or fewer"
+    (object ["field" .= ("description" :: Text), "maximum" .= (500 :: Int), "actual" .= n])
 fromUpdateDetails :: UTD.UpdateTournamentDetailsError -> ApiError
 fromUpdateDetails (UTD.Unauthorized a)     = fromAuthorization a
 fromUpdateDetails (UTD.InvalidLifecycle l) = fromLifecycle l

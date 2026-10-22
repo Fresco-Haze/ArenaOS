@@ -12,6 +12,7 @@ module Engine.TournamentValidation
   ) where
 
 import Data.Char (isSpace)
+import Data.List (dropWhileEnd)
 import Data.Time (UTCTime(..))
 import Domain.Participant
   (Participant(..), Player(..), PlayerName(..), Team(..), TeamName(..))
@@ -71,19 +72,30 @@ participantMatchesMode SquadOnly      (Squad _)      = True
 participantMatchesMode _              _              = False
 
 -- v0.12: game is validated by its type; the prize is a whole number of KSh
--- (0 means no prize); the start time is truncated to whole seconds.
-data DetailsValidationError = PrizeOutOfRange Int
+-- (0 means no prize); the description is trimmed and capped (blank means none);
+-- the start time is truncated to whole seconds.
+data DetailsValidationError
+  = PrizeOutOfRange Int
+  | DescriptionTooLong Int
   deriving (Eq, Show)
 
 maxPrizeKes :: Int
 maxPrizeKes = 1000000000
 
+maxDescriptionLength :: Int
+maxDescriptionLength = 500
+
 validateDetails :: TournamentDetails -> Either DetailsValidationError TournamentDetails
 validateDetails d =
-  case detailsPrize d of
-    Just n | n < 0 || n > maxPrizeKes -> Left (PrizeOutOfRange n)
-    mp -> Right d { detailsPrize = mp >>= nonZero
-                  , detailsStartTime = truncSecs <$> detailsStartTime d }
+  case (detailsPrize d, trimmed) of
+    (Just n, _) | n < 0 || n > maxPrizeKes -> Left (PrizeOutOfRange n)
+    (_, Just s) | length s > maxDescriptionLength -> Left (DescriptionTooLong (length s))
+    _ -> Right d { detailsPrize = detailsPrize d >>= nonZero
+                 , detailsDescription = trimmed >>= nonBlank
+                 , detailsStartTime = truncSecs <$> detailsStartTime d }
   where
+    trimmed = trim <$> detailsDescription d
+    trim = dropWhileEnd isSpace . dropWhile isSpace
     nonZero n = if n == 0 then Nothing else Just n
+    nonBlank s = if null s then Nothing else Just s
     truncSecs (UTCTime day t) = UTCTime day (fromIntegral (floor t :: Integer))

@@ -161,6 +161,7 @@ changedFieldToText FieldThirdPlaceMatch  = "ThirdPlaceMatch"
 changedFieldToText FieldGame             = "Game"
 changedFieldToText FieldStartTime        = "StartTime"
 changedFieldToText FieldPrize            = "Prize"
+changedFieldToText FieldDescription      = "Description"
 
 textToChangedField :: String -> IO ChangedField
 textToChangedField "Name"             = pure FieldName
@@ -171,6 +172,7 @@ textToChangedField "ThirdPlaceMatch"  = pure FieldThirdPlaceMatch
 textToChangedField "Game"             = pure FieldGame
 textToChangedField "StartTime"        = pure FieldStartTime
 textToChangedField "Prize"            = pure FieldPrize
+textToChangedField "Description"      = pure FieldDescription
 textToChangedField other              =
     throwIO (StorageFailure ("Unknown changed field in storage: " ++ other))
 
@@ -187,17 +189,17 @@ tournamentSelect :: Query
 tournamentSelect =
     "SELECT id, name, organizer_name, owner_id, format, state, visibility, \
     \max_participants, third_place_match, bracket_id, \
-    \participant_mode, game, start_time, prize_kes \
+    \participant_mode, game, start_time, prize_kes, description \
     \FROM tournaments"
 
 type TournamentRow =
     (Int, String, String, Int, String, String, String, Int, Int, Maybe Int)
-    :. (String, Maybe String, Maybe String, Maybe Int)
+    :. (String, Maybe String, Maybe String, Maybe Int, Maybe String)
 
 decodeTournamentRow :: TournamentRow -> IO Tournament
 decodeTournamentRow
     ( (tidInt, name, organizer, ownerId, formatText, stateText, visText, maxP, thirdPlaceInt, bracketIdMaybe)
-      :. (modeText, gameMaybe, startMaybe, prizeMaybe) ) = do
+      :. (modeText, gameMaybe, startMaybe, prizeMaybe, descMaybe) ) = do
     format <- textToFormat formatText
     state  <- textToState stateText
     vis    <- textToVisibility visText
@@ -219,6 +221,7 @@ decodeTournamentRow
         , tournamentGame            = game
         , tournamentStartTime       = start
         , tournamentPrize           = prizeMaybe
+        , tournamentDescription     = descMaybe
         }
 
 -- v0.12: public stats. "Public" = Public and past Draft (same set as the list).
@@ -307,8 +310,8 @@ instance TournamentRepository SQLiteM where
             UserId owner_id         = tournamentOwner t
             bracketIdMaybe          = (\(BracketId bid) -> bid) <$> tournamentBracket t
         liftIO $ execute conn
-            "INSERT INTO tournaments (id, name, organizer_name, owner_id, format, state, visibility, max_participants, third_place_match, bracket_id, participant_mode, game, start_time, prize_kes) \
-            \VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
+            "INSERT INTO tournaments (id, name, organizer_name, owner_id, format, state, visibility, max_participants, third_place_match, bracket_id, participant_mode, game, start_time, prize_kes, description) \
+            \VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
             \ON CONFLICT(id) DO UPDATE SET \
             \  name = excluded.name, \
             \  organizer_name = excluded.organizer_name, \
@@ -321,7 +324,8 @@ instance TournamentRepository SQLiteM where
             \  bracket_id = excluded.bracket_id, \
             \  game = excluded.game, \
             \  start_time = excluded.start_time, \
-            \  prize_kes = excluded.prize_kes"
+            \  prize_kes = excluded.prize_kes, \
+            \  description = excluded.description"
             ( ( tidInt
               , tname
               , organizer
@@ -337,6 +341,7 @@ instance TournamentRepository SQLiteM where
                  , gameToText <$> tournamentGame t
                  , timeToText <$> tournamentStartTime t
                  , tournamentPrize t
+                 , tournamentDescription t
                  )
             )
 
@@ -428,10 +433,11 @@ instance TournamentRepository SQLiteM where
     updateTournamentDetails (TournamentId tidInt) d = do
         conn <- asks envConnection
         liftIO $ execute conn
-            "UPDATE tournaments SET game = ?, start_time = ?, prize_kes = ? WHERE id = ?"
+            "UPDATE tournaments SET game = ?, start_time = ?, prize_kes = ?, description = ? WHERE id = ?"
             ( gameToText <$> detailsGame d
             , timeToText <$> detailsStartTime d
             , detailsPrize d
+            , detailsDescription d
             , tidInt
             )
         n <- liftIO $ changes conn
