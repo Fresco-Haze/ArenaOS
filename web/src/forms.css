@@ -110,3 +110,10 @@
   pointer-events: none;
 }
 .kes-input input { width: 100%; padding-left: 3.25rem; }
+
+.create-form textarea, .inline-form textarea {
+  background: var(--shell-search);
+  font-size: var(--font-base);
+  font-weight: 400;
+  resize: vertical;
+}

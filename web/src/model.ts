@@ -31,6 +31,7 @@ export const Tournament = z.object({
   game: Game.nullish(),
   startTime: z.string().nullish(),
   prize: z.number().nullish(),
+  description: z.string().nullish(),
   registeredCount: z.number().nullish(),
   bracketId: z.number().nullable(),
 })

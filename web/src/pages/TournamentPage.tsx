@@ -122,6 +122,7 @@ export default function TournamentPage({ id }: { id: string }) {
               {t.prize != null && <li className="tp-prize"><TrophyIcon />{formatKes(t.prize)}</li>}
             </ul>
           )}
+          {t.description && <p className="tp-about">{t.description}</p>}
         </div>
       </section>
 

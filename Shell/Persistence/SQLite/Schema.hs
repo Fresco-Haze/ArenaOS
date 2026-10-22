@@ -155,7 +155,7 @@ statements =
 
   , "CREATE TABLE IF NOT EXISTS user_roles ( \
     \  user_id INTEGER NOT NULL REFERENCES users(id), \
-    \  role    TEXT NOT NULL CHECK (role IN ('Administrator')), \
+    \  role    TEXT NOT NULL CHECK (role IN ('h
     \  PRIMARY KEY (user_id, role) \
     \)"
 

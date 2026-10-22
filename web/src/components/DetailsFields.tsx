@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { Game, gameLabel } from '../model'
-import { prizeError } from '../lib/details'
+import { DESCRIPTION_MAX, prizeError } from '../lib/details'
 import type { DetailsValues } from '../lib/details'
 
 // start is "YYYY-MM-DDTHH:mm" in the device's time zone ("" when unset).
@@ -65,6 +65,17 @@ export default function DetailsFields({
           />
         </span>
         {prizeProblem && <span role="alert" className="form-error">{prizeProblem}</span>}
+      </label>
+      <label>
+        Description (optional)
+        <textarea
+          value={values.description}
+          maxLength={DESCRIPTION_MAX}
+          rows={4}
+          placeholder="Tell players about your tournament..."
+          onChange={(e) => onChange({ ...values, description: e.target.value })}
+        />
+        <span className="muted">{values.description.length}/{DESCRIPTION_MAX}</span>
       </label>
     </>
   )

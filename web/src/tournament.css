@@ -150,3 +150,10 @@
   .tp-art { height: auto; min-height: 13rem; }
   .tp-info { display: flex; flex-direction: column; justify-content: center; }
 }
+
+.tp-about {
+  margin: var(--space-3) 0 0;
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

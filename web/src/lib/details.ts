@@ -2,12 +2,18 @@ import { Game } from '../model'
 import type { Tournament } from '../model'
 
 export const PRIZE_MAX = 1000000000
+export const DESCRIPTION_MAX = 500
 
 // What the form holds: strings only. `start` is a datetime-local value in the device's time zone.
-export type DetailsValues = { game: string; start: string; prize: string }
-export type DetailsPayload = { game: Game | null; startTime: string | null; prize: number | null }
+export type DetailsValues = { game: string; start: string; prize: string; description: string }
+export type DetailsPayload = {
+  game: Game | null
+  startTime: string | null
+  prize: number | null
+  description: string | null
+}
 
-export const emptyDetails: DetailsValues = { game: '', start: '', prize: '' }
+export const emptyDetails: DetailsValues = { game: '', start: '', prize: '', description: '' }
 
 const pad = (n: number) => ('0' + n).slice(-2)
 
@@ -45,6 +51,7 @@ export function detailsFromTournament(t: Tournament): DetailsValues {
     game: t.game ?? '',
     start: isoToLocalInput(t.startTime),
     prize: t.prize != null ? String(t.prize) : '',
+    description: t.description ?? '',
   }
 }
 
@@ -54,14 +61,21 @@ export function toPayload(v: DetailsValues, original?: Tournament): DetailsPaylo
   const game = Game.safeParse(v.game)
   let startTime = localInputToIso(v.start)
   if (original?.startTime && v.start === isoToLocalInput(original.startTime)) startTime = original.startTime
+  const description = v.description.trim()
   return {
     game: game.success ? game.data : null,
     startTime,
     prize: parsePrize(v.prize) ?? null,
+    description: description === '' ? null : description,
   }
 }
 
 export function detailsChanged(v: DetailsValues, t: Tournament): boolean {
   const p = toPayload(v, t)
-  return p.game !== (t.game ?? null) || p.startTime !== (t.startTime ?? null) || p.prize !== (t.prize ?? null)
+  return (
+    p.game !== (t.game ?? null) ||
+    p.startTime !== (t.startTime ?? null) ||
+    p.prize !== (t.prize ?? null) ||
+    p.description !== (t.description ?? null)
+  )
 }
