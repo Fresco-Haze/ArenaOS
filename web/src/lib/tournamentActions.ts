@@ -1,5 +1,5 @@
 import { api, apiVoid } from '../api'
-import { Match, Tournament, RegistrationResult, BracketIdResult, CreateTournamentResponse, CreateTeamResponse, TeamList, type Game } from '../model'
+import { Match, Tournament, RegistrationResult, BracketIdResult, CreateTournamentResponse, CreateTeamResponse, TeamList, type Game, type TournamentFormat } from '../model'
 
 export function publish(id: number) {
   return apiVoid(`/tournaments/${id}/publish`, { method: 'POST' })
@@ -112,6 +112,13 @@ export function setThirdPlaceMatch(id: number, enabled: boolean) {
   return apiVoid(`/tournaments/${id}/third-place-match`, {
     method: 'POST',
     body: JSON.stringify({ thirdPlaceMatch: enabled }),
+  })
+}
+
+export function updateFormat(id: number, format: TournamentFormat) {
+  return apiVoid(`/tournaments/${id}/format`, {
+    method: 'PUT',
+    body: JSON.stringify({ format }),
   })
 }
 

@@ -12,9 +12,10 @@ import {
   publish, openRegistration, addParticipant, registerSquad, closeRegistration,
   generateBracket, startTournament, completeTournament, cancelTournament,
   setThirdPlaceMatch, listTeams, updateName, updateVisibility, updateMaxParticipants,
-  pauseTournament, resumeTournament, reopenTournament, updateDetails,
+  pauseTournament, resumeTournament, reopenTournament, updateDetails, updateFormat,
 } from '../lib/tournamentActions'
-import type { BracketView, Team, Tournament } from '../model'
+import { formatLabel } from '../model'
+import type { BracketView, Team, Tournament, TournamentFormat } from '../model'
 
 function ActionButton({ label, busyLabel, onRun, primary }: { label: string; busyLabel?: string; primary?: boolean; onRun: () => Promise<void> }) {
   const [busy, setBusy] = useState(false)
@@ -319,6 +320,17 @@ function ThirdPlaceToggle({ tournament, onDone }: { tournament: Tournament; onDo
   )
 }
 
+function describeFormatChange(from: TournamentFormat, to: TournamentFormat, thirdPlace: boolean): string {
+  const base = `Format: ${formatLabel[from]} \u2192 ${formatLabel[to]}.`
+  if (from === 'SingleElimination' && to !== 'SingleElimination' && thirdPlace) {
+    return base + ' The third-place match will be turned off.'
+  }
+  if (from !== 'SingleElimination' && to === 'SingleElimination') {
+    return base + ' A third-place match will be added.'
+  }
+  return base
+}
+
 function EditDetails({ tournament, registeredCount, onDone }: {
   tournament: Tournament
   registeredCount: number
@@ -332,11 +344,18 @@ function EditDetails({ tournament, registeredCount, onDone }: {
   const [busy, setBusy] = useState(false)
   const [problems, setProblems] = useState<string[]>([])
   const [saved, setSaved] = useState(false)
+  const [format, setFormat] = useState<TournamentFormat>(tournament.format)
+  const formatLocked = tournament.bracketId != null
+  const formatChanged = !formatLocked && format !== tournament.format
+  const formatNote = formatChanged
+    ? describeFormatChange(tournament.format, format, tournament.thirdPlaceMatch)
+    : null
 
   const changed =
     name.trim() !== tournament.name ||
     visibility !== tournament.visibility ||
     (canEditMax && Number(max) !== tournament.maxParticipants) ||
+    formatChanged ||
     detailsChanged(details, tournament)
 
   async function handleSubmit(e: FormEvent) {
@@ -361,6 +380,21 @@ function EditDetails({ tournament, registeredCount, onDone }: {
     if (canEditMax && Number(max) !== tournament.maxParticipants) {
       if (!Number.isInteger(Number(max))) found.push('Maximum: enter a whole number')
       else await attempt('Maximum', () => updateMaxParticipants(tournament.tournamentId, Number(max)))
+    }
+    if (formatChanged) {
+      const from = tournament.format
+      await attempt('Format', async () => {
+        const toSingle = format === 'SingleElimination'
+        // The backend rejects third-place on a non-single format, so turn it off first...
+        if (from === 'SingleElimination' && !toSingle && tournament.thirdPlaceMatch) {
+          await setThirdPlaceMatch(tournament.tournamentId, false)
+        }
+        await updateFormat(tournament.tournamentId, format)
+        // ...and back on after returning to single elimination.
+        if (from !== 'SingleElimination' && toSingle) {
+          await setThirdPlaceMatch(tournament.tournamentId, true)
+        }
+      })
     }
     if (detailsChanged(details, tournament)) {
       await attempt('Details', () => updateDetails(tournament.tournamentId, toPayload(details, tournament)))
@@ -391,7 +425,28 @@ function EditDetails({ tournament, registeredCount, onDone }: {
             <option value="Private">Private</option>
           </select>
         </label>
-        <DetailsFields values={details} onChange={setDetails} />
+        <DetailsFields
+          values={details}
+          onChange={setDetails}
+          afterGame={
+            <>
+              <label>
+                Format
+                <select
+                  value={format}
+                  disabled={formatLocked}
+                  onChange={(e) => setFormat(e.target.value as TournamentFormat)}
+                >
+                  <option value="SingleElimination">Single elimination</option>
+                  <option value="DoubleElimination">Double elimination</option>
+                  <option value="RoundRobin">Round robin</option>
+                </select>
+              </label>
+              {formatLocked && <p className="muted">The format can't change once the bracket exists.</p>}
+              {formatNote && <p role="status" className="muted">{formatNote}</p>}
+            </>
+          }
+        />
         {canEditMax && (
           <>
             <label>
