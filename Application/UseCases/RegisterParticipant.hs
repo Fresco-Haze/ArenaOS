@@ -3,16 +3,23 @@ module Application.UseCases.RegisterParticipant
   , RegisterParticipantError(..)
   , registerParticipantChecked
   , RegisterParticipantCheckedError(..)
+  , joinTournament
+  , JoinTournamentError(..)
+  , withdrawFromTournament
+  , WithdrawError(..)
+  , listMyRegistrations
   ) where
 
 import Data.Bifunctor (first)
+import qualified Data.Text as T
+import Domain.User (Username(..), User(username))
 
 import Domain.Ids (UserId)
-import Domain.Participant (Participant(..))
+import Domain.Participant (Participant(..), Player(..), PlayerName(..))
 import Domain.Registration (registrationParticipant)
 import Domain.Tournament
-  (TournamentId, TournamentState(RegistrationOpen), tournamentMaxParticipants, tournamentParticipantMode, ParticipantMode(..))
-import Application.Internal.Authorization (AuthorizationError, requireTournamentOwner)
+  (Tournament, TournamentId, TournamentState(RegistrationOpen), tournamentMaxParticipants, tournamentParticipantMode, ParticipantMode(..))
+import Application.Internal.Authorization (AuthorizationError, requireTournamentOwner, requireVisibleToViewer)
 import Application.Internal.LifecycleTransition (requireTournamentState, LifecycleError)
 import Engine.TournamentValidation (ParticipantValidationError, validateParticipant, participantMatchesMode)
 import Shell.Persistence.Port
@@ -22,6 +29,7 @@ import Shell.Persistence.Port
   , RegistrationId
   , Transactional(..)
   , NewRegistration(..)
+  , UserRepository
   )
 import qualified Shell.Persistence.Port as Repo
 import Control.Monad (unless)
@@ -100,3 +108,87 @@ registerParticipantChecked caller tid participant =
 
       unless (participantMatchesMode (tournamentParticipantMode t) participant)
         (Left (ParticipantKindNotAllowed (tournamentParticipantMode t)))
+
+-- ===== Self-registration (v0.12) =====
+-- The registration is linked to the account; the player name is the username.
+
+data JoinTournamentError
+  = JoinNotVisible AuthorizationError
+  | JoinLifecycle LifecycleError
+  | JoinSquadOnly
+  | JoinAlreadyJoined
+  | JoinNameTaken
+  | JoinFull
+  | JoinAccountMissing
+  deriving (Eq, Show)
+
+joinTournament
+  :: ( TournamentRepository m, ParticipantRepository m
+     , RegistrationRepository m, UserRepository m, Transactional m )
+  => UserId
+  -> TournamentId
+  -> m (Either JoinTournamentError RegistrationId)
+joinTournament caller tid =
+  withTxEither $ do
+    tournament <- Repo.getTournament tid
+    case preChecks tournament of
+      Left err -> pure (Left err)
+      Right () -> do
+        mUser <- Repo.findUserById caller
+        case mUser of
+          Nothing -> pure (Left JoinAccountMissing)
+          Just u -> do
+            existing <- Repo.findUserRegistration tid caller
+            regs <- Repo.listRegistrations tid
+            let player = Player (PlayerName (T.unpack (unUsername (username u))))
+                participant = Individual player
+            case existing of
+              Just _ -> pure (Left JoinAlreadyJoined)
+              Nothing
+                | participant `elem` map registrationParticipant regs ->
+                    pure (Left JoinNameTaken)
+                | length regs >= tournamentMaxParticipants tournament ->
+                    pure (Left JoinFull)
+                | otherwise -> do
+                    Repo.savePlayer player
+                    pid <- Repo.resolveParticipant participant
+                    Right <$> Repo.createUserRegistration caller NewRegistration
+                      { newRegistrationTournament  = tid
+                      , newRegistrationParticipant = pid
+                      }
+  where
+    preChecks t = do
+      first JoinNotVisible (requireVisibleToViewer (Just caller) t)
+      first JoinLifecycle (requireTournamentState RegistrationOpen t)
+      unless (tournamentParticipantMode t == IndividualOnly) (Left JoinSquadOnly)
+
+data WithdrawError
+  = WithdrawLifecycle LifecycleError
+  | WithdrawNotRegistered
+  deriving (Eq, Show)
+
+withdrawFromTournament
+  :: (TournamentRepository m, RegistrationRepository m, Transactional m)
+  => UserId
+  -> TournamentId
+  -> m (Either WithdrawError ())
+withdrawFromTournament caller tid =
+  withTxEither $ do
+    tournament <- Repo.getTournament tid
+    case requireTournamentState RegistrationOpen tournament of
+      Left e -> pure (Left (WithdrawLifecycle e))
+      Right () -> do
+        mReg <- Repo.findUserRegistration tid caller
+        case mReg of
+          Nothing  -> pure (Left WithdrawNotRegistered)
+          Just rid -> do
+            Repo.deleteRegistration rid
+            pure (Right ())
+
+listMyRegistrations
+  :: (TournamentRepository m, RegistrationRepository m)
+  => UserId
+  -> m [Tournament]
+listMyRegistrations uid = do
+  ids <- Repo.listRegisteredTournamentIds uid
+  mapM Repo.getTournament ids

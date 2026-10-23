@@ -648,7 +648,28 @@ tournamentViewJson v = object
   [ "tournament"    .= tournamentJsonCounted (length (GetT.tvParticipants v)) (GetT.tvTournament v)
   , "participants"  .= map participantJson (GetT.tvParticipants v)
   , "viewerIsOwner" .= GetT.tvViewerIsOwner v
+  , "viewerIsRegistered" .= GetT.tvViewerIsRegistered v
   ]
+
+fromJoin :: Register.JoinTournamentError -> ApiError
+fromJoin (Register.JoinNotVisible a) = fromAuthorization a
+fromJoin (Register.JoinLifecycle l)  = fromLifecycle l
+fromJoin Register.JoinSquadOnly =
+  ApiError status409 "SQUAD_ONLY"
+    "This tournament is for teams. Ask the organizer to register your team" (object [])
+fromJoin Register.JoinAlreadyJoined =
+  ApiError status409 "ALREADY_REGISTERED" "You are already registered" (object [])
+fromJoin Register.JoinNameTaken =
+  ApiError status409 "NAME_TAKEN"
+    "A player with your name is already registered. Ask the organizer" (object [])
+fromJoin Register.JoinFull =
+  ApiError status409 "REGISTRATION_CAPACITY_REACHED" "The tournament is full" (object [])
+fromJoin Register.JoinAccountMissing = unauthenticated
+
+fromWithdraw :: Register.WithdrawError -> ApiError
+fromWithdraw (Register.WithdrawLifecycle l) = fromLifecycle l
+fromWithdraw Register.WithdrawNotRegistered =
+  ApiError status404 "NOT_REGISTERED" "You are not registered for this tournament" (object [])
 
 fromGetTournament :: GetT.GetTournamentError -> ApiError
 fromGetTournament (GetT.Unauthorized a) = fromAuthorization a
@@ -1246,6 +1267,26 @@ main = do
                 fromRegister $ \rid -> do
                   status status201
                   json (object ["registrationId" .= unRegistrationId rid])
+
+    post "/tournaments/:id/join" $
+      runAction lock Register.joinTournament fromJoin $ \rid -> do
+        status status201
+        json (object ["registrationId" .= unRegistrationId rid])
+
+    post "/tournaments/:id/withdraw" $
+      runAction lock Register.withdrawFromTournament fromWithdraw (\() -> status status204)
+
+    get "/me/registrations" $ do
+      mUser <- currentUser lock
+      case mUser of
+        Nothing  -> sendError unauthenticated
+        Just uid -> do
+          result <- runUseCase lock ((,) <$> Register.listMyRegistrations uid <*> Repo.countRegistrationsByTournament)
+          case result of
+            Left apiErr -> sendError apiErr
+            Right (ts, counts) -> json (object
+              [ "tournaments" .=
+                  map (\t -> tournamentJsonCounted (countFor counts t) t) (sortOn (negate . unTournamentId . tournamentId) ts) ])
 
     post "/login" $ do
       raw <- body

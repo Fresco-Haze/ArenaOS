@@ -17,6 +17,7 @@ import Domain.Registration
     , RegistrationStatus(..)
     )
 import Domain.Tournament (TournamentId(..))
+import Domain.Ids (UserId(..))
 import Domain.Participant (Participant, ParticipantId(..))
 
 import Shell.Persistence.Port
@@ -118,3 +119,41 @@ instance RegistrationRepository SQLiteM where
                 "SELECT tournament_id, COUNT(*) FROM registrations GROUP BY tournament_id"
              :: IO [(Int, Int)])
         pure [ (TournamentId tidInt, n) | (tidInt, n) <- rows ]
+
+    createUserRegistration :: UserId -> NewRegistration -> SQLiteM RegistrationId
+    createUserRegistration (UserId uidInt) nr = do
+        conn <- asks envConnection
+        let TournamentId tidInt  = newRegistrationTournament nr
+            ParticipantId pidInt = newRegistrationParticipant nr
+        liftIO $ execute conn
+            "INSERT INTO registrations (tournament_id, participant_id, status, user_id) \
+            \VALUES (?, ?, ?, ?)"
+            ( tidInt
+            , pidInt
+            , registrationStatusToText Confirmed
+            , uidInt
+            )
+        rowId <- liftIO $ lastInsertRowId conn
+        pure (RegistrationId (fromIntegral rowId))
+
+    findUserRegistration :: TournamentId -> UserId -> SQLiteM (Maybe RegistrationId)
+    findUserRegistration (TournamentId tidInt) (UserId uidInt) = do
+        conn <- asks envConnection
+        rows <- liftIO $
+            (query conn
+                "SELECT id FROM registrations WHERE tournament_id = ? AND user_id = ?"
+                (tidInt, uidInt)
+             :: IO [Only Int])
+        pure $ case rows of
+            (Only r : _) -> Just (RegistrationId r)
+            []           -> Nothing
+
+    listRegisteredTournamentIds :: UserId -> SQLiteM [TournamentId]
+    listRegisteredTournamentIds (UserId uidInt) = do
+        conn <- asks envConnection
+        rows <- liftIO $
+            (query conn
+                "SELECT tournament_id FROM registrations WHERE user_id = ? ORDER BY id DESC"
+                (Only uidInt)
+             :: IO [Only Int])
+        pure [ TournamentId t | Only t <- rows ]

@@ -5,6 +5,7 @@ module Application.UseCases.GetTournament
   ) where
 
 import Data.Bifunctor (first)
+import Data.Maybe (isJust)
 
 import Domain.Ids (UserId)
 import Domain.Participant (Participant)
@@ -24,6 +25,7 @@ data TournamentView = TournamentView
   { tvTournament    :: Tournament
   , tvParticipants  :: [Participant]
   , tvViewerIsOwner :: Bool
+  , tvViewerIsRegistered :: Bool
   } deriving (Eq, Show)
 
 getTournament
@@ -37,8 +39,10 @@ getTournament viewer tid = do
     Left err -> pure (Left err)
     Right () -> do
       regs <- Repo.listRegistrations tid
+      registered <- maybe (pure False) (\u -> isJust <$> Repo.findUserRegistration tid u) viewer
       pure (Right TournamentView
         { tvTournament    = tournament
         , tvParticipants  = map registrationParticipant regs
         , tvViewerIsOwner = viewer == Just (tournamentOwner tournament)
+        , tvViewerIsRegistered = registered
         })

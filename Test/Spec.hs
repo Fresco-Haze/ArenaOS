@@ -6286,6 +6286,118 @@ spec = before_ resetTestDb $ do
         Right (Left e)  -> e `shouldBe` LU.AccountNotActive Suspended
         Right (Right _) -> expectationFailure "expected suspended login to be rejected"
 
+  describe "Self-registration (v0.12)" $ do
+
+    it "lets a signed-in user join, and the view and list show it" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "jn-owner-1"
+        joiner <- createTestUser "jn-joiner-1"
+        tid <- jnOpen owner "Join Cup" 8 Public
+        r <- RPC.joinTournament joiner tid
+        v <- GetT.getTournament (Just joiner) tid
+        ids <- Repo.listRegisteredTournamentIds joiner
+        pure (r, fmap GetT.tvViewerIsRegistered v, ids, tid)
+      case result of
+        Left err -> expectationFailure (show err)
+        Right (r, flag, ids, tid) -> do
+          r `shouldSatisfy` isRight
+          flag `shouldBe` Right True
+          ids `shouldBe` [tid]
+
+    it "rejects a second join by the same account" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "jn-owner-2"
+        joiner <- createTestUser "jn-joiner-2"
+        tid <- jnOpen owner "Twice Cup" 8 Public
+        _ <- unwrap =<< RPC.joinTournament joiner tid
+        RPC.joinTournament joiner tid
+      case result of
+        Left err -> expectationFailure (show err)
+        Right r  -> r `shouldBe` Left RPC.JoinAlreadyJoined
+
+    it "rejects a join once the tournament is full" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "jn-owner-3"
+        a <- createTestUser "jn-a-3"
+        b <- createTestUser "jn-b-3"
+        c <- createTestUser "jn-c-3"
+        tid <- jnOpen owner "Full Cup" 2 Public
+        _ <- unwrap =<< RPC.joinTournament a tid
+        _ <- unwrap =<< RPC.joinTournament b tid
+        RPC.joinTournament c tid
+      case result of
+        Left err -> expectationFailure (show err)
+        Right r  -> r `shouldBe` Left RPC.JoinFull
+
+    it "rejects a join when registration is not open" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "jn-owner-4"
+        joiner <- createTestUser "jn-joiner-4"
+        tid <- dtCreate owner "Not Open Cup" noDetails
+        Repo.updateTournamentVisibility tid Public
+        _ <- unwrap =<< publishTournament owner tid
+        RPC.joinTournament joiner tid
+      case result of
+        Left err -> expectationFailure (show err)
+        Right r  -> r `shouldBe` Left (RPC.JoinLifecycle (InvalidTransition Published RegistrationOpen))
+
+    it "does not let a stranger join a Private tournament" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "jn-owner-5"
+        joiner <- createTestUser "jn-joiner-5"
+        tid <- jnOpen owner "Private Cup" 8 Private
+        RPC.joinTournament joiner tid
+      case result of
+        Left err -> expectationFailure (show err)
+        Right (Left (RPC.JoinNotVisible _)) -> pure ()
+        Right other -> expectationFailure ("expected JoinNotVisible, got " ++ show other)
+
+    it "reports a name clash with a player the organizer already added" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "jn-owner-6"
+        tid <- jnOpen owner "Clash Cup" 8 Public
+        _ <- unwrap =<< RPC.registerParticipantChecked owner tid
+               (Individual (Player (PlayerName "jn-clash")))
+        clasher <- createTestUser "jn-clash"
+        RPC.joinTournament clasher tid
+      case result of
+        Left err -> expectationFailure (show err)
+        Right r  -> r `shouldBe` Left RPC.JoinNameTaken
+
+    it "withdraws while registration is open, and rejects a second withdraw" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "jn-owner-7"
+        joiner <- createTestUser "jn-joiner-7"
+        tid <- jnOpen owner "Withdraw Cup" 8 Public
+        _ <- unwrap =<< RPC.joinTournament joiner tid
+        w1 <- RPC.withdrawFromTournament joiner tid
+        ids <- Repo.listRegisteredTournamentIds joiner
+        w2 <- RPC.withdrawFromTournament joiner tid
+        pure (w1, ids, w2)
+      case result of
+        Left err -> expectationFailure (show err)
+        Right (w1, ids, w2) -> do
+          w1 `shouldBe` Right ()
+          ids `shouldBe` []
+          w2 `shouldBe` Left RPC.WithdrawNotRegistered
+
+    it "lets the organizer join their own tournament" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "jn-owner-8"
+        tid <- jnOpen owner "Own Cup" 8 Public
+        RPC.joinTournament owner tid
+      case result of
+        Left err -> expectationFailure (show err)
+        Right r  -> r `shouldSatisfy` isRight
+
   describe "Engine.User.validateRawPassword (pure)" $ do
 
     it "rejects a password shorter than 8 characters" $
@@ -8894,3 +9006,12 @@ formatChangeSpec = describe "Format change (v0.12)" $ do
         (r1, r2, r3) `shouldBe` (Right (), Right (), Right ())
         f `shouldBe` RoundRobin
         changed `shouldBe` [TournamentHistory.FieldFormat, TournamentHistory.FieldFormat, TournamentHistory.FieldFormat]
+
+jnOpen :: UserId -> String -> Int -> Visibility -> SQLiteM TournamentId
+jnOpen owner name mx vis = do
+  tid <- dtCreate owner name noDetails
+  Repo.updateTournamentMaxParticipants tid mx
+  Repo.updateTournamentVisibility tid vis
+  _ <- unwrap =<< publishTournament owner tid
+  _ <- unwrap =<< openRegistration owner tid
+  pure tid

@@ -143,6 +143,10 @@ class Monad m => RegistrationRepository m where
     listRegistrations  :: TournamentId -> m [Registration]
     -- One GROUP BY query: registrations per tournament (tournaments with none are absent).
     countRegistrationsByTournament :: m [(TournamentId, Int)]
+    -- v0.12: self-registration. The registration carries the registering account.
+    createUserRegistration :: UserId -> NewRegistration -> m RegistrationId
+    findUserRegistration :: TournamentId -> UserId -> m (Maybe RegistrationId)
+    listRegisteredTournamentIds :: UserId -> m [TournamentId]
 
 
 class Monad m => BracketRepository m where

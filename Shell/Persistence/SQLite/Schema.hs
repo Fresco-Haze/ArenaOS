@@ -29,6 +29,7 @@ initializeSchema :: Connection -> IO ()
 initializeSchema conn = do
   mapM_ (execute_ conn) statements
   migrateTournamentColumns conn
+  migrateRegistrationColumns conn
 
 -- v0.12: CREATE TABLE IF NOT EXISTS never adds columns to an existing
 -- database, so add any missing tournament columns here. Safe on every start.
@@ -46,6 +47,16 @@ migrateTournamentColumns conn = do
   cols <- query_ conn "PRAGMA table_info(tournaments)" :: IO [(Int, String, String, Int, Maybe String, Int)]
   let present = [ n | (_, n, _, _, _, _) <- cols ]
   mapM_ (\(n, ddl) -> when (n `notElem` present) (execute_ conn ddl)) newTournamentColumns
+
+-- v0.12: registrations may carry the account that registered itself.
+-- Organizer-added players leave user_id NULL.
+migrateRegistrationColumns :: Connection -> IO ()
+migrateRegistrationColumns conn = do
+  cols <- query_ conn "PRAGMA table_info(registrations)" :: IO [(Int, String, String, Int, Maybe String, Int)]
+  let present = [ n | (_, n, _, _, _, _) <- cols ]
+  when ("user_id" `notElem` present) $
+    execute_ conn "ALTER TABLE registrations ADD COLUMN user_id INTEGER REFERENCES users(id)"
+  execute_ conn "CREATE UNIQUE INDEX IF NOT EXISTS registrations_tournament_user ON registrations(tournament_id, user_id) WHERE user_id IS NOT NULL"
 
 statements :: [Query]
 statements =
