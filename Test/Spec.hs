@@ -291,6 +291,7 @@ spec = before_ resetTestDb $ do
   upcomingFilterSpec
   prizePoolSpec
   descriptionSpec
+  formatChangeSpec
   describe "Tournament Lifecycle (4-participant golden scenario)" $
     it "runs the full pipeline from creation to completion" $ do
       result <- runSQLiteM testDbPath $ do
@@ -8809,3 +8810,44 @@ descriptionSpec = describe "Tournament description (v0.12)" $ do
       Right t -> do
         dtTriple t `shouldBe` (Just GameEFootball, Nothing, Just 5000)
         tournamentDescription t `shouldBe` Nothing
+
+-- ---------------------------------------------------------------------
+-- v0.12: changing a tournament's format (success paths).
+-- ---------------------------------------------------------------------
+
+formatChangeSpec :: Spec
+formatChangeSpec = describe "Format change (v0.12)" $ do
+
+  it "changes the format of a tournament without a bracket and logs one history entry" $ do
+    result <- runSQLiteM testDbPath $ do
+      setupSchema
+      owner <- createTestUser "fc-owner-1"
+      tid <- dtCreate owner "Format Cup" noDetails
+      r <- UTF.updateTournamentFormat owner tid DoubleElimination
+      t <- Repo.getTournament tid
+      changed <- dtChanged tid
+      pure (r, tournamentFormat t, changed)
+    case result of
+      Left err -> expectationFailure (show err)
+      Right (r, f, changed) -> do
+        r `shouldBe` Right ()
+        f `shouldBe` DoubleElimination
+        changed `shouldBe` [TournamentHistory.FieldFormat]
+
+  it "can move between all three formats and logs each change" $ do
+    result <- runSQLiteM testDbPath $ do
+      setupSchema
+      owner <- createTestUser "fc-owner-2"
+      tid <- dtCreate owner "Format Walk Cup" noDetails
+      r1 <- UTF.updateTournamentFormat owner tid DoubleElimination
+      r2 <- UTF.updateTournamentFormat owner tid SingleElimination
+      r3 <- UTF.updateTournamentFormat owner tid RoundRobin
+      t <- Repo.getTournament tid
+      changed <- dtChanged tid
+      pure (r1, r2, r3, tournamentFormat t, changed)
+    case result of
+      Left err -> expectationFailure (show err)
+      Right (r1, r2, r3, f, changed) -> do
+        (r1, r2, r3) `shouldBe` (Right (), Right (), Right ())
+        f `shouldBe` RoundRobin
+        changed `shouldBe` [TournamentHistory.FieldFormat, TournamentHistory.FieldFormat, TournamentHistory.FieldFormat]

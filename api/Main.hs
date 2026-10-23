@@ -85,6 +85,7 @@ import qualified Application.UseCases.ListPublicTournaments as ListPublic
 import qualified Application.UseCases.UpdateTournamentThirdPlaceMatch as UTTP
 import qualified Application.UseCases.UpdateTournamentName as UTN
 import qualified Application.UseCases.UpdateTournamentDetails as UTD
+import qualified Application.UseCases.UpdateTournamentFormat as UTF
 import qualified Application.UseCases.UpdateTournamentMaxParticipants as UTM
 import qualified Application.UseCases.UpdateTournamentVisibility as UTV
 import qualified Application.UseCases.PauseTournament as PauseT
@@ -713,6 +714,25 @@ fromDetailsValidation (PrizeOutOfRange n) =
 fromDetailsValidation (DescriptionTooLong n) =
   ApiError status400 "VALIDATION_FAILED" "Description must be 500 characters or fewer"
     (object ["field" .= ("description" :: Text), "maximum" .= (500 :: Int), "actual" .= n])
+newtype FormatReq = FormatReq TournamentFormat
+
+instance FromJSON FormatReq where
+  parseJSON = withObject "format" $ \o -> do
+    f <- o .: "format"
+    case (f :: Text) of
+      "SingleElimination" -> pure (FormatReq SingleElimination)
+      "DoubleElimination" -> pure (FormatReq DoubleElimination)
+      "RoundRobin"        -> pure (FormatReq RoundRobin)
+      _ -> fail "format must be SingleElimination, DoubleElimination or RoundRobin"
+
+fromUpdateFormat :: UTF.UpdateTournamentFormatError -> ApiError
+fromUpdateFormat (UTF.Unauthorized a)      = fromAuthorization a
+fromUpdateFormat (UTF.InvalidLifecycle l)  = fromLifecycle l
+fromUpdateFormat (UTF.InvalidTournament v) = fromValidation v
+fromUpdateFormat UTF.BracketAlreadyGenerated =
+  ApiError status409 "BRACKET_ALREADY_GENERATED"
+    "The format can't change once the bracket exists" (object [])
+
 fromUpdateDetails :: UTD.UpdateTournamentDetailsError -> ApiError
 fromUpdateDetails (UTD.Unauthorized a)     = fromAuthorization a
 fromUpdateDetails (UTD.InvalidLifecycle l) = fromLifecycle l
@@ -1389,6 +1409,14 @@ main = do
         Right (MaxReq n) ->
           runTransition lock
             (\uid tid -> UTM.updateTournamentMaxParticipants uid tid n) fromUpdateMax
+
+    put "/tournaments/:id/format" $ do
+      raw <- body
+      case eitherDecode raw of
+        Left reason -> sendError (invalidBody reason)
+        Right (FormatReq f) ->
+          runTransition lock
+            (\uid tid -> UTF.updateTournamentFormat uid tid f) fromUpdateFormat
 
     put "/tournaments/:id/details" $ do
       raw <- body
