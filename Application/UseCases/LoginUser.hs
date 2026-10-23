@@ -7,7 +7,8 @@ module Application.UseCases.LoginUser
   ) where
 
 import Data.Text (Text)
-import Domain.User (User(..), Username, passwordHash, AccountStatus(..))
+import qualified Data.Text as T
+import Domain.User (User(..), Username(..), Email(..), passwordHash, AccountStatus(..))
 import Shell.Persistence.Port (UserRepository(..), PasswordHasher(..))
 
 data LoginUserRequest = LoginUserRequest
@@ -22,7 +23,13 @@ data LoginUserError
 
 -- | Step 1 (needs the DB): find the user.
 lookupForLogin :: UserRepository m => LoginUserRequest -> m (Maybe User)
-lookupForLogin req = findUserByUsername (loginUsername req)
+-- The request field is still called loginUsername, but it may hold an email:
+-- usernames can't contain '@', so anything with one is looked up as an email.
+lookupForLogin req
+  | T.any (== '@') ident = findUserByEmail (Email ident)
+  | otherwise            = findUserByUsername (Username ident)
+  where
+    ident = T.strip (unUsername (loginUsername req))
 
 -- | Step 3 (pure): decide the outcome. The password check comes first,
 -- so a wrong password on a suspended account is still InvalidCredentials

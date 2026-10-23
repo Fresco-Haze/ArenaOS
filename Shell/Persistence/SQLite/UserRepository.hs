@@ -65,7 +65,7 @@ instance UserRepository SQLiteM where
   findUserByEmail (Email em') = do
     conn <- asks envConnection
     rows <- liftIO $ (query conn
-      "SELECT id, username, email, password_hash, account_status FROM users WHERE email = ?"
+      "SELECT id, username, email, password_hash, account_status FROM users WHERE lower(email) = lower(?)"
       (Only em')
       :: IO [(Int, Text, Text, Text, String)])
     case rows of

@@ -6243,6 +6243,49 @@ spec = before_ resetTestDb $ do
         Right (Right _) -> expectationFailure "expected wrong password to be rejected"
 
   
+  describe "LoginUser by email (v0.12)" $ do
+
+    it "lets a user log in with their email address" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        _ <- unwrap =<< RU.registerUser
+               (RU.RegisterUserRequest (Username "loginmail") (Email "loginmail@test.com") "password123")
+        LU.loginUser (LU.LoginUserRequest (Username "loginmail@test.com") "password123")
+      case result of
+        Left err    -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right inner -> inner `shouldSatisfy` isRight
+
+    it "matches the email regardless of letter case" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        _ <- unwrap =<< RU.registerUser
+               (RU.RegisterUserRequest (Username "logincase") (Email "logincase@test.com") "password123")
+        LU.loginUser (LU.LoginUserRequest (Username "LoginCase@Test.com") "password123")
+      case result of
+        Left err    -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right inner -> inner `shouldSatisfy` isRight
+
+    it "rejects an unknown email with InvalidCredentials" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        LU.loginUser (LU.LoginUserRequest (Username "nobody@test.com") "password123")
+      case result of
+        Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right (Left e)  -> e `shouldBe` LU.InvalidCredentials
+        Right (Right _) -> expectationFailure "expected unknown email to be rejected"
+
+    it "rejects a Suspended user who logs in by email with the correct password" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        u <- unwrap =<< RU.registerUser
+               (RU.RegisterUserRequest (Username "loginmailsusp") (Email "loginmailsusp@test.com") "password123")
+        Repo.updateAccountStatus (userId u) Suspended
+        LU.loginUser (LU.LoginUserRequest (Username "loginmailsusp@test.com") "password123")
+      case result of
+        Left err -> expectationFailure ("runSQLiteM failed: " ++ show err)
+        Right (Left e)  -> e `shouldBe` LU.AccountNotActive Suspended
+        Right (Right _) -> expectationFailure "expected suspended login to be rejected"
+
   describe "Engine.User.validateRawPassword (pure)" $ do
 
     it "rejects a password shorter than 8 characters" $

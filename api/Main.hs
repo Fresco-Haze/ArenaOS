@@ -897,12 +897,14 @@ resolveParticipantReq (SquadReq n) =
 data LoginReq = LoginReq Text Text
 
 instance FromJSON LoginReq where
-  parseJSON = withObject "login" $ \o ->
-    LoginReq <$> o .: "username" <*> o .: "password"
+  parseJSON = withObject "login" $ \o -> do
+    mi <- o .:? "identifier"
+    u  <- maybe (o .: "username") pure mi
+    LoginReq u <$> o .: "password"
 
 fromLogin :: LU.LoginUserError -> ApiError
 fromLogin LU.InvalidCredentials =
-  ApiError status401 "INVALID_CREDENTIALS" "Wrong username or password" (object [])
+  ApiError status401 "INVALID_CREDENTIALS" "Wrong email, username or password" (object [])
 fromLogin (LU.AccountNotActive s) =
   ApiError status403 "ACCOUNT_NOT_ACTIVE" "This account cannot log in"
     (object ["status" .= show s])

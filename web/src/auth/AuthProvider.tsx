@@ -40,7 +40,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function login(username: string, password: string, remember = true) {
     const res = await api('/login', LoginResponse, {
       method: 'POST',
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({ identifier: username, password }),
     })
     auth.set(res.token, remember)
     clearStoredUser()

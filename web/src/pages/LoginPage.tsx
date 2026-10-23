@@ -47,13 +47,15 @@ export default function LoginPage() {
       {notice && <p role="status" className="form-notice">{notice}</p>}
       <form onSubmit={onSubmit} className="auth-form">
         <AuthField
-          label="Username"
+          label="Email or username"
           hideLabel
           icon="user"
-          placeholder="Username"
+          placeholder="Email or username"
           value={username}
           onChange={(e) => setUsername(e.target.value)}
           autoComplete="username"
+          autoCapitalize="none"
+          spellCheck={false}
           autoFocus
           required
         />
