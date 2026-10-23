@@ -59,6 +59,7 @@ export function useTournament(id: string) {
 
   // First load.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch on mount: setState only runs after the awaited fetch resolves
     void reload()
   }, [reload])
 
