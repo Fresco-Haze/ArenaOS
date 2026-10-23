@@ -114,6 +114,7 @@ export const TournamentView = z.object({
   tournament: Tournament,
   participants: z.array(Participant),
   viewerIsOwner: z.boolean(),
+  viewerIsRegistered: z.boolean().default(false),
 })
 export type TournamentView = z.infer<typeof TournamentView>
 

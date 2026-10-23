@@ -181,3 +181,12 @@ export function updateDetails(
     body: JSON.stringify(details),
   })
 }
+
+// Self-registration: the signed-in user joins or leaves an open tournament.
+export function joinTournament(id: number) {
+  return apiVoid(`/tournaments/${id}/join`, { method: 'POST' })
+}
+
+export function withdrawFromTournament(id: number) {
+  return apiVoid(`/tournaments/${id}/withdraw`, { method: 'POST' })
+}

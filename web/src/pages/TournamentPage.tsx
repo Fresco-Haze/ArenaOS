@@ -17,6 +17,7 @@ import LoadingBlock from '../components/LoadingBlock'
 import OrganizerPanel from '../components/OrganizerPanel'
 import PlayerLookup from '../components/PlayerLookup'
 import Tabs from '../components/Tabs'
+import JoinBar from '../components/JoinBar'
 
 type TabId = 'bracket' | 'players'
 
@@ -123,6 +124,7 @@ export default function TournamentPage({ id }: { id: string }) {
             </ul>
           )}
           {t.description && <p className="tp-about">{t.description}</p>}
+          <JoinBar tournament={t} signedIn={!!user} registered={view.viewerIsRegistered} onDone={reload} />
         </div>
       </section>
 

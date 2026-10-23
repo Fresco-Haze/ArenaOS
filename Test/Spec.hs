@@ -6398,6 +6398,22 @@ spec = before_ resetTestDb $ do
         Left err -> expectationFailure (show err)
         Right r  -> r `shouldSatisfy` isRight
 
+  describe "Self-registration squad-only (v0.12)" $ do
+
+    it "rejects a join in a SquadOnly tournament" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "jn-owner-9"
+        joiner <- createTestUser "jn-joiner-9"
+        tid <- unwrap =<< CTD.createTournamentWithDetails
+                 ((dtNew owner "Squad Join Cup") { newTournamentParticipantMode = SquadOnly }) noDetails
+        _ <- unwrap =<< publishTournament owner tid
+        _ <- unwrap =<< openRegistration owner tid
+        RPC.joinTournament joiner tid
+      case result of
+        Left err -> expectationFailure (show err)
+        Right r  -> r `shouldBe` Left RPC.JoinSquadOnly
+
   describe "Engine.User.validateRawPassword (pure)" $ do
 
     it "rejects a password shorter than 8 characters" $
