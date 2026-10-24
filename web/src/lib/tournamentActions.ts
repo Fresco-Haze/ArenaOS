@@ -1,5 +1,5 @@
 import { api, apiVoid } from '../api'
-import { Match, Tournament, RegistrationResult, BracketIdResult, CreateTournamentResponse, CreateTeamResponse, TeamList, type Game, type Participant, type TournamentFormat } from '../model'
+import { Match, Tournament, RegistrationResult, BracketIdResult, CreateTournamentResponse, CreateTeamResponse, TeamList, JoinRequestList, type Game, type Participant, type TournamentFormat } from '../model'
 
 export function publish(id: number) {
   return apiVoid(`/tournaments/${id}/publish`, { method: 'POST' })
@@ -206,5 +206,27 @@ export function removeParticipant(id: number, p: Participant) {
   return apiVoid(`/tournaments/${id}/registrations/remove`, {
     method: 'POST',
     body: JSON.stringify(body),
+  })
+}
+
+export function cancelJoinRequest(id: number) {
+  return apiVoid(`/tournaments/${id}/cancel-request`, { method: 'POST' })
+}
+
+export function listJoinRequests(id: number) {
+  return api(`/tournaments/${id}/requests`, JoinRequestList)
+}
+
+export function approveJoinRequest(id: number, userId: number) {
+  return apiVoid(`/tournaments/${id}/requests/approve`, {
+    method: 'POST',
+    body: JSON.stringify({ userId }),
+  })
+}
+
+export function declineJoinRequest(id: number, userId: number) {
+  return apiVoid(`/tournaments/${id}/requests/decline`, {
+    method: 'POST',
+    body: JSON.stringify({ userId }),
   })
 }

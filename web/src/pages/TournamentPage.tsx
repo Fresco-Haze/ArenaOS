@@ -128,7 +128,7 @@ export default function TournamentPage({ id }: { id: string }) {
             </ul>
           )}
           {t.description && <p className="tp-about">{t.description}</p>}
-          <JoinBar tournament={t} signedIn={!!user} registered={view.viewerIsRegistered} onDone={reload} />
+          <JoinBar tournament={t} signedIn={!!user} registered={view.viewerIsRegistered} requestStatus={view.viewerRequestStatus} onDone={reload} />
         </div>
       </section>
 
@@ -223,6 +223,7 @@ export default function TournamentPage({ id }: { id: string }) {
           bracket={bracket}
           participantCount={view.participants.length}
           registered={view.participants.map(participantName)}
+          refreshKey={String(lastUpdated)}
           reload={reload}
         />
       )}

@@ -51,6 +51,7 @@ export default function CreateTournamentPage() {
   const [busy, setBusy] = useState(false)
   const [format, setFormat] = useState<Format>('SingleElimination')
   const [participantMode, setParticipantMode] = useState<'IndividualOnly' | 'SquadOnly'>('IndividualOnly')
+  const [requireApproval, setRequireApproval] = useState(true)
   const [details, setDetails] = useState<DetailsValues>(emptyDetails)
 
   // ProtectedRoute guarantees this, but keep TypeScript honest.
@@ -82,6 +83,7 @@ export default function CreateTournamentPage() {
         thirdPlaceMatch: format === 'SingleElimination',
         format,
         participantMode,
+        requireApproval: participantMode === 'IndividualOnly' && requireApproval,
         ...toPayload(details),
       })
       navigate(`/tournaments/${res.tournamentId}`)
@@ -184,6 +186,25 @@ export default function CreateTournamentPage() {
             Private
           </label>
         </fieldset>
+
+        {participantMode === 'IndividualOnly' && (
+          <fieldset>
+            <legend>Joining</legend>
+            <label>
+              <input
+                type="checkbox"
+                checked={requireApproval}
+                onChange={(e) => setRequireApproval(e.target.checked)}
+              />
+              Approve each join request
+            </label>
+            <p className="muted">
+              {requireApproval
+                ? 'Players ask to join and you approve them, for example once they have paid.'
+                : 'Anyone who is signed in can join straight away.'}
+            </p>
+          </fieldset>
+        )}
 
         <label>
           Maximum participants

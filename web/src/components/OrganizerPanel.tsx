@@ -1,5 +1,5 @@
 import { Link } from 'react-router'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { ApiError } from '../api'
 import ConfirmDialog from './ConfirmDialog'
@@ -13,9 +13,10 @@ import {
   generateBracket, startTournament, completeTournament, cancelTournament,
   setThirdPlaceMatch, listTeams, updateName, updateVisibility, updateMaxParticipants,
   pauseTournament, resumeTournament, reopenTournament, updateDetails, updateFormat,
+  setRequireApproval, listJoinRequests, approveJoinRequest, declineJoinRequest,
 } from '../lib/tournamentActions'
 import { formatLabel } from '../model'
-import type { BracketView, Team, Tournament, TournamentFormat } from '../model'
+import type { BracketView, JoinRequestRow, Team, Tournament, TournamentFormat } from '../model'
 
 function ActionButton({ label, busyLabel, onRun, primary }: { label: string; busyLabel?: string; primary?: boolean; onRun: () => Promise<void> }) {
   const [busy, setBusy] = useState(false)
@@ -466,20 +467,123 @@ function EditDetails({ tournament, registeredCount, onDone }: {
   )
 }
 
+function ApprovalToggle({ tournament, onDone }: { tournament: Tournament; onDone: () => Promise<void> }) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function toggle(next: boolean) {
+    setBusy(true)
+    setError(null)
+    try {
+      await setRequireApproval(tournament.tournamentId, next)
+      await onDone()
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Could not reach the server')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="action-item">
+      <label>
+        <input
+          type="checkbox"
+          checked={tournament.requireApproval}
+          disabled={busy}
+          onChange={(e) => void toggle(e.target.checked)}
+        />
+        Approve each join request
+      </label>
+      {error && <p role="alert" className="form-error">{error}</p>}
+    </div>
+  )
+}
+
+function RequestsSection({ tournament, refreshKey, onDone }: { tournament: Tournament; refreshKey: string; onDone: () => Promise<void> }) {
+  const id = tournament.tournamentId
+  const [rows, setRows] = useState<JoinRequestRow[]>([])
+  const [error, setError] = useState<string | null>(null)
+  const [tick, setTick] = useState(0)
+
+  useEffect(() => {
+    let alive = true
+    listJoinRequests(id)
+      .then((r) => {
+        if (alive) {
+          setRows(r.requests)
+          setError(null)
+        }
+      })
+      .catch((e) => {
+        if (alive) setError(e instanceof ApiError ? e.message : 'Could not reach the server')
+      })
+    return () => {
+      alive = false
+    }
+  }, [id, refreshKey, tick])
+
+  const open = rows.filter((r) => r.status !== 'Approved')
+  async function after() {
+    await onDone()
+    setTick((n) => n + 1)
+  }
+
+  if (!tournament.requireApproval && open.length === 0) return null
+
+  return (
+    <div className="requests">
+      <h3>Join requests</h3>
+      {error && <p role="alert" className="form-error">{error}</p>}
+      {open.length === 0 ? (
+        <p className="muted">No requests waiting.</p>
+      ) : (
+        <ul className="req-list">
+          {open.map((r) => (
+            <li key={r.userId} className="req-row">
+              <span className="req-name">{r.username}</span>
+              <span className="muted">{r.status === 'Pending' ? 'wants to join' : 'declined'}</span>
+              <span className="req-actions">
+                <ActionButton
+                  primary
+                  label={r.status === 'Pending' ? 'Approve' : 'Approve anyway'}
+                  onRun={async () => { await approveJoinRequest(id, r.userId); await after() }}
+                />
+                {r.status === 'Pending' && (
+                  <ActionButton
+                    label="Decline"
+                    onRun={async () => { await declineJoinRequest(id, r.userId); await after() }}
+                  />
+                )}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
 type Props = {
   tournament: Tournament
   bracket: BracketView | null
   participantCount: number
   registered: string[]
+  refreshKey: string
   reload: () => Promise<void>
 }
 
-export default function OrganizerPanel({ tournament, bracket, participantCount, registered, reload }: Props) {
+export default function OrganizerPanel({ tournament, bracket, participantCount, registered, refreshKey, reload }: Props) {
   const id = tournament.tournamentId
 
   return (
     <section className="section organizer-panel">
       <h2>Organizer controls</h2>
+
+      {tournament.participantMode === 'IndividualOnly' &&
+       ['Draft', 'Published', 'RegistrationOpen', 'RegistrationClosed'].includes(tournament.state) && (
+        <ApprovalToggle tournament={tournament} onDone={reload} />
+      )}
 
       {tournament.format === 'SingleElimination' && !tournament.thirdPlaceMatch &&
        (['Draft', 'Published', 'RegistrationOpen'].includes(tournament.state) ||
@@ -505,6 +609,9 @@ export default function OrganizerPanel({ tournament, bracket, participantCount, 
 
       {tournament.state === 'RegistrationOpen' && (
         <>
+          {tournament.participantMode === 'IndividualOnly' && (
+            <RequestsSection tournament={tournament} refreshKey={refreshKey} onDone={reload} />
+          )}
           {tournament.participantMode === 'IndividualOnly' && <AddManyPlayersForm tournamentId={id} room={tournament.maxParticipants - participantCount} onDone={reload} />}
           {tournament.participantMode === 'SquadOnly' && (
             <>

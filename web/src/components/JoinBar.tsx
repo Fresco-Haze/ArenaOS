@@ -1,18 +1,20 @@
 import { useState } from 'react'
 import { Link } from 'react-router'
 import { ApiError } from '../api'
-import { joinTournament, withdrawFromTournament } from '../lib/tournamentActions'
-import type { Tournament } from '../model'
+import { cancelJoinRequest, joinTournament, withdrawFromTournament } from '../lib/tournamentActions'
+import type { JoinRequestStatus, Tournament } from '../model'
 
 export default function JoinBar({
   tournament: t,
   signedIn,
   registered,
+  requestStatus,
   onDone,
 }: {
   tournament: Tournament
   signedIn: boolean
   registered: boolean
+  requestStatus?: JoinRequestStatus | null
   onDone: () => Promise<void>
 }) {
   const [busy, setBusy] = useState(false)
@@ -50,6 +52,21 @@ export default function JoinBar({
     )
   }
 
+  if (requestStatus === 'Pending') {
+    return (
+      <div className="tp-join">
+        <p role="status">Waiting for the organizer&rsquo;s approval.</p>
+        <button onClick={() => void run(() => cancelJoinRequest(t.tournamentId))} disabled={busy}>
+          {busy ? 'Working' : 'Cancel request'}
+        </button>
+        {error && <p role="alert" className="form-error">{error}</p>}
+      </div>
+    )
+  }
+  if (requestStatus === 'Declined') {
+    return <p className="muted tp-join">The organizer declined your request to join.</p>
+  }
+
   if ((t.registeredCount ?? 0) >= t.maxParticipants) {
     return <p className="muted tp-join">Registration is full.</p>
   }
@@ -58,7 +75,7 @@ export default function JoinBar({
     const next = encodeURIComponent(`/tournaments/${t.tournamentId}`)
     return (
       <div className="tp-join">
-        <Link to={`/login?next=${next}`} className="button-link btn-primary">Register Now</Link>
+        <Link to={`/login?next=${next}`} className="button-link btn-primary">{t.requireApproval ? 'Request to join' : 'Register Now'}</Link>
       </div>
     )
   }
@@ -66,7 +83,7 @@ export default function JoinBar({
   return (
     <div className="tp-join">
       <button className="btn-primary" onClick={() => void run(() => joinTournament(t.tournamentId))} disabled={busy}>
-        {busy ? 'Registering' : 'Register Now'}
+        {busy ? (t.requireApproval ? 'Requesting' : 'Registering') : (t.requireApproval ? 'Request to join' : 'Register Now')}
       </button>
       {error && <p role="alert" className="form-error">{error}</p>}
     </div>

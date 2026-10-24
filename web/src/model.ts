@@ -116,8 +116,19 @@ export const TournamentView = z.object({
   participants: z.array(Participant),
   viewerIsOwner: z.boolean(),
   viewerIsRegistered: z.boolean().default(false),
+  viewerRequestStatus: z.enum(['Pending', 'Approved', 'Declined']).nullish(),
 })
 export type TournamentView = z.infer<typeof TournamentView>
+
+export const JoinRequestStatus = z.enum(['Pending', 'Approved', 'Declined'])
+export type JoinRequestStatus = z.infer<typeof JoinRequestStatus>
+export const JoinRequestRow = z.object({
+  userId: z.number(),
+  username: z.string(),
+  status: JoinRequestStatus,
+})
+export type JoinRequestRow = z.infer<typeof JoinRequestRow>
+export const JoinRequestList = z.object({ requests: z.array(JoinRequestRow) })
 
 export const TournamentList = z.object({ tournaments: z.array(Tournament) })
 
