@@ -115,6 +115,7 @@ class Monad m => TournamentRepository m where
     updateTournamentVisibility :: TournamentId -> Visibility -> m ()
     updateTournamentFormat   :: TournamentId -> TournamentFormat -> m ()
     updateTournamentThirdPlaceMatch :: TournamentId -> Bool -> m ()
+    updateTournamentRequireApproval :: TournamentId -> Bool -> m ()
     listAllTournaments :: m [Tournament]
     updateTournamentDetails :: TournamentId -> TournamentDetails -> m ()
     publicStats :: m PublicStats

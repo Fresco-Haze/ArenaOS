@@ -27,6 +27,7 @@ export const Tournament = z.object({
   visibility: z.enum(['Public', 'Private']),
   maxParticipants: z.number(),
   thirdPlaceMatch: z.boolean(),
+  requireApproval: z.boolean().default(false),
   participantMode: ParticipantMode,
   game: Game.nullish(),
   startTime: z.string().nullish(),

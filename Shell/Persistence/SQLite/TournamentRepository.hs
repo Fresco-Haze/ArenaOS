@@ -189,17 +189,17 @@ tournamentSelect :: Query
 tournamentSelect =
     "SELECT id, name, organizer_name, owner_id, format, state, visibility, \
     \max_participants, third_place_match, bracket_id, \
-    \participant_mode, game, start_time, prize_kes, description \
+    \participant_mode, game, start_time, prize_kes, description, require_approval \
     \FROM tournaments"
 
 type TournamentRow =
     (Int, String, String, Int, String, String, String, Int, Int, Maybe Int)
-    :. (String, Maybe String, Maybe String, Maybe Int, Maybe String)
+    :. (String, Maybe String, Maybe String, Maybe Int, Maybe String, Int)
 
 decodeTournamentRow :: TournamentRow -> IO Tournament
 decodeTournamentRow
     ( (tidInt, name, organizer, ownerId, formatText, stateText, visText, maxP, thirdPlaceInt, bracketIdMaybe)
-      :. (modeText, gameMaybe, startMaybe, prizeMaybe, descMaybe) ) = do
+      :. (modeText, gameMaybe, startMaybe, prizeMaybe, descMaybe, approvalInt) ) = do
     format <- textToFormat formatText
     state  <- textToState stateText
     vis    <- textToVisibility visText
@@ -222,6 +222,7 @@ decodeTournamentRow
         , tournamentStartTime       = start
         , tournamentPrize           = prizeMaybe
         , tournamentDescription     = descMaybe
+        , tournamentRequireApproval = approvalInt /= 0
         }
 
 -- v0.12: public stats. "Public" = Public and past Draft (same set as the list).
@@ -310,8 +311,8 @@ instance TournamentRepository SQLiteM where
             UserId owner_id         = tournamentOwner t
             bracketIdMaybe          = (\(BracketId bid) -> bid) <$> tournamentBracket t
         liftIO $ execute conn
-            "INSERT INTO tournaments (id, name, organizer_name, owner_id, format, state, visibility, max_participants, third_place_match, bracket_id, participant_mode, game, start_time, prize_kes, description) \
-            \VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
+            "INSERT INTO tournaments (id, name, organizer_name, owner_id, format, state, visibility, max_participants, third_place_match, bracket_id, participant_mode, game, start_time, prize_kes, description, require_approval) \
+            \VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
             \ON CONFLICT(id) DO UPDATE SET \
             \  name = excluded.name, \
             \  organizer_name = excluded.organizer_name, \
@@ -325,7 +326,8 @@ instance TournamentRepository SQLiteM where
             \  game = excluded.game, \
             \  start_time = excluded.start_time, \
             \  prize_kes = excluded.prize_kes, \
-            \  description = excluded.description"
+            \  description = excluded.description, \
+            \  require_approval = excluded.require_approval"
             ( ( tidInt
               , tname
               , organizer
@@ -342,6 +344,7 @@ instance TournamentRepository SQLiteM where
                  , timeToText <$> tournamentStartTime t
                  , tournamentPrize t
                  , tournamentDescription t
+                 , fromEnum (tournamentRequireApproval t)
                  )
             )
 
@@ -425,6 +428,16 @@ instance TournamentRepository SQLiteM where
         liftIO $ execute conn
             "UPDATE tournaments SET third_place_match = ? WHERE id = ?"
             (thirdPlaceMatchToInt newThirdPlaceMatch, tidInt)
+        n <- liftIO $ changes conn
+        when (n == 0) $
+            liftIO $ throwIO (NotFound ("Tournament not found: " ++ show tidInt))
+
+    updateTournamentRequireApproval :: TournamentId -> Bool -> SQLiteM ()
+    updateTournamentRequireApproval (TournamentId tidInt) newApproval = do
+        conn <- asks envConnection
+        liftIO $ execute conn
+            "UPDATE tournaments SET require_approval = ? WHERE id = ?"
+            (fromEnum newApproval, tidInt)
         n <- liftIO $ changes conn
         when (n == 0) $
             liftIO $ throwIO (NotFound ("Tournament not found: " ++ show tidInt))

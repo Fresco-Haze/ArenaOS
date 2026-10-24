@@ -95,6 +95,7 @@ library
                       Application.UseCases.ListMyTournaments
                       Application.UseCases.ListPublicTournaments
                       Application.UseCases.UpdateTournamentThirdPlaceMatch
+                      Application.UseCases.UpdateTournamentRequireApproval
 
 
     hs-source-dirs:   .

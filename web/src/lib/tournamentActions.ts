@@ -59,6 +59,7 @@ export function createTournament(input: {
   visibility: 'Public' | 'Private'
   maxParticipants: number
   thirdPlaceMatch: boolean
+  requireApproval?: boolean
   participantMode?: 'IndividualOnly' | 'SquadOnly'
   format?: 'SingleElimination' | 'DoubleElimination' | 'RoundRobin'
   game?: Game | null
@@ -112,6 +113,13 @@ export function setThirdPlaceMatch(id: number, enabled: boolean) {
   return apiVoid(`/tournaments/${id}/third-place-match`, {
     method: 'POST',
     body: JSON.stringify({ thirdPlaceMatch: enabled }),
+  })
+}
+
+export function setRequireApproval(id: number, enabled: boolean) {
+  return apiVoid(`/tournaments/${id}/require-approval`, {
+    method: 'POST',
+    body: JSON.stringify({ requireApproval: enabled }),
   })
 }
 

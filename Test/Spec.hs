@@ -148,6 +148,8 @@ import Application.UseCases.GetTournamentSchedule (getTournamentSchedule, GetTou
 import qualified Application.UseCases.GetTournamentSchedule as GTS
 import qualified Application.UseCases.CreateTournament as CTU
 import qualified Application.UseCases.RegisterParticipant as RPC
+import qualified Application.UseCases.UpdateTournamentRequireApproval as UTRA
+import qualified Application.UseCases.CreateTournament as CreateApproval
 import qualified Engine.TournamentValidation as TV
 import qualified Application.UseCases.LoginUser as LU
 import qualified Application.UseCases.RegisterUser as RU
@@ -1421,7 +1423,7 @@ spec = before_ resetTestDb $ do
             , tournamentVisibility = Public
             , tournamentMaxParticipants = 2
             , tournamentBracket = Nothing
-            , tournamentOwner = UserId 1, tournamentThirdPlaceMatch = False, tournamentParticipantMode = IndividualOnly, tournamentGame = Nothing, tournamentStartTime = Nothing, tournamentPrize = Nothing, tournamentDescription = Nothing
+            , tournamentOwner = UserId 1, tournamentThirdPlaceMatch = False, tournamentParticipantMode = IndividualOnly, tournamentGame = Nothing, tournamentStartTime = Nothing, tournamentPrize = Nothing, tournamentDescription = Nothing, tournamentRequireApproval = False
             }
           tournaments = map mkT [Draft, Draft, Published, InProgress, Completed, Completed, Completed, Cancelled]
           overview = buildTournamentOverview tournaments
@@ -6370,6 +6372,26 @@ spec = before_ resetTestDb $ do
         Left err -> expectationFailure (show err)
         Right r  -> r `shouldBe` Left RPC.JoinNameTaken
 
+    it "Require approval: create stores the flag, and only the owner can toggle it" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "ra-owner-1"
+        other <- createTestUser "ra-other-1"
+        tid <- jnOpen owner "Approval Cup" 8 Public
+        t0 <- Repo.getTournament tid
+        a <- UTRA.updateTournamentRequireApproval other tid True
+        b <- UTRA.updateTournamentRequireApproval owner tid True
+        t1 <- Repo.getTournament tid
+        c <- UTRA.updateTournamentRequireApproval owner tid False
+        t2 <- Repo.getTournament tid
+        tid2 <- unwrap =<< CreateApproval.createTournamentWithApproval (raNew owner "Approval Create Cup") noDetails True
+        t3 <- Repo.getTournament tid2
+        tid3 <- unwrap =<< CreateApproval.createTournamentWithApproval (raNew owner "Open Create Cup") noDetails False
+        t4 <- Repo.getTournament tid3
+        pure ( tournamentRequireApproval t0, raTag a, raTag b, tournamentRequireApproval t1
+             , raTag c, tournamentRequireApproval t2, tournamentRequireApproval t3, tournamentRequireApproval t4 )
+      result `shouldBe` Right (False, "unauthorized", "ok", True, "ok", False, True, False)
+
     it "Organizer removes a participant: removes, and the player can register again" $ do
       result <- runSQLiteM testDbPath $ do
         setupSchema
@@ -6544,7 +6566,7 @@ spec = before_ resetTestDb $ do
           , tournamentOrganizer = OrganizerName "x", tournamentFormat = SingleElimination
           , tournamentState = st, tournamentVisibility = vis
           , tournamentMaxParticipants = 2, tournamentBracket = Nothing
-          , tournamentOwner = UserId 1, tournamentThirdPlaceMatch = False, tournamentParticipantMode = IndividualOnly, tournamentGame = Nothing, tournamentStartTime = Nothing, tournamentPrize = Nothing, tournamentDescription = Nothing }
+          , tournamentOwner = UserId 1, tournamentThirdPlaceMatch = False, tournamentParticipantMode = IndividualOnly, tournamentGame = Nothing, tournamentStartTime = Nothing, tournamentPrize = Nothing, tournamentDescription = Nothing, tournamentRequireApproval = False }
         owner    = Just (UserId 1)
         stranger = Just (UserId 2)
 
@@ -6600,7 +6622,7 @@ spec = before_ resetTestDb $ do
           , tournamentOrganizer = OrganizerName "x", tournamentFormat = SingleElimination
           , tournamentState = st, tournamentVisibility = vis
           , tournamentMaxParticipants = 2, tournamentBracket = Nothing
-          , tournamentOwner = UserId 1, tournamentThirdPlaceMatch = False, tournamentParticipantMode = IndividualOnly, tournamentGame = Nothing, tournamentStartTime = Nothing, tournamentPrize = Nothing, tournamentDescription = Nothing }
+          , tournamentOwner = UserId 1, tournamentThirdPlaceMatch = False, tournamentParticipantMode = IndividualOnly, tournamentGame = Nothing, tournamentStartTime = Nothing, tournamentPrize = Nothing, tournamentDescription = Nothing, tournamentRequireApproval = False }
         ids = map (unTournamentId . tournamentId)
 
     it "keeps only Public tournaments past Draft, newest first" $
@@ -8780,7 +8802,7 @@ plT i name g = Tournament
   , tournamentMaxParticipants = 2, tournamentBracket = Nothing
   , tournamentOwner = UserId 1, tournamentThirdPlaceMatch = False
   , tournamentParticipantMode = IndividualOnly
-  , tournamentGame = g, tournamentStartTime = Nothing, tournamentPrize = Nothing, tournamentDescription = Nothing }
+  , tournamentGame = g, tournamentStartTime = Nothing, tournamentPrize = Nothing, tournamentDescription = Nothing, tournamentRequireApproval = False }
 
 -- ids 1..60; id 3 is "Zebra Open" (Call of Duty); other even ids are eFootball
 plAll :: [Tournament]
@@ -9053,6 +9075,23 @@ formatChangeSpec = describe "Format change (v0.12)" $ do
         (r1, r2, r3) `shouldBe` (Right (), Right (), Right ())
         f `shouldBe` RoundRobin
         changed `shouldBe` [TournamentHistory.FieldFormat, TournamentHistory.FieldFormat, TournamentHistory.FieldFormat]
+
+raTag :: Either UTRA.UpdateTournamentRequireApprovalError () -> String
+raTag (Right ())                         = "ok"
+raTag (Left (UTRA.Unauthorized _))       = "unauthorized"
+raTag (Left (UTRA.InvalidLifecycle _))   = "lifecycle"
+
+raNew :: UserId -> String -> NewTournament
+raNew owner name = NewTournament
+  { newTournamentName            = TournamentName name
+  , newTournamentOrganizer       = OrganizerName "ra"
+  , newTournamentFormat          = SingleElimination
+  , newTournamentVisibility      = Public
+  , newTournamentMaxParticipants = 8
+  , newTournamentThirdPlaceMatch = False
+  , newTournamentParticipantMode = IndividualOnly
+  , newTournamentOwner           = owner
+  }
 
 rmTag :: Either RPC.RemoveError () -> String
 rmTag (Right ())                        = "ok"

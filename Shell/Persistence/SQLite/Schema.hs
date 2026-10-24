@@ -40,6 +40,7 @@ newTournamentColumns =
   , ("prize", "ALTER TABLE tournaments ADD COLUMN prize TEXT")
   , ("prize_kes", "ALTER TABLE tournaments ADD COLUMN prize_kes INTEGER CHECK (prize_kes IS NULL OR prize_kes > 0)")
   , ("description", "ALTER TABLE tournaments ADD COLUMN description TEXT")
+  , ("require_approval", "ALTER TABLE tournaments ADD COLUMN require_approval INTEGER NOT NULL DEFAULT 0 CHECK (require_approval IN (0, 1))")
   ]
 
 migrateTournamentColumns :: Connection -> IO ()
@@ -108,7 +109,8 @@ statements =
     \  bracket_id         INTEGER REFERENCES brackets(id), \
     \  game               TEXT CHECK (game IS NULL OR game IN ('eFootball', 'PubgMobile', 'CallOfDuty', 'Other')), \
     \  start_time         TEXT, \
-    \  prize              TEXT \
+    \  prize              TEXT, \
+    \  require_approval   INTEGER NOT NULL DEFAULT 0 CHECK (require_approval IN (0, 1)) \
     \)"
     -- Circular FK with brackets.tournament_id below -- SQLite allows
     -- the forward reference at CREATE TABLE time; the insert-order

@@ -89,5 +89,6 @@ data Tournament = Tournament
     , tournamentStartTime :: Maybe UTCTime
     , tournamentPrize :: Maybe Int
     , tournamentDescription :: Maybe String
+    , tournamentRequireApproval :: Bool
     } deriving (Show, Eq)
 

@@ -83,6 +83,7 @@ import qualified Application.UseCases.CancelTournament as Cancel
 import Domain.TournamentError (TournamentError(..))
 import qualified Application.UseCases.ListPublicTournaments as ListPublic
 import qualified Application.UseCases.UpdateTournamentThirdPlaceMatch as UTTP
+import qualified Application.UseCases.UpdateTournamentRequireApproval as UTRA
 import qualified Application.UseCases.UpdateTournamentName as UTN
 import qualified Application.UseCases.UpdateTournamentDetails as UTD
 import qualified Application.UseCases.UpdateTournamentFormat as UTF
@@ -506,6 +507,7 @@ data CreateReq = CreateReq
   , reqMaxPlayers      :: Int
   , reqThirdPlaceMatch :: Bool
   , reqParticipantMode :: ParticipantMode
+  , reqRequireApproval :: Bool
   , reqDetails         :: TournamentDetails
   }
 
@@ -532,7 +534,8 @@ instance FromJSON CreateReq where
       "SquadOnly"      -> pure SquadOnly
       _ -> fail "participantMode must be IndividualOnly or SquadOnly"
     DetailsReq det <- parseJSON (Object o)
-    pure (CreateReq n org fmt vis m tp mode det)
+    ra  <- o .:? "requireApproval" .!= False
+    pure (CreateReq n org fmt vis m tp mode ra det)
   --  pure (CreateReq n org fmt vis m tp)
 
 toNewTournament :: UserId -> CreateReq -> NewTournament
@@ -637,6 +640,7 @@ tournamentPairs t =
   , "visibility"      .= T.pack (show (tournamentVisibility t))
   , "maxParticipants" .= tournamentMaxParticipants t
   , "thirdPlaceMatch" .= tournamentThirdPlaceMatch t
+  , "requireApproval" .= tournamentRequireApproval t
   , "participantMode" .= T.pack (show (tournamentParticipantMode t))
   , "bracketId"       .= fmap unBracketId (tournamentBracket t)
   ]
@@ -810,6 +814,16 @@ fromUpdateThirdPlaceMatch (UTTP.InvalidTournament v) = fromValidation v
 fromUpdateThirdPlaceMatch UTTP.BracketAlreadyGenerated =
   ApiError status409 "BRACKET_ALREADY_GENERATED"
     "The third-place setting can't change once the bracket exists" (object [])
+
+newtype RequireApprovalReq = RequireApprovalReq Bool
+
+instance FromJSON RequireApprovalReq where
+  parseJSON = withObject "requireApproval" $ \o ->
+    RequireApprovalReq <$> o .: "requireApproval"
+
+fromUpdateRequireApproval :: UTRA.UpdateTournamentRequireApprovalError -> ApiError
+fromUpdateRequireApproval (UTRA.Unauthorized a)     = fromAuthorization a
+fromUpdateRequireApproval (UTRA.InvalidLifecycle l) = fromLifecycle l
 
 
 data NameReq = NameReq String
@@ -1245,7 +1259,7 @@ main = do
         (_, Left reason) -> sendError (invalidBody reason)
         (Just uid, Right req) -> do
           result <- runUseCase lock
-                      (Create.createTournamentWithDetails (toNewTournament uid req) (reqDetails req))
+                      (Create.createTournamentWithApproval (toNewTournament uid req) (reqDetails req) (reqRequireApproval req))
                  --     (Create.createTournamentChecked (toNewTournament (UserId uid) req))
           case result of
             Left apiErr -> sendError apiErr
@@ -1513,6 +1527,14 @@ main = do
         Right (ThirdPlaceMatchReq tp) ->
           runTransition lock
             (\uid tid -> UTTP.updateTournamentThirdPlaceMatch uid tid tp) fromUpdateThirdPlaceMatch
+
+    post "/tournaments/:id/require-approval" $ do
+      raw <- body
+      case eitherDecode raw of
+        Left reason -> sendError (invalidBody reason)
+        Right (RequireApprovalReq ra) ->
+          runTransition lock
+            (\uid tid -> UTRA.updateTournamentRequireApproval uid tid ra) fromUpdateRequireApproval
 
     get "/teams" $ do
       mUser <- currentUser lock

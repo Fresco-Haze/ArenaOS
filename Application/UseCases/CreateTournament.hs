@@ -3,6 +3,7 @@ module Application.UseCases.CreateTournament
   , createTournamentChecked
   , CreateTournamentError(..)
   , createTournamentWithDetails
+  , createTournamentWithApproval
   , CreateWithDetailsError(..)
   ) where
 
@@ -58,7 +59,16 @@ createTournamentWithDetails
   => NewTournament
   -> TournamentDetails
   -> m (Either CreateWithDetailsError TournamentId)
-createTournamentWithDetails nt details =
+createTournamentWithDetails nt details = createTournamentWithApproval nt details False
+
+-- Same as above, plus the join-approval flag, written in the same transaction.
+createTournamentWithApproval
+  :: (TournamentRepository m, TournamentHistoryRepository m, Transactional m)
+  => NewTournament
+  -> TournamentDetails
+  -> Bool
+  -> m (Either CreateWithDetailsError TournamentId)
+createTournamentWithApproval nt details approval =
   case validateTournamentFields
          (newTournamentName nt)
          (newTournamentOrganizer nt)
@@ -71,5 +81,6 @@ createTournamentWithDetails nt details =
         Right d -> fmap Right $ withTxN $ do
           tid <- Repo.createTournament nt
           when (d /= noDetails) (Repo.updateTournamentDetails tid d)
+          when approval (Repo.updateTournamentRequireApproval tid True)
           Repo.recordHistoryEvent tid TournamentCreated
           pure tid
