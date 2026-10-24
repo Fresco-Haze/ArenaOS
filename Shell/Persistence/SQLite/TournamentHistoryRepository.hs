@@ -15,6 +15,7 @@ import Domain.TournamentHistory
     ( TournamentHistoryEvent(..)
     , TournamentHistoryEntry(..)
     , ChangedField(..)
+    , ActivityItem(..)
     )
 
 import Shell.Persistence.Port (TournamentHistoryRepository(..))
@@ -90,8 +91,8 @@ instance TournamentHistoryRepository SQLiteM where
         conn <- asks envConnection
         let (eventType, reason, field) = eventToRow event
         liftIO $ execute conn
-            "INSERT INTO tournament_history (tournament_id, event_type, cancellation_reason, changed_field) \
-            \VALUES (?, ?, ?, ?)"
+            "INSERT INTO tournament_history (tournament_id, event_type, cancellation_reason, changed_field, occurred_at) \
+            \VALUES (?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))"
             (tidInt, eventType, reason, field)
 
     getTournamentHistory :: TournamentId -> SQLiteM [TournamentHistoryEntry]
@@ -111,4 +112,29 @@ instance TournamentHistoryRepository SQLiteM where
                 { historyEntryId      = entryId
                 , historyTournamentId = TournamentId tidInt
                 , historyEvent        = event
+                }
+
+    recentPublicActivity :: Int -> SQLiteM [ActivityItem]
+    recentPublicActivity limitN = do
+        conn <- asks envConnection
+        rows <- liftIO $
+            (query conn
+                "SELECT h.tournament_id, t.name, h.event_type, h.cancellation_reason, h.changed_field, h.occurred_at \
+                \FROM tournament_history h JOIN tournaments t ON t.id = h.tournament_id \
+                \WHERE t.visibility = 'Public' AND t.state <> 'Draft' \
+                \AND h.occurred_at IS NOT NULL \
+                \AND h.event_type IN ('TournamentPublished', 'RegistrationOpened', 'TournamentStarted', \
+                \                     'TournamentCompleted', 'TournamentCancelled', 'TournamentReopened') \
+                \ORDER BY h.occurred_at DESC, h.id DESC LIMIT ?"
+                (Only limitN)
+             :: IO [(Int, String, String, Maybe String, Maybe String, String)])
+        liftIO (mapM decodeItem rows)
+      where
+        decodeItem (tid, name, eventType, reason, field, at) = do
+            event <- rowToEvent eventType reason field
+            pure ActivityItem
+                { activityTournamentId   = TournamentId tid
+                , activityTournamentName = name
+                , activityEvent          = event
+                , activityAt             = at
                 }

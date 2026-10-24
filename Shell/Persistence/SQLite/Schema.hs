@@ -30,6 +30,7 @@ initializeSchema conn = do
   mapM_ (execute_ conn) statements
   migrateTournamentColumns conn
   migrateRegistrationColumns conn
+  migrateHistoryColumns conn
   migrateUserColumns conn
   migratePasswordResets conn
 
@@ -73,6 +74,15 @@ migrateUserColumns conn = do
 migratePasswordResets :: Connection -> IO ()
 migratePasswordResets conn =
   execute_ conn "CREATE TABLE IF NOT EXISTS password_resets (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), secret_hash TEXT NOT NULL, expires_at INTEGER NOT NULL, used_at INTEGER)"
+
+-- v0.12: history events carry the time they happened. Rows written before
+-- this column existed stay NULL and are left out of the activity feed.
+migrateHistoryColumns :: Connection -> IO ()
+migrateHistoryColumns conn = do
+  cols <- query_ conn "PRAGMA table_info(tournament_history)" :: IO [(Int, String, String, Int, Maybe String, Int)]
+  let present = [ n | (_, n, _, _, _, _) <- cols ]
+  when ("occurred_at" `notElem` present) $
+    execute_ conn "ALTER TABLE tournament_history ADD COLUMN occurred_at TEXT"
 
 statements :: [Query]
 statements =

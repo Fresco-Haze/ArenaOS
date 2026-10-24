@@ -152,6 +152,7 @@ import qualified Application.UseCases.CreateTournament as CTU
 import qualified Application.UseCases.RegisterParticipant as RPC
 import qualified Application.UseCases.UpdateTournamentRequireApproval as UTRA
 import qualified Application.UseCases.JoinRequests as JRQ
+import qualified Domain.TournamentHistory as ActH
 import qualified Application.UseCases.CreateTournament as CreateApproval
 import qualified Engine.TournamentValidation as TV
 import qualified Application.UseCases.LoginUser as LU
@@ -6433,6 +6434,29 @@ spec = before_ resetTestDb $ do
         rc <- JRQ.approveJoinRequest owner tid c
         pure (apTag x, dcTag y, apTag ra, apTag rb, apTag rc)
       result `shouldBe` Right ("unauthorized", "unauthorized", "ok", "ok", "full")
+
+    it "Recent activity: lists public events newest first, never private or draft tournaments" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "act-owner-1"
+        _ <- jnOpen owner "Act Public Cup" 8 Public
+        _ <- jnOpen owner "Act Private Cup" 8 Private
+        _ <- dtCreate owner "Act Draft Cup" noDetails
+        items <- Repo.recentPublicActivity 10
+        pure (map (\i -> (ActH.activityTournamentName i, ActH.activityEvent i)) items)
+      result `shouldBe` Right [("Act Public Cup", ActH.RegistrationOpened), ("Act Public Cup", ActH.TournamentPublished)]
+
+    it "Recent activity: the limit applies" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "act-owner-2"
+        _ <- jnOpen owner "Act Cap A" 8 Public
+        _ <- jnOpen owner "Act Cap B" 8 Public
+        _ <- jnOpen owner "Act Cap C" 8 Public
+        three <- length <$> Repo.recentPublicActivity 3
+        everything <- length <$> Repo.recentPublicActivity 50
+        pure (three, everything)
+      result `shouldBe` Right (3, 6)
 
     it "Join requests: with approval off, joining registers immediately as before" $ do
       result <- runSQLiteM testDbPath $ do

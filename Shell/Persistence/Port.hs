@@ -49,7 +49,7 @@ import Domain.BracketLinks (BracketLinks)
 import Domain.Match (Match, MatchId)
 import Domain.User (User(..), Username(..), Email(..), PasswordHash(..), AccountStatus(..))
 import Domain.Ids ( UserId(..))
-import Domain.TournamentHistory (TournamentHistoryEvent, TournamentHistoryEntry)
+import Domain.TournamentHistory (TournamentHistoryEvent, TournamentHistoryEntry, ActivityItem)
 import Domain.Role (Role(..))
 import Domain.Audit (AuditEvent(..))
 import Domain.Scoreable (EFootballScore)
@@ -217,6 +217,7 @@ class Monad m => PasswordHasher m where
 class TournamentHistoryRepository m where
     recordHistoryEvent  :: TournamentId -> TournamentHistoryEvent -> m ()
     getTournamentHistory :: TournamentId -> m [TournamentHistoryEntry]
+    recentPublicActivity :: Int -> m [ActivityItem]
 
 
 class Monad m => RoleRepository m where

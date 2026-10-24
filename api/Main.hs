@@ -102,6 +102,7 @@ import Shell.Persistence.SQLite.EFootballScoreRepository ()
 import Shell.Persistence.SQLite.JoinRequestRepository ()
 import qualified Application.UseCases.JoinRequests as JRQ
 import Domain.JoinRequest (JoinRequestStatus(..))
+import qualified Domain.TournamentHistory as TH
 import Domain.Participant (Participant(..), Player(..), PlayerName(..), Team(..), TeamName(..))
 import qualified Application.UseCases.CreateTeam as CT
 import Application.UseCases.CreateTeam (createTeam, CreateTeamError(..))
@@ -629,6 +630,24 @@ statsJson s = object
   , "teams"             .= statsTeams s
   , "prizePool"         .= statsPrizePool s
   , "byGame"            .= [ object ["game" .= gameText g, "count" .= n] | (g, n) <- statsByGame s ]
+  ]
+
+activityEventText :: TH.TournamentHistoryEvent -> Text
+activityEventText e = case e of
+  TH.TournamentPublished   -> "Published"
+  TH.RegistrationOpened    -> "RegistrationOpened"
+  TH.TournamentStarted     -> "Started"
+  TH.TournamentCompleted   -> "Completed"
+  TH.TournamentCancelled _ -> "Cancelled"
+  TH.TournamentReopened _  -> "Reopened"
+  _                        -> "Other"
+
+activityJson :: TH.ActivityItem -> Value
+activityJson a = object
+  [ "tournamentId" .= unTournamentId (TH.activityTournamentId a)
+  , "name"         .= TH.activityTournamentName a
+  , "event"        .= activityEventText (TH.activityEvent a)
+  , "at"           .= TH.activityAt a
   ]
 
 tournamentPairs :: Tournament -> [Pair]
@@ -1666,6 +1685,13 @@ main = do
       case result of
         Left apiErr -> sendError apiErr
         Right s     -> json (statsJson s)
+
+    -- public, no login: latest events of public tournaments past Draft
+    get "/activity" $ do
+      result <- runUseCase lock (Repo.recentPublicActivity 10)
+      case result of
+        Left apiErr -> sendError apiErr
+        Right items -> json (object ["activity" .= map activityJson items])
 
     get "/tournaments" $ do
       mv <- viewer lock

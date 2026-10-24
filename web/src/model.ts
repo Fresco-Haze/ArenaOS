@@ -132,6 +132,15 @@ export const JoinRequestList = z.object({ requests: z.array(JoinRequestRow) })
 
 export const TournamentList = z.object({ tournaments: z.array(Tournament) })
 
+export const ActivityItem = z.object({
+  tournamentId: z.number(),
+  name: z.string(),
+  event: z.enum(['Published', 'RegistrationOpened', 'Started', 'Completed', 'Cancelled', 'Reopened', 'Other']),
+  at: z.string(),
+})
+export type ActivityItem = z.infer<typeof ActivityItem>
+export const ActivityList = z.object({ activity: z.array(ActivityItem) })
+
 export const LoginResponse = z.object({
   token: z.string(),
   user: z.object({ id: z.number(), username: z.string(), fullName: z.string().nullish() }),

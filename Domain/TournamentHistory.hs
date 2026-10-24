@@ -4,6 +4,7 @@ module Domain.TournamentHistory
     ( TournamentHistoryEvent(..)
     , ChangedField(..)
     , TournamentHistoryEntry(..)
+    , ActivityItem(..)
     ) where
 
 import Domain.Ids (TournamentId(..))
@@ -45,4 +46,13 @@ data TournamentHistoryEntry = TournamentHistoryEntry
     { historyEntryId      :: Int
     , historyTournamentId :: TournamentId
     , historyEvent        :: TournamentHistoryEvent
+    } deriving (Show, Eq)
+
+-- One line of the public activity feed. The time is canonical UTC text
+-- (YYYY-MM-DDTHH:MM:SSZ) written by SQLite itself.
+data ActivityItem = ActivityItem
+    { activityTournamentId   :: TournamentId
+    , activityTournamentName :: String
+    , activityEvent          :: TournamentHistoryEvent
+    , activityAt             :: String
     } deriving (Show, Eq)

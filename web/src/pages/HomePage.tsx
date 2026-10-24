@@ -2,10 +2,10 @@ import { useState } from 'react'
 import type { ReactNode } from 'react'
 import { Link } from 'react-router'
 import { useApi } from '../hooks/useApi'
-import { startsIn } from '../lib/cardDate'
+import { startsIn, timeAgo } from '../lib/cardDate'
 import { formatKes } from '../lib/money'
-import { gameLabel, PublicStatsView, TournamentList } from '../model'
-import type { Game } from '../model'
+import { ActivityList, gameLabel, PublicStatsView, TournamentList } from '../model'
+import type { ActivityItem, Game } from '../model'
 import EmptyState from '../components/EmptyState'
 import ErrorBanner from '../components/ErrorBanner'
 import LoadingBlock from '../components/LoadingBlock'
@@ -125,6 +125,42 @@ function UpcomingPanel() {
   )
 }
 
+const ACTIVITY_TEXT: Record<ActivityItem['event'], string> = {
+  Published: 'Published',
+  RegistrationOpened: 'Registration opened',
+  Started: 'Started',
+  Completed: 'Completed',
+  Cancelled: 'Cancelled',
+  Reopened: 'Reopened',
+  Other: 'Updated',
+}
+
+function ActivityPanel() {
+  const act = useApi('/activity', ActivityList, true)
+  const [now] = useState(() => Date.now())
+  const items = act.data ? act.data.activity : null
+  return (
+    <RailPanel id="activity-heading" icon="pulse" title="Recent Activity">
+      {act.error ? (
+        <ErrorBanner message={act.error} onRetry={act.retry} />
+      ) : items === null ? (
+        <LoadingBlock label="Loading activity" />
+      ) : items.length === 0 ? (
+        <p className="muted rail-empty">Tournament activity will appear here.</p>
+      ) : (
+        <ul className="arows">
+          {items.map((a, i) => (
+            <li key={i} className="arow">
+              <Link to={`/tournaments/${a.tournamentId}`} className="arow-name">{a.name}</Link>
+              <p className="arow-sub">{ACTIVITY_TEXT[a.event]} &bull; {timeAgo(a.at, now)}</p>
+            </li>
+          ))}
+        </ul>
+      )}
+    </RailPanel>
+  )
+}
+
 export default function HomePage() {
   const list = useApi('/tournaments', TournamentList, true)
   const stats = useApi('/stats', PublicStatsView, true)
@@ -228,9 +264,7 @@ export default function HomePage() {
           <p className="muted rail-empty">Not available yet. This will show your next scheduled match.</p>
         </RailPanel>
         <UpcomingPanel />
-        <RailPanel id="activity-heading" icon="pulse" title="Recent Activity" soon>
-          <p className="muted rail-empty">Not available yet. Tournament activity will appear here.</p>
-        </RailPanel>
+        <ActivityPanel />
         <RailPanel id="top-players-heading" icon="trophy" title="Top Players (Global)" soon>
           <p className="muted rail-empty">Not available yet. Rankings will appear here.</p>
         </RailPanel>
