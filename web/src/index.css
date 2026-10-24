@@ -1306,8 +1306,8 @@ main > .form { max-width: 32rem; }
   font-size: 0.7rem; line-height: 1.1rem; text-align: center;
 }
 .bell-panel {
-  position: absolute; right: 0; top: calc(100% + 8px); width: min(22rem, 90vw);
-  max-height: 24rem; overflow: auto; background: var(--surface);
+  position: absolute; right: 0; top: calc(100% + 8px); width: min(19rem, 90vw);
+  max-height: min(24rem, 70vh); overflow: auto; background: var(--surface);
   border: 1px solid var(--line); border-radius: 12px; padding: var(--space-2); z-index: 50;
 }
 .bell-empty { margin: 0; padding: var(--space-3); }
@@ -1316,3 +1316,9 @@ main > .form { max-width: 32rem; }
 .note-new { border-left: 3px solid var(--brand-solid); }
 .note-title { margin: 0; font-weight: 600; }
 .note-sub { margin: 0; color: var(--muted); font-size: 0.8125rem; }
+
+/* join requests: tighter heading gap and smaller buttons */
+.requests { margin: var(--space-4) 0; }
+.requests h3 { margin: 0 0 var(--space-2); }
+.req-list { gap: var(--space-2); }
+.req-actions button { padding: 6px 14px; }
