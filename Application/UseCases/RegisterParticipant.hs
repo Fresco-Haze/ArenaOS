@@ -7,6 +7,8 @@ module Application.UseCases.RegisterParticipant
   , JoinTournamentError(..)
   , withdrawFromTournament
   , WithdrawError(..)
+  , removeParticipant
+  , RemoveError(..)
   , listMyRegistrations
   ) where
 
@@ -16,7 +18,7 @@ import Domain.User (Username(..), User(username))
 
 import Domain.Ids (UserId)
 import Domain.Participant (Participant(..), Player(..), PlayerName(..))
-import Domain.Registration (registrationParticipant)
+import Domain.Registration (registrationParticipant, registrationId)
 import Domain.Tournament
   (Tournament, TournamentId, TournamentState(RegistrationOpen), tournamentMaxParticipants, tournamentParticipantMode, ParticipantMode(..))
 import Application.Internal.Authorization (AuthorizationError, requireTournamentOwner, requireVisibleToViewer)
@@ -184,6 +186,36 @@ withdrawFromTournament caller tid =
           Just rid -> do
             Repo.deleteRegistration rid
             pure (Right ())
+
+data RemoveError
+  = RemoveUnauthorized AuthorizationError
+  | RemoveLifecycle LifecycleError
+  | RemoveNotRegistered
+  deriving (Eq, Show)
+
+-- Organizer removes a participant while registration is open (plain remove).
+removeParticipant
+  :: (TournamentRepository m, RegistrationRepository m, Transactional m)
+  => UserId
+  -> TournamentId
+  -> Participant
+  -> m (Either RemoveError ())
+removeParticipant caller tid participant =
+  withTxEither $ do
+    tournament <- Repo.getTournament tid
+    case preChecks tournament of
+      Left e -> pure (Left e)
+      Right () -> do
+        regs <- Repo.listRegistrations tid
+        case filter ((== participant) . registrationParticipant) regs of
+          []      -> pure (Left RemoveNotRegistered)
+          (r : _) -> do
+            Repo.deleteRegistration (registrationId r)
+            pure (Right ())
+  where
+    preChecks t = do
+      first RemoveUnauthorized (requireTournamentOwner caller t)
+      first RemoveLifecycle (requireTournamentState RegistrationOpen t)
 
 listMyRegistrations
   :: (TournamentRepository m, RegistrationRepository m)

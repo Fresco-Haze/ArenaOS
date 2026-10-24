@@ -6370,6 +6370,37 @@ spec = before_ resetTestDb $ do
         Left err -> expectationFailure (show err)
         Right r  -> r `shouldBe` Left RPC.JoinNameTaken
 
+    it "Organizer removes a participant: removes, and the player can register again" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "rm-owner-1"
+        tid <- jnOpen owner "Remove Cup" 8 Public
+        let p = Individual (Player (PlayerName "rm-fresco"))
+        _ <- unwrap =<< RPC.registerParticipantChecked owner tid p
+        before <- length <$> Repo.listRegistrations tid
+        r1 <- RPC.removeParticipant owner tid p
+        after <- length <$> Repo.listRegistrations tid
+        _ <- unwrap =<< RPC.registerParticipantChecked owner tid p
+        again <- length <$> Repo.listRegistrations tid
+        pure (before, rmTag r1, after, again)
+      result `shouldBe` Right (1, "ok", 0, 1)
+
+    it "Organizer removes a participant: rejects non-owner, not-registered and wrong state" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "rm-owner-2"
+        other <- createTestUser "rm-other-2"
+        tid <- jnOpen owner "Remove Guard Cup" 8 Public
+        draftTid <- dtCreate owner "Remove Draft Cup" noDetails
+        let p = Individual (Player (PlayerName "rm-guard"))
+        _ <- unwrap =<< RPC.registerParticipantChecked owner tid p
+        a <- RPC.removeParticipant other tid p
+        b <- RPC.removeParticipant owner tid (Individual (Player (PlayerName "rm-nobody")))
+        c <- RPC.removeParticipant owner draftTid p
+        left <- length <$> Repo.listRegistrations tid
+        pure (rmTag a, rmTag b, rmTag c, left)
+      result `shouldBe` Right ("unauthorized", "not-registered", "lifecycle", 1)
+
     it "withdraws while registration is open, and rejects a second withdraw" $ do
       result <- runSQLiteM testDbPath $ do
         setupSchema
@@ -9022,6 +9053,12 @@ formatChangeSpec = describe "Format change (v0.12)" $ do
         (r1, r2, r3) `shouldBe` (Right (), Right (), Right ())
         f `shouldBe` RoundRobin
         changed `shouldBe` [TournamentHistory.FieldFormat, TournamentHistory.FieldFormat, TournamentHistory.FieldFormat]
+
+rmTag :: Either RPC.RemoveError () -> String
+rmTag (Right ())                        = "ok"
+rmTag (Left (RPC.RemoveUnauthorized _)) = "unauthorized"
+rmTag (Left (RPC.RemoveLifecycle _))    = "lifecycle"
+rmTag (Left RPC.RemoveNotRegistered)    = "not-registered"
 
 jnOpen :: UserId -> String -> Int -> Visibility -> SQLiteM TournamentId
 jnOpen owner name mx vis = do

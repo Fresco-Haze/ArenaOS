@@ -1,5 +1,5 @@
 import { api, apiVoid } from '../api'
-import { Match, Tournament, RegistrationResult, BracketIdResult, CreateTournamentResponse, CreateTeamResponse, TeamList, type Game, type TournamentFormat } from '../model'
+import { Match, Tournament, RegistrationResult, BracketIdResult, CreateTournamentResponse, CreateTeamResponse, TeamList, type Game, type Participant, type TournamentFormat } from '../model'
 
 export function publish(id: number) {
   return apiVoid(`/tournaments/${id}/publish`, { method: 'POST' })
@@ -189,4 +189,14 @@ export function joinTournament(id: number) {
 
 export function withdrawFromTournament(id: number) {
   return apiVoid(`/tournaments/${id}/withdraw`, { method: 'POST' })
+}
+
+export function removeParticipant(id: number, p: Participant) {
+  const body = p.type === 'Squad'
+    ? { type: 'Squad', teamName: p.team.name }
+    : { type: 'Individual', player: p.player }
+  return apiVoid(`/tournaments/${id}/registrations/remove`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
 }

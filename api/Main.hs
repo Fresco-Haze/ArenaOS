@@ -671,6 +671,12 @@ fromWithdraw (Register.WithdrawLifecycle l) = fromLifecycle l
 fromWithdraw Register.WithdrawNotRegistered =
   ApiError status404 "NOT_REGISTERED" "You are not registered for this tournament" (object [])
 
+fromRemove :: Register.RemoveError -> ApiError
+fromRemove (Register.RemoveUnauthorized a) = fromAuthorization a
+fromRemove (Register.RemoveLifecycle l)    = fromLifecycle l
+fromRemove Register.RemoveNotRegistered =
+  ApiError status404 "NOT_REGISTERED" "That participant is not registered for this tournament" (object [])
+
 fromGetTournament :: GetT.GetTournamentError -> ApiError
 fromGetTournament (GetT.Unauthorized a) = fromAuthorization a
 
@@ -1272,6 +1278,23 @@ main = do
       runAction lock Register.joinTournament fromJoin $ \rid -> do
         status status201
         json (object ["registrationId" .= unRegistrationId rid])
+
+    post "/tournaments/:id/registrations/remove" $ do
+      raw <- body
+      case eitherDecode raw of
+        Left reason -> sendError (invalidBody reason)
+        Right req -> do
+          resolved <- do
+            mu <- currentUser lock
+            case mu of
+              Nothing -> pure (Left unauthenticated)
+              Just _  -> runUseCase lock (resolveParticipantReq req)
+          case resolved of
+            Left apiErr -> sendError apiErr
+            Right p ->
+              runAction lock
+                (\uid tid -> Register.removeParticipant uid tid p)
+                fromRemove (\() -> status status204)
 
     post "/tournaments/:id/withdraw" $
       runAction lock Register.withdrawFromTournament fromWithdraw (\() -> status status204)

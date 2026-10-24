@@ -8,7 +8,7 @@ import { useTournament } from '../hooks/useTournament'
 import { participantName } from '../lib/participants'
 import { formatCardDate } from '../lib/cardDate'
 import { formatKes } from '../lib/money'
-import { formatLabel, gameLabel, stateLabel } from '../model'
+import { formatLabel, gameLabel, stateLabel, type Participant } from '../model'
 
 import Bracket from '../components/Bracket'
 import EmptyState from '../components/EmptyState'
@@ -18,6 +18,8 @@ import OrganizerPanel from '../components/OrganizerPanel'
 import PlayerLookup from '../components/PlayerLookup'
 import Tabs from '../components/Tabs'
 import JoinBar from '../components/JoinBar'
+import ConfirmDialog from '../components/ConfirmDialog'
+import { removeParticipant } from '../lib/tournamentActions'
 
 type TabId = 'bracket' | 'players'
 
@@ -53,6 +55,7 @@ export default function TournamentPage({ id }: { id: string }) {
   const { user } = useAuth()
   const { state, reload } = useTournament(id)
   const [tab, setTab] = useState<TabId>('bracket')
+  const [removing, setRemoving] = useState<Participant | null>(null)
 
   if (state.kind === 'loading') {
     return <LoadingBlock label="Loading tournament" rows={4} />
@@ -96,6 +99,7 @@ export default function TournamentPage({ id }: { id: string }) {
   const mode = squads ? 'Squad' : '1v1'
   const gameName = t.game && t.game !== 'Other' ? gameLabel[t.game] : null
   const when = t.startTime ? formatCardDate(t.startTime) : ''
+  const canRemove = view.viewerIsOwner && t.state === 'RegistrationOpen'
 
   return (
     <div className="tp">
@@ -182,12 +186,36 @@ export default function TournamentPage({ id }: { id: string }) {
                       <span className="prow-members">{p.team.members.join(', ')}</span>
                     )}
                   </span>
+                  {canRemove && (
+                    <button className="btn-danger prow-remove" onClick={() => setRemoving(p)}>
+                      Remove
+                    </button>
+                  )}
                 </li>
               ))}
             </ol>
           )}
         </div>
       )}
+
+      <ConfirmDialog
+        open={removing !== null}
+        title="Remove participant"
+        confirmLabel="Remove"
+        danger
+        onConfirm={async () => {
+          if (removing) {
+            await removeParticipant(t.tournamentId, removing)
+            await reload()
+          }
+        }}
+        onClose={() => setRemoving(null)}
+      >
+        <p>
+          Remove {removing ? participantName(removing) : ''} from this tournament? They can register
+          again while registration is open.
+        </p>
+      </ConfirmDialog>
 
       {view.viewerIsOwner && (
         <OrganizerPanel
