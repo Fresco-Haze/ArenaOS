@@ -463,7 +463,7 @@ function EditDetails({ tournament, registeredCount, onDone }: {
           <span className={'badge ' + statusClass[tournament.state]}>{stateLabel[tournament.state]}</span>
         </div>
         <p className="muted">
-          Status changes with the buttons below: Publish, Open registration, Close registration, Start and Cancel.
+          Change the status with the buttons below.
         </p>
         {problems.map((p) => (
           <p key={p} role="alert" className="form-error">{p}</p>

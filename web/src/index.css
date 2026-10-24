@@ -1322,3 +1322,5 @@ main > .form { max-width: 32rem; }
 .requests h3 { margin: 0 0 var(--space-2); }
 .req-list { gap: var(--space-2); }
 .req-actions button { padding: 6px 14px; }
+
+.edit-status { display: flex; align-items: center; gap: var(--space-3, 12px); }
