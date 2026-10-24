@@ -28,6 +28,7 @@ import qualified Shell.Persistence.Port as Repo
 
 import Application.Internal.Authorization (AuthorizationError, requireTournamentOwner)
 import Data.Maybe (isJust)
+import Engine.Champion (findChampionMatch, findChampionMatchDoubleElim, lookupMatchForNode, championOutcome)
 
 
 data CompleteTournamentError
@@ -89,53 +90,4 @@ completeTournament currentUser tid = do
                     Repo.saveTournament updated
                     Repo.recordHistoryEvent tid TournamentCompleted
                 pure (Right updated)
-
--- new, alongside findChampionMatch
-findChampionMatchDoubleElim
-  :: BracketNodeId -> Maybe BracketNodeId -> [BracketNode] -> [Match] -> Maybe Match
-findChampionMatchDoubleElim gf1Id mResetId nodes matches = do
-  gf1Node  <- find ((== gf1Id) . nodeId) nodes
-  gf1Match <- lookupMatchForNode gf1Id matches >>= championOutcome
-  winner   <- matchOutcomeWinner gf1Match
-  case nodeSlotB gf1Node of
-    Filled lbChampion
-      | winner == lbChampion ->
-          mResetId >>= \rid -> lookupMatchForNode rid matches >>= championOutcome
-      | otherwise -> Just gf1Match
-    _ -> Nothing
-
-matchOutcomeWinner :: Match -> Maybe Participant
-matchOutcomeWinner m = case matchOutcome m of
-  Just (Winner p)           -> Just p
-  Just (Forfeit p)          -> Just p
-  Just (Disqualification p) -> Just p
-  _                          -> Nothing
-
-
--- | The tournament is complete iff the final BracketNode (highest
--- nodeRound -- single-elimination only; double-elim would need a
--- different "final node" rule for the grand finals, see backlog) has a
--- Completed Match whose outcome names an advancing Participant.
---
--- Status and outcome are checked together in one case, since "champion
--- determined" is a single business rule, not two independent predicates.
-findChampionMatch :: Maybe BracketNodeId -> [BracketNode] -> [Match] -> Maybe Match
-findChampionMatch mThirdPlaceId nodes matches
-  | null candidates = Nothing
-  | otherwise = do
-      let finalNode = maximumBy (comparing nodeRound) candidates
-      m <- lookupMatchForNode (nodeId finalNode) matches
-      championOutcome m
-  where
-    candidates = filter (\n -> Just (nodeId n) /= mThirdPlaceId) nodes
-
-lookupMatchForNode :: BracketNodeId -> [Match] -> Maybe Match
-lookupMatchForNode nid = find (\m -> matchBracketNode m == nid)
-
-championOutcome :: Match -> Maybe Match
-championOutcome m = case (matchStatus m, matchOutcome m) of
-  (Domain.Match.Completed, Just (Winner _))           -> Just m
-  (Domain.Match.Completed, Just (Forfeit _))          -> Just m
-  (Domain.Match.Completed, Just (Disqualification _)) -> Just m
-  _                                      -> Nothing
 
