@@ -594,7 +594,8 @@ instance FromJSON DetailsReq where
     st <- o .:? "startTime"
     pz <- o .:? "prize"
     ds <- o .:? "description"
-    pure (DetailsReq (TournamentDetails g st pz ds))
+    rd <- o .:? "registrationDeadline"
+    pure (DetailsReq (TournamentDetails g st pz ds rd))
 
 -- ?q= (name contains), ?game= (eFootball | PubgMobile | CallOfDuty | Other), ?limit= (1..100)
 parseListFilter :: UTCTime -> Maybe Text -> Maybe Text -> Maybe Text -> Maybe Text -> Either ApiError ListPublic.PublicFilter
@@ -685,6 +686,7 @@ tournamentPairs t =
   , "maxParticipants" .= tournamentMaxParticipants t
   , "thirdPlaceMatch" .= tournamentThirdPlaceMatch t
   , "requireApproval" .= tournamentRequireApproval t
+  , "registrationDeadline" .= tournamentRegistrationDeadline t
   , "participantMode" .= T.pack (show (tournamentParticipantMode t))
   , "bracketId"       .= fmap unBracketId (tournamentBracket t)
   ]
@@ -716,6 +718,9 @@ fromJoin Register.JoinFull =
 fromJoin Register.JoinAccountMissing = unauthenticated
 
 fromJoinOrRequest :: JRQ.JoinOrRequestError -> ApiError
+fromJoinOrRequest JRQ.JoinDeadlinePassed =
+  ApiError status409 "REGISTRATION_DEADLINE_PASSED"
+    "The registration deadline has passed" (object [])
 fromJoinOrRequest (JRQ.JoinFailed e) = fromJoin e
 fromJoinOrRequest JRQ.JoinRequestAlreadyPending =
   ApiError status409 "REQUEST_PENDING"
@@ -838,6 +843,9 @@ fromDetailsValidation :: DetailsValidationError -> ApiError
 fromDetailsValidation (PrizeOutOfRange n) =
   ApiError status400 "VALIDATION_FAILED" "Prize must be a whole number of KSh, up to 1,000,000,000"
     (object ["field" .= ("prize" :: Text), "maximum" .= (1000000000 :: Int), "actual" .= n])
+fromDetailsValidation DeadlineAfterStart =
+  ApiError status400 "VALIDATION_FAILED" "Registration deadline must not be after the start time"
+    (object ["field" .= ("registrationDeadline" :: Text)])
 fromDetailsValidation (DescriptionTooLong n) =
   ApiError status400 "VALIDATION_FAILED" "Description must be 500 characters or fewer"
     (object ["field" .= ("description" :: Text), "maximum" .= (500 :: Int), "actual" .= n])
@@ -1468,8 +1476,9 @@ main = do
                   status status201
                   json (object ["registrationId" .= unRegistrationId rid])
 
-    post "/tournaments/:id/join" $
-      runAction lock JRQ.joinOrRequest fromJoinOrRequest $ \outcome -> do
+    post "/tournaments/:id/join" $ do
+      nowT <- liftIO getCurrentTime
+      runAction lock (JRQ.joinOrRequestAt nowT) fromJoinOrRequest $ \outcome -> do
         status status201
         case outcome of
           JRQ.Joined rid ->

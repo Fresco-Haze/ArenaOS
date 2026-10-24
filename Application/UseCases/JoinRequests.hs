@@ -1,5 +1,6 @@
 module Application.UseCases.JoinRequests
   ( joinOrRequest
+  , joinOrRequestAt
   , JoinOutcome(..)
   , JoinOrRequestError(..)
   , cancelJoinRequest
@@ -16,6 +17,7 @@ module Application.UseCases.JoinRequests
 import Control.Monad (unless, forM_)
 import Data.Bifunctor (bimap, first)
 import qualified Data.Text as T
+import Data.Time (UTCTime)
 
 import Domain.Ids (UserId)
 import Domain.JoinRequest (JoinRequestStatus(..))
@@ -24,7 +26,7 @@ import Domain.Participant (Participant(..), Player(..), PlayerName(..))
 import Domain.Registration (registrationParticipant)
 import Domain.Tournament
   ( Tournament, TournamentId, TournamentState(RegistrationOpen)
-  , tournamentMaxParticipants, tournamentParticipantMode, tournamentRequireApproval, tournamentOwner
+  , tournamentMaxParticipants, tournamentParticipantMode, tournamentRequireApproval, tournamentOwner, tournamentRegistrationDeadline
   , ParticipantMode(..) )
 import Domain.User (Username(..), User(username))
 
@@ -54,6 +56,7 @@ data JoinOrRequestError
   = JoinFailed JoinTournamentError
   | JoinRequestAlreadyPending
   | JoinRequestDeclined
+  | JoinDeadlinePassed
   deriving (Eq, Show)
 
 -- Approval off: exactly joinTournament. Approval on: record a Pending request.
@@ -68,6 +71,22 @@ joinOrRequest caller tid = do
   if tournamentRequireApproval tournament
     then withTxEither (requestPath caller tid tournament)
     else bimap JoinFailed Joined <$> joinTournament caller tid
+
+-- Same as joinOrRequest, but refuses once the registration deadline has passed.
+-- The caller passes the current time, so the check stays pure and testable.
+joinOrRequestAt
+  :: ( TournamentRepository m, ParticipantRepository m, RegistrationRepository m
+     , UserRepository m, JoinRequestRepository m, NotificationRepository m, Transactional m )
+  => UTCTime
+  -> UserId
+  -> TournamentId
+  -> m (Either JoinOrRequestError JoinOutcome)
+joinOrRequestAt now caller tid = do
+  tournament <- Repo.getTournament tid
+  let visible = either (const False) (const True) (requireVisibleToViewer (Just caller) tournament)
+  case tournamentRegistrationDeadline tournament of
+    Just d | visible && now > d -> pure (Left JoinDeadlinePassed)
+    _ -> joinOrRequest caller tid
 
 requestPath
   :: (UserRepository m, RegistrationRepository m, JoinRequestRepository m, NotificationRepository m)

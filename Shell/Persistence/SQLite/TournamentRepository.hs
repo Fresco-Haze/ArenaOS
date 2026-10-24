@@ -162,6 +162,7 @@ changedFieldToText FieldGame             = "Game"
 changedFieldToText FieldStartTime        = "StartTime"
 changedFieldToText FieldPrize            = "Prize"
 changedFieldToText FieldDescription      = "Description"
+changedFieldToText FieldRegistrationDeadline = "RegistrationDeadline"
 
 textToChangedField :: String -> IO ChangedField
 textToChangedField "Name"             = pure FieldName
@@ -173,6 +174,7 @@ textToChangedField "Game"             = pure FieldGame
 textToChangedField "StartTime"        = pure FieldStartTime
 textToChangedField "Prize"            = pure FieldPrize
 textToChangedField "Description"      = pure FieldDescription
+textToChangedField "RegistrationDeadline" = pure FieldRegistrationDeadline
 textToChangedField other              =
     throwIO (StorageFailure ("Unknown changed field in storage: " ++ other))
 
@@ -189,23 +191,24 @@ tournamentSelect :: Query
 tournamentSelect =
     "SELECT id, name, organizer_name, owner_id, format, state, visibility, \
     \max_participants, third_place_match, bracket_id, \
-    \participant_mode, game, start_time, prize_kes, description, require_approval \
+    \participant_mode, game, start_time, prize_kes, description, require_approval, registration_deadline \
     \FROM tournaments"
 
 type TournamentRow =
     (Int, String, String, Int, String, String, String, Int, Int, Maybe Int)
-    :. (String, Maybe String, Maybe String, Maybe Int, Maybe String, Int)
+    :. (String, Maybe String, Maybe String, Maybe Int, Maybe String, Int, Maybe String)
 
 decodeTournamentRow :: TournamentRow -> IO Tournament
 decodeTournamentRow
     ( (tidInt, name, organizer, ownerId, formatText, stateText, visText, maxP, thirdPlaceInt, bracketIdMaybe)
-      :. (modeText, gameMaybe, startMaybe, prizeMaybe, descMaybe, approvalInt) ) = do
+      :. (modeText, gameMaybe, startMaybe, prizeMaybe, descMaybe, approvalInt, deadlineMaybe) ) = do
     format <- textToFormat formatText
     state  <- textToState stateText
     vis    <- textToVisibility visText
     mode   <- textToParticipantMode modeText
     game   <- traverse textToGame gameMaybe
     start  <- traverse textToTime startMaybe
+    deadline <- traverse textToTime deadlineMaybe
     pure Tournament
         { tournamentId              = TournamentId tidInt
         , tournamentName            = TournamentName name
@@ -223,6 +226,7 @@ decodeTournamentRow
         , tournamentPrize           = prizeMaybe
         , tournamentDescription     = descMaybe
         , tournamentRequireApproval = approvalInt /= 0
+        , tournamentRegistrationDeadline = deadline
         }
 
 -- v0.12: public stats. "Public" = Public and past Draft (same set as the list).
@@ -311,8 +315,8 @@ instance TournamentRepository SQLiteM where
             UserId owner_id         = tournamentOwner t
             bracketIdMaybe          = (\(BracketId bid) -> bid) <$> tournamentBracket t
         liftIO $ execute conn
-            "INSERT INTO tournaments (id, name, organizer_name, owner_id, format, state, visibility, max_participants, third_place_match, bracket_id, participant_mode, game, start_time, prize_kes, description, require_approval) \
-            \VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
+            "INSERT INTO tournaments (id, name, organizer_name, owner_id, format, state, visibility, max_participants, third_place_match, bracket_id, participant_mode, game, start_time, prize_kes, description, require_approval, registration_deadline) \
+            \VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
             \ON CONFLICT(id) DO UPDATE SET \
             \  name = excluded.name, \
             \  organizer_name = excluded.organizer_name, \
@@ -327,7 +331,8 @@ instance TournamentRepository SQLiteM where
             \  start_time = excluded.start_time, \
             \  prize_kes = excluded.prize_kes, \
             \  description = excluded.description, \
-            \  require_approval = excluded.require_approval"
+            \  require_approval = excluded.require_approval, \
+            \  registration_deadline = excluded.registration_deadline"
             ( ( tidInt
               , tname
               , organizer
@@ -345,6 +350,7 @@ instance TournamentRepository SQLiteM where
                  , tournamentPrize t
                  , tournamentDescription t
                  , fromEnum (tournamentRequireApproval t)
+                 , timeToText <$> tournamentRegistrationDeadline t
                  )
             )
 
@@ -446,11 +452,12 @@ instance TournamentRepository SQLiteM where
     updateTournamentDetails (TournamentId tidInt) d = do
         conn <- asks envConnection
         liftIO $ execute conn
-            "UPDATE tournaments SET game = ?, start_time = ?, prize_kes = ?, description = ? WHERE id = ?"
+            "UPDATE tournaments SET game = ?, start_time = ?, prize_kes = ?, description = ?, registration_deadline = ? WHERE id = ?"
             ( gameToText <$> detailsGame d
             , timeToText <$> detailsStartTime d
             , detailsPrize d
             , detailsDescription d
+            , timeToText <$> detailsRegistrationDeadline d
             , tidInt
             )
         n <- liftIO $ changes conn

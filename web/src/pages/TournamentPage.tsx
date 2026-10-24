@@ -128,6 +128,8 @@ export default function TournamentPage({ id }: { id: string }) {
             </ul>
           )}
           {t.description && <p className="tp-about">{t.description}</p>}
+          {t.registrationDeadline && <p className="muted">Registration closes {formatCardDate(t.registrationDeadline)}</p>}
+
           <JoinBar tournament={t} signedIn={!!user} registered={view.viewerIsRegistered} requestStatus={view.viewerRequestStatus} onDone={reload} />
         </div>
       </section>

@@ -43,6 +43,7 @@ newTournamentColumns =
   , ("prize", "ALTER TABLE tournaments ADD COLUMN prize TEXT")
   , ("prize_kes", "ALTER TABLE tournaments ADD COLUMN prize_kes INTEGER CHECK (prize_kes IS NULL OR prize_kes > 0)")
   , ("description", "ALTER TABLE tournaments ADD COLUMN description TEXT")
+  , ("registration_deadline", "ALTER TABLE tournaments ADD COLUMN registration_deadline TEXT")
   , ("require_approval", "ALTER TABLE tournaments ADD COLUMN require_approval INTEGER NOT NULL DEFAULT 0 CHECK (require_approval IN (0, 1))")
   ]
 

@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { Game, gameLabel } from '../model'
-import { DESCRIPTION_MAX, prizeError } from '../lib/details'
+import { DESCRIPTION_MAX, deadlineError, prizeError } from '../lib/details'
 import type { DetailsValues } from '../lib/details'
 
 // start is "YYYY-MM-DDTHH:mm" in the device's time zone ("" when unset).
@@ -19,6 +19,16 @@ export default function DetailsFields({
   afterGame?: ReactNode
 }) {
   const { date, time } = splitStart(values.start)
+  const dl = splitStart(values.deadline)
+  const deadlineProblem = deadlineError(values)
+
+  function setDeadline(nextDate: string, nextTime: string) {
+    if (!nextDate && !nextTime) {
+      onChange({ ...values, deadline: '' })
+      return
+    }
+    onChange({ ...values, deadline: `${nextDate}T${nextDate ? nextTime || '18:00' : nextTime}` })
+  }
   const prizeProblem = values.prize.trim() === '' ? null : prizeError(values.prize)
 
   function setStart(nextDate: string, nextTime: string) {
@@ -53,6 +63,17 @@ export default function DetailsFields({
         </label>
       </div>
       <p className="muted">Uses this device&rsquo;s time zone. Everyone sees it in their own.</p>
+      <div className="form-row-2">
+        <label>
+          Registration deadline (optional)
+          <input type="date" value={dl.date} onChange={(e) => setDeadline(e.target.value, dl.time)} />
+        </label>
+        <label>
+          Deadline time
+          <input type="time" value={dl.time} onChange={(e) => setDeadline(dl.date, e.target.value)} />
+        </label>
+      </div>
+      {deadlineProblem && <span role="alert" className="form-error">{deadlineProblem}</span>}
       <label>
         Prize pool (optional)
         <span className="kes-input">

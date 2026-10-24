@@ -31,6 +31,7 @@ export const Tournament = z.object({
   participantMode: ParticipantMode,
   game: Game.nullish(),
   startTime: z.string().nullish(),
+  registrationDeadline: z.string().nullish(),
   prize: z.number().nullish(),
   description: z.string().nullish(),
   registeredCount: z.number().nullish(),

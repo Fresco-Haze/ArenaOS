@@ -77,6 +77,7 @@ participantMatchesMode _              _              = False
 data DetailsValidationError
   = PrizeOutOfRange Int
   | DescriptionTooLong Int
+  | DeadlineAfterStart
   deriving (Eq, Show)
 
 maxPrizeKes :: Int
@@ -90,11 +91,16 @@ validateDetails d =
   case (detailsPrize d, trimmed) of
     (Just n, _) | n < 0 || n > maxPrizeKes -> Left (PrizeOutOfRange n)
     (_, Just s) | length s > maxDescriptionLength -> Left (DescriptionTooLong (length s))
+    _ | deadlineAfterStart -> Left DeadlineAfterStart
     _ -> Right d { detailsPrize = detailsPrize d >>= nonZero
                  , detailsDescription = trimmed >>= nonBlank
-                 , detailsStartTime = truncSecs <$> detailsStartTime d }
+                 , detailsStartTime = truncSecs <$> detailsStartTime d
+                 , detailsRegistrationDeadline = truncSecs <$> detailsRegistrationDeadline d }
   where
     trimmed = trim <$> detailsDescription d
+    deadlineAfterStart = case (detailsRegistrationDeadline d, detailsStartTime d) of
+      (Just r, Just s) -> r > s
+      _ -> False
     trim = dropWhileEnd isSpace . dropWhile isSpace
     nonZero n = if n == 0 then Nothing else Just n
     nonBlank s = if null s then Nothing else Just s

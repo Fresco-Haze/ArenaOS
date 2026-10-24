@@ -32,6 +32,7 @@ changedFieldToText FieldGame            = "Game"
 changedFieldToText FieldStartTime       = "StartTime"
 changedFieldToText FieldPrize           = "Prize"
 changedFieldToText FieldDescription      = "Description"
+changedFieldToText FieldRegistrationDeadline = "RegistrationDeadline"
 
 textToChangedField :: String -> IO ChangedField
 textToChangedField "Name"            = pure FieldName
@@ -43,6 +44,7 @@ textToChangedField "Game"            = pure FieldGame
 textToChangedField "StartTime"       = pure FieldStartTime
 textToChangedField "Prize"           = pure FieldPrize
 textToChangedField "Description"      = pure FieldDescription
+textToChangedField "RegistrationDeadline" = pure FieldRegistrationDeadline
 textToChangedField other             =
     throwIO (StorageFailure ("Unknown changed field in storage: " ++ other))
 

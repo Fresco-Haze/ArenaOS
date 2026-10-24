@@ -44,6 +44,7 @@ updateTournamentDetails currentUser tid new = do
                              ++ [ FieldStartTime | tournamentStartTime tournament /= detailsStartTime d ]
                              ++ [ FieldPrize     | tournamentPrize tournament     /= detailsPrize d ]
                              ++ [ FieldDescription | tournamentDescription tournament /= detailsDescription d ]
+                             ++ [ FieldRegistrationDeadline | tournamentRegistrationDeadline tournament /= detailsRegistrationDeadline d ]
                         withTxN $ do
                             Repo.updateTournamentDetails tid d
                             mapM_ (Repo.recordHistoryEvent tid . ConfigurationChanged) changed

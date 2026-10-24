@@ -19,6 +19,7 @@ export default function JoinBar({
 }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [now] = useState(() => Date.now())
 
   async function run(action: () => Promise<void>) {
     setBusy(true)
@@ -65,6 +66,10 @@ export default function JoinBar({
   }
   if (requestStatus === 'Declined') {
     return <p className="muted tp-join">The organizer declined your request to join.</p>
+  }
+
+  if (t.registrationDeadline && now > new Date(t.registrationDeadline).getTime()) {
+    return <p className="muted tp-join">Registration deadline has passed.</p>
   }
 
   if ((t.registeredCount ?? 0) >= t.maxParticipants) {

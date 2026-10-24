@@ -1429,7 +1429,7 @@ spec = before_ resetTestDb $ do
             , tournamentVisibility = Public
             , tournamentMaxParticipants = 2
             , tournamentBracket = Nothing
-            , tournamentOwner = UserId 1, tournamentThirdPlaceMatch = False, tournamentParticipantMode = IndividualOnly, tournamentGame = Nothing, tournamentStartTime = Nothing, tournamentPrize = Nothing, tournamentDescription = Nothing, tournamentRequireApproval = False
+            , tournamentOwner = UserId 1, tournamentThirdPlaceMatch = False, tournamentParticipantMode = IndividualOnly, tournamentGame = Nothing, tournamentStartTime = Nothing, tournamentPrize = Nothing, tournamentDescription = Nothing, tournamentRequireApproval = False, tournamentRegistrationDeadline = Nothing
             }
           tournaments = map mkT [Draft, Draft, Published, InProgress, Completed, Completed, Completed, Cancelled]
           overview = buildTournamentOverview tournaments
@@ -6695,6 +6695,54 @@ spec = before_ resetTestDb $ do
         Left err -> expectationFailure (show err)
         Right r  -> r `shouldBe` Nothing
 
+  describe "Registration deadline (v0.12)" $ do
+
+    it "stores the deadline through the details update and logs one history entry" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "dl-owner-1"
+        tid <- dtCreate owner "Deadline Cup" noDetails
+        r <- UTD.updateTournamentDetails owner tid (noDetails { detailsRegistrationDeadline = Just dtTime })
+        t <- Repo.getTournament tid
+        changed <- dtChanged tid
+        pure (r, tournamentRegistrationDeadline t, changed)
+      case result of
+        Left err -> expectationFailure (show err)
+        Right (r, dl, changed) -> do
+          r `shouldBe` Right ()
+          dl `shouldBe` Just dtTime
+          changed `shouldBe` [TournamentHistory.FieldRegistrationDeadline]
+
+    it "rejects a deadline after the start time" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "dl-owner-2"
+        tid <- dtCreate owner "Late Deadline Cup" noDetails
+        UTD.updateTournamentDetails owner tid
+          (noDetails { detailsStartTime = Just dtTime
+                     , detailsRegistrationDeadline = Just (UTCTime (fromGregorian 2026 12 13) 64800) })
+      case result of
+        Left err -> expectationFailure (show err)
+        Right (Left (UTD.InvalidDetails _)) -> pure ()
+        Right other -> expectationFailure ("expected InvalidDetails, got " ++ show other)
+
+    it "refuses a join after the deadline and allows one before it" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "dl-owner-3"
+        early <- createTestUser "dl-early-3"
+        late <- createTestUser "dl-late-3"
+        tid <- jnOpen owner "Deadline Join Cup" 8 Public
+        Repo.updateTournamentDetails tid (noDetails { detailsRegistrationDeadline = Just dtTime })
+        a <- JRQ.joinOrRequestAt (UTCTime (fromGregorian 2026 12 1) 0) early tid
+        b <- JRQ.joinOrRequestAt (UTCTime (fromGregorian 2026 12 20) 0) late tid
+        pure (a, b)
+      case result of
+        Left err -> expectationFailure (show err)
+        Right (a, b) -> do
+          a `shouldSatisfy` isRight
+          b `shouldBe` Left JRQ.JoinDeadlinePassed
+
   describe "Engine.User.validateRawPassword (pure)" $ do
 
     it "rejects a password shorter than 8 characters" $
@@ -6794,7 +6842,7 @@ spec = before_ resetTestDb $ do
           , tournamentOrganizer = OrganizerName "x", tournamentFormat = SingleElimination
           , tournamentState = st, tournamentVisibility = vis
           , tournamentMaxParticipants = 2, tournamentBracket = Nothing
-          , tournamentOwner = UserId 1, tournamentThirdPlaceMatch = False, tournamentParticipantMode = IndividualOnly, tournamentGame = Nothing, tournamentStartTime = Nothing, tournamentPrize = Nothing, tournamentDescription = Nothing, tournamentRequireApproval = False }
+          , tournamentOwner = UserId 1, tournamentThirdPlaceMatch = False, tournamentParticipantMode = IndividualOnly, tournamentGame = Nothing, tournamentStartTime = Nothing, tournamentPrize = Nothing, tournamentDescription = Nothing, tournamentRequireApproval = False, tournamentRegistrationDeadline = Nothing }
         owner    = Just (UserId 1)
         stranger = Just (UserId 2)
 
@@ -6850,7 +6898,7 @@ spec = before_ resetTestDb $ do
           , tournamentOrganizer = OrganizerName "x", tournamentFormat = SingleElimination
           , tournamentState = st, tournamentVisibility = vis
           , tournamentMaxParticipants = 2, tournamentBracket = Nothing
-          , tournamentOwner = UserId 1, tournamentThirdPlaceMatch = False, tournamentParticipantMode = IndividualOnly, tournamentGame = Nothing, tournamentStartTime = Nothing, tournamentPrize = Nothing, tournamentDescription = Nothing, tournamentRequireApproval = False }
+          , tournamentOwner = UserId 1, tournamentThirdPlaceMatch = False, tournamentParticipantMode = IndividualOnly, tournamentGame = Nothing, tournamentStartTime = Nothing, tournamentPrize = Nothing, tournamentDescription = Nothing, tournamentRequireApproval = False, tournamentRegistrationDeadline = Nothing }
         ids = map (unTournamentId . tournamentId)
 
     it "keeps only Public tournaments past Draft, newest first" $
@@ -8694,7 +8742,7 @@ dtTime :: UTCTime
 dtTime = UTCTime (fromGregorian 2026 12 12) 64800
 
 dtDetails :: TournamentDetails
-dtDetails = TournamentDetails (Just GameEFootball) (Just dtTime) (Just 50000) Nothing
+dtDetails = TournamentDetails (Just GameEFootball) (Just dtTime) (Just 50000) Nothing Nothing
 
 dtCreate :: UserId -> String -> TournamentDetails -> SQLiteM TournamentId
 dtCreate owner name d = unwrap =<< CTD.createTournamentWithDetails (dtNew owner name) d
@@ -8771,8 +8819,8 @@ detailsSpec = describe "Tournament details: game, start time, prize in KSh (v0.1
     result <- runSQLiteM testDbPath $ do
       setupSchema
       owner <- createTestUser "dt-owner-6"
-      tid <- dtCreate owner "Edit Cup" (TournamentDetails (Just GameEFootball) Nothing (Just 10000) Nothing)
-      r <- UTD.updateTournamentDetails owner tid (TournamentDetails (Just GameEFootball) (Just dtTime) (Just 20000) Nothing)
+      tid <- dtCreate owner "Edit Cup" (TournamentDetails (Just GameEFootball) Nothing (Just 10000) Nothing Nothing)
+      r <- UTD.updateTournamentDetails owner tid (TournamentDetails (Just GameEFootball) (Just dtTime) (Just 20000) Nothing Nothing)
       t <- Repo.getTournament tid
       changed <- dtChanged tid
       pure (r, t, changed)
@@ -9030,7 +9078,7 @@ plT i name g = Tournament
   , tournamentMaxParticipants = 2, tournamentBracket = Nothing
   , tournamentOwner = UserId 1, tournamentThirdPlaceMatch = False
   , tournamentParticipantMode = IndividualOnly
-  , tournamentGame = g, tournamentStartTime = Nothing, tournamentPrize = Nothing, tournamentDescription = Nothing, tournamentRequireApproval = False }
+  , tournamentGame = g, tournamentStartTime = Nothing, tournamentPrize = Nothing, tournamentDescription = Nothing, tournamentRequireApproval = False, tournamentRegistrationDeadline = Nothing }
 
 -- ids 1..60; id 3 is "Zebra Open" (Call of Duty); other even ids are eFootball
 plAll :: [Tournament]

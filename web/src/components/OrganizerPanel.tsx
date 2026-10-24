@@ -5,7 +5,7 @@ import { ApiError } from '../api'
 import ConfirmDialog from './ConfirmDialog'
 import MatchActions from './MatchActions'
 import DetailsFields from './DetailsFields'
-import { detailsChanged, detailsFromTournament, prizeError, toPayload } from '../lib/details'
+import { deadlineError, detailsChanged, detailsFromTournament, prizeError, toPayload } from '../lib/details'
 import type { DetailsValues } from '../lib/details'
 import { actionableMatches, isBracketDecided } from '../lib/bracket'
 import {
@@ -461,7 +461,7 @@ function EditDetails({ tournament, registeredCount, onDone }: {
           <p key={p} role="alert" className="form-error">{p}</p>
         ))}
         {saved && <p role="status">Saved.</p>}
-        <button type="submit" className="btn-primary" disabled={busy || !changed || prizeError(details.prize) !== null}>{busy ? 'Saving' : 'Save changes'}</button>
+        <button type="submit" className="btn-primary" disabled={busy || !changed || prizeError(details.prize) !== null || deadlineError(details) !== null}>{busy ? 'Saving' : 'Save changes'}</button>
       </form>
     </details>
   )
