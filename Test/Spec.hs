@@ -113,6 +113,8 @@ import Shell.Persistence.SQLite.EFootballScoreRepository ()
 import Shell.Persistence.SQLite.JoinRequestRepository ()
 import Shell.Persistence.SQLite.NotificationRepository ()
 import qualified Domain.Notification as Notif
+import qualified Engine.Rankings as Rk
+import qualified Application.UseCases.GetRankings as GRK
 import Domain.JoinRequest (JoinRequestStatus(..))
 import qualified Application.UseCases.RecordEFootballResult as REF
 import qualified Application.UseCases.UpdateTournamentName as UTN
@@ -6473,6 +6475,22 @@ spec = before_ resetTestDb $ do
         pure (ids == [a])
       result `shouldBe` Right True
 
+    it "Rankings: titles rank before wins, and a title does not replace the wins" $ do
+      Rk.computeRankings [(Just (rkP "ann"), [rkP "ann", rkP "ann", rkP "bob"]), (Nothing, [rkP "bob"])]
+        `shouldBe` [Rk.RankingEntry "ann" 1 2, Rk.RankingEntry "bob" 0 2]
+
+    it "Rankings: equal titles and wins are ordered by name" $ do
+      Rk.computeRankings [(Nothing, [rkP "zed", rkP "amy"])]
+        `shouldBe` [Rk.RankingEntry "amy" 0 1, Rk.RankingEntry "zed" 0 1]
+
+    it "Rankings: a tournament without a bracket contributes nothing" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "rk-owner-1"
+        _ <- jnOpen owner "Rank Empty Cup" 8 Public
+        GRK.getRankings 5
+      result `shouldBe` Right []
+
     it "Recent activity: lists public events newest first, never private or draft tournaments" $ do
       result <- runSQLiteM testDbPath $ do
         setupSchema
@@ -9457,6 +9475,9 @@ formatChangeSpec = describe "Format change (v0.12)" $ do
         (r1, r2, r3) `shouldBe` (Right (), Right (), Right ())
         f `shouldBe` RoundRobin
         changed `shouldBe` [TournamentHistory.FieldFormat, TournamentHistory.FieldFormat, TournamentHistory.FieldFormat]
+
+rkP :: String -> Participant
+rkP n = Individual (Player (PlayerName n))
 
 jrTag :: Either JRQ.JoinOrRequestError JRQ.JoinOutcome -> String
 jrTag (Right JRQ.RequestPending)               = "pending"

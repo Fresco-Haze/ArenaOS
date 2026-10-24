@@ -4,7 +4,7 @@ import { Link } from 'react-router'
 import { useApi } from '../hooks/useApi'
 import { startsIn, timeAgo } from '../lib/cardDate'
 import { formatKes } from '../lib/money'
-import { ActivityList, gameLabel, PublicStatsView, TournamentList } from '../model'
+import { ActivityList, gameLabel, PublicStatsView, RankingList, TournamentList } from '../model'
 import type { ActivityItem, Game } from '../model'
 import EmptyState from '../components/EmptyState'
 import ErrorBanner from '../components/ErrorBanner'
@@ -120,6 +120,34 @@ function UpcomingPanel() {
             )
           })}
         </ul>
+      )}
+    </RailPanel>
+  )
+}
+
+function TopPlayersPanel() {
+  const top = useApi('/rankings', RankingList, true)
+  const rows = top.data ? top.data.rankings : null
+  return (
+    <RailPanel id="top-players-heading" icon="trophy" title="Top Players (Global)">
+      {top.error ? (
+        <ErrorBanner message={top.error} onRetry={top.retry} />
+      ) : rows === null ? (
+        <LoadingBlock label="Loading rankings" />
+      ) : rows.length === 0 ? (
+        <p className="muted rail-empty">Rankings appear once matches have been played.</p>
+      ) : (
+        <ol className="rrows">
+          {rows.map((r, i) => (
+            <li key={r.player} className="rrow">
+              <span className="rrow-rank num">{i + 1}</span>
+              <span className="rrow-name">{r.player}</span>
+              <span className="rrow-stat num">
+                {r.titles} {r.titles === 1 ? 'title' : 'titles'} &bull; {r.wins} {r.wins === 1 ? 'win' : 'wins'}
+              </span>
+            </li>
+          ))}
+        </ol>
       )}
     </RailPanel>
   )
@@ -265,9 +293,7 @@ export default function HomePage() {
         </RailPanel>
         <UpcomingPanel />
         <ActivityPanel />
-        <RailPanel id="top-players-heading" icon="trophy" title="Top Players (Global)" soon>
-          <p className="muted rail-empty">Not available yet. Rankings will appear here.</p>
-        </RailPanel>
+        <TopPlayersPanel />
       </aside>
     </div>
   )

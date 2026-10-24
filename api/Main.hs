@@ -105,6 +105,8 @@ import qualified Application.UseCases.JoinRequests as JRQ
 import Domain.JoinRequest (JoinRequestStatus(..))
 import qualified Domain.TournamentHistory as TH
 import qualified Domain.Notification as Notif
+import qualified Application.UseCases.GetRankings as GRK
+import qualified Engine.Rankings as Rk
 import Domain.Participant (Participant(..), Player(..), PlayerName(..), Team(..), TeamName(..))
 import qualified Application.UseCases.CreateTeam as CT
 import Application.UseCases.CreateTeam (createTeam, CreateTeamError(..))
@@ -633,6 +635,13 @@ statsJson s = object
   , "teams"             .= statsTeams s
   , "prizePool"         .= statsPrizePool s
   , "byGame"            .= [ object ["game" .= gameText g, "count" .= n] | (g, n) <- statsByGame s ]
+  ]
+
+rankingJson :: Rk.RankingEntry -> Value
+rankingJson e = object
+  [ "player" .= Rk.rankPlayer e
+  , "titles" .= Rk.rankTitles e
+  , "wins"   .= Rk.rankWins e
   ]
 
 notificationKindText :: Notif.NotificationKind -> Text
@@ -1780,6 +1789,13 @@ main = do
           case result of
             Left apiErr -> sendError apiErr
             Right ()    -> status status204
+
+    -- public, no login: top players by titles, then match wins
+    get "/rankings" $ do
+      result <- runUseCase lock (GRK.getRankings 5)
+      case result of
+        Left apiErr -> sendError apiErr
+        Right es    -> json (object ["rankings" .= map rankingJson es])
 
     -- public, no login: latest events of public tournaments past Draft
     get "/activity" $ do

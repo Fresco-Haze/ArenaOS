@@ -142,6 +142,9 @@ export const ActivityItem = z.object({
 export type ActivityItem = z.infer<typeof ActivityItem>
 export const ActivityList = z.object({ activity: z.array(ActivityItem) })
 
+export const RankingRow = z.object({ player: z.string(), titles: z.number(), wins: z.number() })
+export const RankingList = z.object({ rankings: z.array(RankingRow) })
+
 export const NotificationItem = z.object({
   id: z.number(),
   kind: z.enum(['JoinRequested', 'RequestApproved', 'RequestDeclined', 'TournamentStarted']),

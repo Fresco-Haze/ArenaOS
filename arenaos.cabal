@@ -101,6 +101,8 @@ library
                       Shell.Persistence.SQLite.JoinRequestRepository
                       Shell.Persistence.SQLite.NotificationRepository
                       Engine.Champion
+                      Engine.Rankings
+                      Application.UseCases.GetRankings
                       Domain.Notification
 
 
