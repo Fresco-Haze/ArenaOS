@@ -110,6 +110,8 @@ import Application.UseCases.RecordEFootballResult
   (recordEFootballResult, RecordEFootballResultError(..))
 import Domain.Scoreable (mkEFootballScore)
 import Shell.Persistence.SQLite.EFootballScoreRepository ()
+import Shell.Persistence.SQLite.JoinRequestRepository ()
+import Domain.JoinRequest (JoinRequestStatus(..))
 import qualified Application.UseCases.RecordEFootballResult as REF
 import qualified Application.UseCases.UpdateTournamentName as UTN
 import qualified Application.UseCases.UpdateTournamentMaxParticipants as UTM
@@ -149,6 +151,7 @@ import qualified Application.UseCases.GetTournamentSchedule as GTS
 import qualified Application.UseCases.CreateTournament as CTU
 import qualified Application.UseCases.RegisterParticipant as RPC
 import qualified Application.UseCases.UpdateTournamentRequireApproval as UTRA
+import qualified Application.UseCases.JoinRequests as JRQ
 import qualified Application.UseCases.CreateTournament as CreateApproval
 import qualified Engine.TournamentValidation as TV
 import qualified Application.UseCases.LoginUser as LU
@@ -6392,6 +6395,50 @@ spec = before_ resetTestDb $ do
              , raTag c, tournamentRequireApproval t2, tournamentRequireApproval t3, tournamentRequireApproval t4 )
       result `shouldBe` Right (False, "unauthorized", "ok", True, "ok", False, True, False)
 
+    it "Join requests: with approval off, joining registers immediately as before" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "jr-owner-0"
+        joiner <- createTestUser "jr-joiner-0"
+        tid <- jnOpen owner "Open Join Cup" 8 Public
+        r <- JRQ.joinOrRequest joiner tid
+        regs <- length <$> Repo.listRegistrations tid
+        req <- Repo.getJoinRequest tid joiner
+        pure (jrTag r, regs, req)
+      result `shouldBe` Right ("joined", 1, Nothing)
+
+    it "Join requests: with approval on, joining creates a pending request, not a registration" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "jr-owner-1"
+        joiner <- createTestUser "jr-joiner-1"
+        tid <- jnOpen owner "Request Cup" 8 Public
+        _ <- unwrap =<< UTRA.updateTournamentRequireApproval owner tid True
+        r1 <- JRQ.joinOrRequest joiner tid
+        regs <- length <$> Repo.listRegistrations tid
+        r2 <- JRQ.joinOrRequest joiner tid
+        st <- Repo.getJoinRequest tid joiner
+        pure (jrTag r1, regs, jrTag r2, st)
+      result `shouldBe` Right ("pending", 0, "already-pending", Just JoinPending)
+
+    it "Join requests: a declined request cannot be repeated, and a pending one can be cancelled" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "jr-owner-2"
+        a <- createTestUser "jr-a-2"
+        b <- createTestUser "jr-b-2"
+        tid <- jnOpen owner "Decline Cup" 8 Public
+        _ <- unwrap =<< UTRA.updateTournamentRequireApproval owner tid True
+        _ <- JRQ.joinOrRequest a tid
+        Repo.saveJoinRequest tid a JoinDeclined
+        ra <- JRQ.joinOrRequest a tid
+        _ <- JRQ.joinOrRequest b tid
+        c1 <- JRQ.cancelJoinRequest b tid
+        c2 <- JRQ.cancelJoinRequest b tid
+        sb <- Repo.getJoinRequest tid b
+        pure (jrTag ra, cqTag c1, cqTag c2, sb)
+      result `shouldBe` Right ("declined", "ok", "none", Nothing)
+
     it "Organizer removes a participant: removes, and the player can register again" $ do
       result <- runSQLiteM testDbPath $ do
         setupSchema
@@ -9075,6 +9122,17 @@ formatChangeSpec = describe "Format change (v0.12)" $ do
         (r1, r2, r3) `shouldBe` (Right (), Right (), Right ())
         f `shouldBe` RoundRobin
         changed `shouldBe` [TournamentHistory.FieldFormat, TournamentHistory.FieldFormat, TournamentHistory.FieldFormat]
+
+jrTag :: Either JRQ.JoinOrRequestError JRQ.JoinOutcome -> String
+jrTag (Right JRQ.RequestPending)               = "pending"
+jrTag (Right (JRQ.Joined _))                   = "joined"
+jrTag (Left JRQ.JoinRequestAlreadyPending)     = "already-pending"
+jrTag (Left JRQ.JoinRequestDeclined)           = "declined"
+jrTag (Left (JRQ.JoinFailed _))                = "failed"
+
+cqTag :: Either JRQ.CancelRequestError () -> String
+cqTag (Right ())                  = "ok"
+cqTag (Left JRQ.NoPendingRequest) = "none"
 
 raTag :: Either UTRA.UpdateTournamentRequireApprovalError () -> String
 raTag (Right ())                         = "ok"

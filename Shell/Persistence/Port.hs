@@ -36,6 +36,7 @@ module Shell.Persistence.Port
   ,RoleRepository(..)
   ,AuditLogRepository(..)
   ,EFootballScoreRepository(..)
+  ,JoinRequestRepository(..)
   
   ) where
 
@@ -52,6 +53,7 @@ import Domain.TournamentHistory (TournamentHistoryEvent, TournamentHistoryEntry)
 import Domain.Role (Role(..))
 import Domain.Audit (AuditEvent(..))
 import Domain.Scoreable (EFootballScore)
+import Domain.JoinRequest (JoinRequestStatus)
 import Data.Map.Strict (Map)
 import Data.Text (Text)
 import Data.Typeable (Typeable)
@@ -226,4 +228,9 @@ class Monad m => EFootballScoreRepository m where
   saveEFootballScore :: MatchId -> EFootballScore -> EFootballScore -> m ()
   getEFootballScore   :: MatchId -> m (Maybe (EFootballScore, EFootballScore))
   deleteEFootballScore :: MatchId -> m ()
+
+class Monad m => JoinRequestRepository m where
+  getJoinRequest    :: TournamentId -> UserId -> m (Maybe JoinRequestStatus)
+  saveJoinRequest   :: TournamentId -> UserId -> JoinRequestStatus -> m ()
+  deleteJoinRequest :: TournamentId -> UserId -> m ()
 

@@ -96,6 +96,9 @@ library
                       Application.UseCases.ListPublicTournaments
                       Application.UseCases.UpdateTournamentThirdPlaceMatch
                       Application.UseCases.UpdateTournamentRequireApproval
+                      Application.UseCases.JoinRequests
+                      Domain.JoinRequest
+                      Shell.Persistence.SQLite.JoinRequestRepository
 
 
     hs-source-dirs:   .

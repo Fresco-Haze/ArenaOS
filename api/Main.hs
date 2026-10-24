@@ -97,6 +97,8 @@ import Shell.Persistence.SQLite.Schema (initializeSchema)
 import Control.Monad.Reader (ask)
 import Domain.Bracket (Bracket(..), BracketNode(..), MatchSlot(..))
 import Shell.Persistence.SQLite.EFootballScoreRepository ()
+import Shell.Persistence.SQLite.JoinRequestRepository ()
+import qualified Application.UseCases.JoinRequests as JRQ
 import Domain.Participant (Participant(..), Player(..), PlayerName(..), Team(..), TeamName(..))
 import qualified Application.UseCases.CreateTeam as CT
 import Application.UseCases.CreateTeam (createTeam, CreateTeamError(..))
@@ -669,6 +671,20 @@ fromJoin Register.JoinNameTaken =
 fromJoin Register.JoinFull =
   ApiError status409 "REGISTRATION_CAPACITY_REACHED" "The tournament is full" (object [])
 fromJoin Register.JoinAccountMissing = unauthenticated
+
+fromJoinOrRequest :: JRQ.JoinOrRequestError -> ApiError
+fromJoinOrRequest (JRQ.JoinFailed e) = fromJoin e
+fromJoinOrRequest JRQ.JoinRequestAlreadyPending =
+  ApiError status409 "REQUEST_PENDING"
+    "Your request is waiting for the organizer's approval" (object [])
+fromJoinOrRequest JRQ.JoinRequestDeclined =
+  ApiError status403 "REQUEST_DECLINED"
+    "The organizer declined your request to join this tournament" (object [])
+
+fromCancelRequest :: JRQ.CancelRequestError -> ApiError
+fromCancelRequest JRQ.NoPendingRequest =
+  ApiError status404 "NO_PENDING_REQUEST"
+    "You have no pending request for this tournament" (object [])
 
 fromWithdraw :: Register.WithdrawError -> ApiError
 fromWithdraw (Register.WithdrawLifecycle l) = fromLifecycle l
@@ -1289,9 +1305,16 @@ main = do
                   json (object ["registrationId" .= unRegistrationId rid])
 
     post "/tournaments/:id/join" $
-      runAction lock Register.joinTournament fromJoin $ \rid -> do
+      runAction lock JRQ.joinOrRequest fromJoinOrRequest $ \outcome -> do
         status status201
-        json (object ["registrationId" .= unRegistrationId rid])
+        case outcome of
+          JRQ.Joined rid ->
+            json (object ["status" .= ("Joined" :: Text), "registrationId" .= unRegistrationId rid])
+          JRQ.RequestPending ->
+            json (object ["status" .= ("Pending" :: Text)])
+
+    post "/tournaments/:id/cancel-request" $
+      runAction lock JRQ.cancelJoinRequest fromCancelRequest (\() -> status status204)
 
     post "/tournaments/:id/registrations/remove" $ do
       raw <- body

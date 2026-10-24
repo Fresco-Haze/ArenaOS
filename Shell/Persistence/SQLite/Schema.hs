@@ -250,4 +250,11 @@ statements =
     \  CHECK ((loser_node_id IS NULL) = (loser_slot IS NULL)) \
     \)"
   , "CREATE INDEX IF NOT EXISTS idx_links_bracket ON bracket_links(bracket_id)"
+  , "CREATE TABLE IF NOT EXISTS join_requests ( \
+    \  id            INTEGER PRIMARY KEY, \
+    \  tournament_id INTEGER NOT NULL REFERENCES tournaments(id), \
+    \  user_id       INTEGER NOT NULL REFERENCES users(id), \
+    \  status        TEXT NOT NULL CHECK (status IN ('Pending', 'Approved', 'Declined')), \
+    \  UNIQUE (tournament_id, user_id) \
+    \)"
   ]
