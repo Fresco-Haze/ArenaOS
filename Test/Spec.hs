@@ -6475,6 +6475,10 @@ spec = before_ resetTestDb $ do
         pure (ids == [a])
       result `shouldBe` Right True
 
+    it "Rankings: equal titles and wins share a rank, and the next rank skips" $ do
+      map fst (Rk.assignRanks [Rk.RankingEntry "a" 1 3, Rk.RankingEntry "b" 0 2, Rk.RankingEntry "c" 0 2, Rk.RankingEntry "d" 0 1])
+        `shouldBe` [1, 2, 2, 4]
+
     it "Rankings: titles rank before wins, and a title does not replace the wins" $ do
       Rk.computeRankings [(Just (rkP "ann"), [rkP "ann", rkP "ann", rkP "bob"]), (Nothing, [rkP "bob"])]
         `shouldBe` [Rk.RankingEntry "ann" 1 2, Rk.RankingEntry "bob" 0 2]
@@ -6488,7 +6492,7 @@ spec = before_ resetTestDb $ do
         setupSchema
         owner <- createTestUser "rk-owner-1"
         _ <- jnOpen owner "Rank Empty Cup" 8 Public
-        GRK.getRankings 5
+        GRK.getRankings Nothing 5
       result `shouldBe` Right []
 
     it "Recent activity: lists public events newest first, never private or draft tournaments" $ do

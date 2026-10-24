@@ -4,6 +4,7 @@
 module Engine.Rankings
   ( RankingEntry(..)
   , computeRankings
+  , assignRanks
   ) where
 
 import Data.List (sortBy)
@@ -32,3 +33,9 @@ computeRankings facts = sortBy order (map toEntry (Map.toList totals))
     playerName _                                    = Nothing
     toEntry (n, (t, w)) = RankingEntry n t w
     order = comparing (\e -> (Down (rankTitles e), Down (rankWins e), rankPlayer e))
+
+-- Competition ranking: equal titles and wins share a rank (1, 1, 3).
+-- The input must already be in ranking order.
+assignRanks :: [RankingEntry] -> [(Int, RankingEntry)]
+assignRanks es = [ (1 + length (takeWhile ((/= key e) . key) es), e) | e <- es ]
+  where key x = (rankTitles x, rankWins x)

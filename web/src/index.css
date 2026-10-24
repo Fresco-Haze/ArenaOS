@@ -1330,3 +1330,9 @@ main > .form { max-width: 32rem; }
 .rrow-rank { flex: none; width: 1.25rem; color: var(--muted); }
 .rrow-name { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .rrow-stat { margin-left: auto; color: var(--muted); font-size: 0.8125rem; white-space: nowrap; }
+
+.rtable { width: 100%; border-collapse: collapse; }
+.rtable th, .rtable td { padding: var(--space-3) var(--space-4); text-align: left; border-bottom: 1px solid var(--line); }
+.rtable th { color: var(--muted); font-weight: 600; font-size: 0.8125rem; }
+.rtable th.num, .rtable td.num { text-align: right; }
+.rtable td:nth-child(2) { font-weight: 600; }

@@ -14,22 +14,24 @@ import Engine.Rankings (RankingEntry, computeRankings)
 import Shell.Persistence.Port (TournamentRepository, BracketRepository, MatchRepository)
 import qualified Shell.Persistence.Port as Repo
 
--- Public tournaments past Draft, not cancelled. Computed on read, never stored,
--- so corrections and reopenings are always reflected.
+-- Public tournaments past Draft, not cancelled, optionally of one game.
+-- Computed on read, never stored, so corrections and reopenings are always reflected.
 getRankings
   :: (TournamentRepository m, BracketRepository m, MatchRepository m)
-  => Int
+  => Maybe T.Game
+  -> Int
   -> m [RankingEntry]
-getRankings limitN = do
+getRankings mGame limitN = do
   ts <- Repo.listAllTournaments
-  facts <- mapM tournamentFacts (filter counted ts)
+  facts <- mapM tournamentFacts (filter (counted mGame) ts)
   pure (take limitN (computeRankings (concat facts)))
 
-counted :: T.Tournament -> Bool
-counted t =
+counted :: Maybe T.Game -> T.Tournament -> Bool
+counted mGame t =
   T.tournamentVisibility t == T.Public
     && T.tournamentState t /= T.Draft
     && T.tournamentState t /= T.Cancelled
+    && maybe True (\g -> T.tournamentGame t == Just g) mGame
 
 tournamentFacts
   :: (BracketRepository m, MatchRepository m)

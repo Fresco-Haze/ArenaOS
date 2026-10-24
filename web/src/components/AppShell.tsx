@@ -288,7 +288,7 @@ function SideNav() {
         <ul className="side-list" aria-label="Coming soon">
           <SoonItem icon="games">Games</SoonItem>
           <SoonItem icon="players">Players</SoonItem>
-          <SoonItem icon="rankings">Rankings</SoonItem>
+          <SideLink to="/rankings" icon="rankings">Rankings</SideLink>
           <SoonItem icon="news">News</SoonItem>
           <SoonItem icon="store">Store</SoonItem>
         </ul>

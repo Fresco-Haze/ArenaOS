@@ -637,9 +637,28 @@ statsJson s = object
   , "byGame"            .= [ object ["game" .= gameText g, "count" .= n] | (g, n) <- statsByGame s ]
   ]
 
-rankingJson :: Rk.RankingEntry -> Value
-rankingJson e = object
-  [ "player" .= Rk.rankPlayer e
+parseRankingsQuery :: Maybe Text -> Maybe Text -> Either ApiError (Maybe Game, Int)
+parseRankingsQuery mg ml = do
+  game <- case fmap T.strip mg of
+    Nothing -> Right Nothing
+    Just g
+      | T.null g  -> Right Nothing
+      | otherwise -> maybe (Left (bad "game")) (Right . Just) (gameFromText g)
+  limitN <- case fmap T.strip ml of
+    Nothing -> Right 5
+    Just l -> case readMaybe (T.unpack l) of
+      Just n | n >= 1 -> Right (min 50 n)
+      _               -> Left (bad "limit")
+  Right (game, limitN)
+  where
+    bad :: Text -> ApiError
+    bad f = ApiError status400 "VALIDATION_FAILED" "Invalid query parameter"
+      (object ["field" .= f])
+
+rankingJson :: (Int, Rk.RankingEntry) -> Value
+rankingJson (r, e) = object
+  [ "rank"   .= r
+  , "player" .= Rk.rankPlayer e
   , "titles" .= Rk.rankTitles e
   , "wins"   .= Rk.rankWins e
   ]
@@ -1792,10 +1811,15 @@ main = do
 
     -- public, no login: top players by titles, then match wins
     get "/rankings" $ do
-      result <- runUseCase lock (GRK.getRankings 5)
-      case result of
+      gRaw <- (queryParamMaybe "game" :: ActionM (Maybe Text))
+      lRaw <- (queryParamMaybe "limit" :: ActionM (Maybe Text))
+      case parseRankingsQuery gRaw lRaw of
         Left apiErr -> sendError apiErr
-        Right es    -> json (object ["rankings" .= map rankingJson es])
+        Right (mGame, limitN) -> do
+          result <- runUseCase lock (GRK.getRankings mGame limitN)
+          case result of
+            Left apiErr -> sendError apiErr
+            Right es    -> json (object ["rankings" .= map rankingJson (Rk.assignRanks es)])
 
     -- public, no login: latest events of public tournaments past Draft
     get "/activity" $ do

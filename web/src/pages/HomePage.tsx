@@ -129,7 +129,7 @@ function TopPlayersPanel() {
   const top = useApi('/rankings', RankingList, true)
   const rows = top.data ? top.data.rankings : null
   return (
-    <RailPanel id="top-players-heading" icon="trophy" title="Top Players (Global)">
+    <RailPanel id="top-players-heading" icon="trophy" title="Top Players (Global)" link={<Link to="/rankings" className="panel-link">View all &rarr;</Link>}>
       {top.error ? (
         <ErrorBanner message={top.error} onRetry={top.retry} />
       ) : rows === null ? (
@@ -138,9 +138,9 @@ function TopPlayersPanel() {
         <p className="muted rail-empty">Rankings appear once matches have been played.</p>
       ) : (
         <ol className="rrows">
-          {rows.map((r, i) => (
+          {rows.map((r) => (
             <li key={r.player} className="rrow">
-              <span className="rrow-rank num">{i + 1}</span>
+              <span className="rrow-rank num">{r.rank}</span>
               <span className="rrow-name">{r.player}</span>
               <span className="rrow-stat num">
                 {r.titles} {r.titles === 1 ? 'title' : 'titles'} &bull; {r.wins} {r.wins === 1 ? 'win' : 'wins'}
