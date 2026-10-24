@@ -3,6 +3,7 @@ import { Link } from 'react-router'
 import { ApiError } from '../api'
 import { cancelJoinRequest, joinTournament, withdrawFromTournament } from '../lib/tournamentActions'
 import type { JoinRequestStatus, Tournament } from '../model'
+import JoinTeam from './JoinTeam'
 
 export default function JoinBar({
   tournament: t,
@@ -37,7 +38,7 @@ export default function JoinBar({
   if (t.state !== 'RegistrationOpen') {
     return registered ? <p className="muted tp-join">You are registered.</p> : null
   }
-  if (t.participantMode === 'SquadOnly') {
+  if (t.participantMode === 'SquadOnly' && t.requireApproval && !registered) {
     return <p className="muted tp-join">Teams are registered by the organizer.</p>
   }
 
@@ -74,6 +75,18 @@ export default function JoinBar({
 
   if ((t.registeredCount ?? 0) >= t.maxParticipants) {
     return <p className="muted tp-join">Registration is full.</p>
+  }
+
+  if (t.participantMode === 'SquadOnly') {
+    if (!signedIn) {
+      const next = encodeURIComponent(`/tournaments/${t.tournamentId}`)
+      return (
+        <div className="tp-join">
+          <Link to={`/login?next=${next}`} className="button-link btn-primary">Register a team</Link>
+        </div>
+      )
+    }
+    return <JoinTeam tournament={t} onDone={onDone} />
   }
 
   if (!signedIn) {

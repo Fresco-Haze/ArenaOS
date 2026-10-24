@@ -10,6 +10,7 @@ import Database.SQLite.Simple (Connection, changes, execute, query,lastInsertRow
 import Data.List (nub)
 
 import Domain.Participant (Player(..), PlayerName(..), Team(..), TeamName(..), Participant(..), ParticipantId(..))
+import Domain.Ids (UserId(..))
 import Shell.Persistence.Port (ParticipantRepository(..))
 import Shell.Persistence.SQLite.Connection (SQLiteEnv(envConnection), SQLiteM, withTxM)
 import Shell.Persistence.SQLite.Error (PersistenceError(..))
@@ -163,6 +164,31 @@ instance ParticipantRepository SQLiteM where
           "SELECT 1 FROM teams WHERE name = ? COLLATE NOCASE LIMIT 1"
           (Only tname) :: IO [Only Int])
         pure (not (null rows))
+
+    setTeamOwner :: TeamName -> UserId -> SQLiteM ()
+    setTeamOwner (TeamName tname) (UserId uid) = do
+        conn <- asks envConnection
+        liftIO $ execute conn
+          "UPDATE teams SET owner_user_id = ? WHERE name = ? COLLATE NOCASE"
+          (uid, tname)
+
+    getTeamOwner :: TeamName -> SQLiteM (Maybe UserId)
+    getTeamOwner (TeamName tname) = do
+        conn <- asks envConnection
+        rows <- liftIO (query conn
+          "SELECT owner_user_id FROM teams WHERE name = ? COLLATE NOCASE"
+          (Only tname) :: IO [Only (Maybe Int)])
+        pure $ case rows of
+            (Only (Just u) : _) -> Just (UserId u)
+            _                   -> Nothing
+
+    listTeamsByOwner :: UserId -> SQLiteM [Team]
+    listTeamsByOwner (UserId uid) = do
+        conn <- asks envConnection
+        rows <- liftIO (query conn
+          "SELECT id FROM teams WHERE owner_user_id = ? ORDER BY name COLLATE NOCASE"
+          (Only uid) :: IO [Only Int])
+        liftIO (mapM (\(Only i) -> getTeamById conn i) rows)
 
 
 -- Private helpers, not part of the port. The port speaks only in

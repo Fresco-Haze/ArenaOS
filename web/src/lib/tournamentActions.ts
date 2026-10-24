@@ -239,3 +239,11 @@ export function fetchNotifications() {
 export function markNotificationsRead() {
   return apiVoid('/me/notifications/read', { method: 'POST' })
 }
+
+// A team's creator registers that team in a squad tournament.
+export function joinTeam(id: number, teamName: string) {
+  return apiVoid(`/tournaments/${id}/join-team`, {
+    method: 'POST',
+    body: JSON.stringify({ teamName }),
+  })
+}

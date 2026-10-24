@@ -6743,6 +6743,112 @@ spec = before_ resetTestDb $ do
           a `shouldSatisfy` isRight
           b `shouldBe` Left JRQ.JoinDeadlinePassed
 
+  describe "Team self-registration (v0.12)" $ do
+
+    it "lets a team's owner register it, and it shows in their list" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "st-owner-1"
+        cap <- createTestUser "st-cap-1"
+        stMake cap "st-team-1"
+        tid <- stOpen owner "Team Join Cup" 8
+        r <- RPC.joinTournamentAsTeam stNow cap tid "st-team-1"
+        ids <- Repo.listRegisteredTournamentIds cap
+        pure (r, ids, tid)
+      case result of
+        Left err -> expectationFailure (show err)
+        Right (r, ids, tid) -> do
+          r `shouldSatisfy` isRight
+          ids `shouldBe` [tid]
+
+    it "rejects someone who does not own the team" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "st-owner-2"
+        cap <- createTestUser "st-cap-2"
+        thief <- createTestUser "st-thief-2"
+        stMake cap "st-team-2"
+        tid <- stOpen owner "Not Yours Cup" 8
+        RPC.joinTournamentAsTeam stNow thief tid "st-team-2"
+      case result of
+        Left err -> expectationFailure (show err)
+        Right r  -> r `shouldBe` Left RPC.JoinTeamNotOwner
+
+    it "rejects a team that has no owner" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "st-owner-3"
+        someone <- createTestUser "st-someone-3"
+        _ <- unwrap =<< createTeam (stTeam "st-team-3")
+        tid <- stOpen owner "Unowned Cup" 8
+        RPC.joinTournamentAsTeam stNow someone tid "st-team-3"
+      case result of
+        Left err -> expectationFailure (show err)
+        Right r  -> r `shouldBe` Left RPC.JoinTeamNotOwner
+
+    it "rejects a second registration by the same account" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "st-owner-4"
+        cap <- createTestUser "st-cap-4"
+        stMake cap "st-team-4a"
+        stMake cap "st-team-4b"
+        tid <- stOpen owner "Twice Cup" 8
+        _ <- unwrap =<< RPC.joinTournamentAsTeam stNow cap tid "st-team-4a"
+        RPC.joinTournamentAsTeam stNow cap tid "st-team-4b"
+      case result of
+        Left err -> expectationFailure (show err)
+        Right r  -> r `shouldBe` Left RPC.JoinTeamAlreadyJoined
+
+    it "rejects a join in an individual tournament, and when approval is required" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "st-owner-5"
+        cap <- createTestUser "st-cap-5"
+        stMake cap "st-team-5"
+        solo <- jnOpen owner "Solo Cup" 8 Public
+        a <- RPC.joinTournamentAsTeam stNow cap solo "st-team-5"
+        tid <- stOpen owner "Approval Squad Cup" 8
+        Repo.updateTournamentRequireApproval tid True
+        b <- RPC.joinTournamentAsTeam stNow cap tid "st-team-5"
+        pure (a, b)
+      case result of
+        Left err -> expectationFailure (show err)
+        Right (a, b) -> do
+          a `shouldBe` Left RPC.JoinTeamIndividualOnly
+          b `shouldBe` Left RPC.JoinTeamApprovalRequired
+
+    it "rejects a join once the tournament is full" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "st-owner-6"
+        c1 <- createTestUser "st-cap-6a"
+        c2 <- createTestUser "st-cap-6b"
+        c3 <- createTestUser "st-cap-6c"
+        stMake c1 "st-team-6a"
+        stMake c2 "st-team-6b"
+        stMake c3 "st-team-6c"
+        tid <- stOpen owner "Full Squad Cup" 2
+        _ <- unwrap =<< RPC.joinTournamentAsTeam stNow c1 tid "st-team-6a"
+        _ <- unwrap =<< RPC.joinTournamentAsTeam stNow c2 tid "st-team-6b"
+        RPC.joinTournamentAsTeam stNow c3 tid "st-team-6c"
+      case result of
+        Left err -> expectationFailure (show err)
+        Right r  -> r `shouldBe` Left RPC.JoinTeamFull
+
+    it "rejects a join after the registration deadline" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "st-owner-7"
+        cap <- createTestUser "st-cap-7"
+        stMake cap "st-team-7"
+        tid <- stOpen owner "Late Squad Cup" 8
+        Repo.updateTournamentDetails tid (noDetails { detailsRegistrationDeadline = Just dtTime })
+        RPC.joinTournamentAsTeam (UTCTime (fromGregorian 2027 1 1) 0) cap tid "st-team-7"
+      case result of
+        Left err -> expectationFailure (show err)
+        Right r  -> r `shouldBe` Left RPC.JoinTeamDeadlinePassed
+
   describe "Engine.User.validateRawPassword (pure)" $ do
 
     it "rejects a password shorter than 8 characters" $
@@ -9402,6 +9508,27 @@ jnOpen owner name mx vis = do
   tid <- dtCreate owner name noDetails
   Repo.updateTournamentMaxParticipants tid mx
   Repo.updateTournamentVisibility tid vis
+  _ <- unwrap =<< publishTournament owner tid
+  _ <- unwrap =<< openRegistration owner tid
+  pure tid
+
+stNow :: UTCTime
+stNow = UTCTime (fromGregorian 2026 1 1) 0
+
+stTeam :: String -> Team
+stTeam n = Team (TeamName n) (Player (PlayerName (n ++ "-cap")))
+  [Player (PlayerName (n ++ "-cap")), Player (PlayerName (n ++ "-p2"))]
+
+stMake :: UserId -> String -> SQLiteM ()
+stMake owner n = do
+  _ <- unwrap =<< createTeam (stTeam n)
+  Repo.setTeamOwner (TeamName n) owner
+
+stOpen :: UserId -> String -> Int -> SQLiteM TournamentId
+stOpen owner name mx = do
+  tid <- unwrap =<< CTD.createTournamentWithDetails
+           ((dtNew owner name) { newTournamentParticipantMode = SquadOnly
+                               , newTournamentMaxParticipants = mx }) noDetails
   _ <- unwrap =<< publishTournament owner tid
   _ <- unwrap =<< openRegistration owner tid
   pure tid

@@ -33,6 +33,7 @@ initializeSchema conn = do
   migrateHistoryColumns conn
   migrateUserColumns conn
   migratePasswordResets conn
+  migrateTeamColumns conn
 
 -- v0.12: CREATE TABLE IF NOT EXISTS never adds columns to an existing
 -- database, so add any missing tournament columns here. Safe on every start.
@@ -84,6 +85,14 @@ migrateHistoryColumns conn = do
   let present = [ n | (_, n, _, _, _, _) <- cols ]
   when ("occurred_at" `notElem` present) $
     execute_ conn "ALTER TABLE tournament_history ADD COLUMN occurred_at TEXT"
+
+-- v0.12: the account that created a team. Older teams keep NULL (organizer-only).
+migrateTeamColumns :: Connection -> IO ()
+migrateTeamColumns conn = do
+  cols <- query_ conn "PRAGMA table_info(teams)" :: IO [(Int, String, String, Int, Maybe String, Int)]
+  let present = [ n | (_, n, _, _, _, _) <- cols ]
+  when ("owner_user_id" `notElem` present) $
+    execute_ conn "ALTER TABLE teams ADD COLUMN owner_user_id INTEGER REFERENCES users(id)"
 
 statements :: [Query]
 statements =

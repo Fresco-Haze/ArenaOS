@@ -782,6 +782,32 @@ fromRemove (Register.RemoveLifecycle l)    = fromLifecycle l
 fromRemove Register.RemoveNotRegistered =
   ApiError status404 "NOT_REGISTERED" "That participant is not registered for this tournament" (object [])
 
+newtype JoinTeamReq = JoinTeamReq String
+
+instance FromJSON JoinTeamReq where
+  parseJSON = withObject "joinTeam" $ \o -> JoinTeamReq <$> o .: "teamName"
+
+fromJoinTeam :: Register.JoinTeamError -> ApiError
+fromJoinTeam (Register.JoinTeamNotVisible a) = fromAuthorization a
+fromJoinTeam (Register.JoinTeamLifecycle l)  = fromLifecycle l
+fromJoinTeam Register.JoinTeamIndividualOnly =
+  ApiError status409 "INDIVIDUAL_ONLY" "This tournament is for individual players" (object [])
+fromJoinTeam Register.JoinTeamApprovalRequired =
+  ApiError status409 "APPROVAL_REQUIRED"
+    "This tournament needs the organizer's approval. Ask the organizer to register your team" (object [])
+fromJoinTeam Register.JoinTeamDeadlinePassed =
+  ApiError status409 "REGISTRATION_DEADLINE_PASSED" "The registration deadline has passed" (object [])
+fromJoinTeam Register.JoinTeamNotFound =
+  ApiError status404 "NOT_FOUND" "No team with that name" (object [])
+fromJoinTeam Register.JoinTeamNotOwner =
+  ApiError status403 "NOT_TEAM_OWNER" "You can only register teams you created" (object [])
+fromJoinTeam Register.JoinTeamAlreadyJoined =
+  ApiError status409 "ALREADY_REGISTERED" "You are already registered" (object [])
+fromJoinTeam Register.JoinTeamAlreadyRegistered =
+  ApiError status409 "ALREADY_REGISTERED" "This team is already registered" (object [])
+fromJoinTeam Register.JoinTeamFull =
+  ApiError status409 "REGISTRATION_CAPACITY_REACHED" "The tournament is full" (object [])
+
 fromGetTournament :: GetT.GetTournamentError -> ApiError
 fromGetTournament (GetT.Unauthorized a) = fromAuthorization a
 
@@ -1545,6 +1571,26 @@ main = do
               [ "tournaments" .=
                   map (\t -> tournamentJsonCounted (countFor counts t) t) (sortOn (negate . unTournamentId . tournamentId) ts) ])
 
+    post "/tournaments/:id/join-team" $ do
+      raw <- body
+      case eitherDecode raw of
+        Left reason -> sendError (invalidBody reason)
+        Right (JoinTeamReq n) -> do
+          nowT <- liftIO getCurrentTime
+          runAction lock (\uid tid -> Register.joinTournamentAsTeam nowT uid tid n) fromJoinTeam $ \rid -> do
+            status status201
+            json (object ["registrationId" .= unRegistrationId rid])
+
+    get "/me/teams" $ do
+      mUser <- currentUser lock
+      case mUser of
+        Nothing  -> sendError unauthenticated
+        Just uid -> do
+          result <- runUseCase lock (Repo.listTeamsByOwner uid)
+          case result of
+            Left apiErr -> sendError apiErr
+            Right ts    -> json (object ["teams" .= map teamJson ts])
+
     post "/login" $ do
       raw <- body
       case eitherDecode raw of
@@ -1845,7 +1891,7 @@ main = do
       case (mUser, eitherDecode raw) of
         (Nothing, _) -> sendError unauthenticated
         (_, Left reason) -> sendError (invalidBody reason)
-        (Just _, Right req) -> do
+        (Just uid, Right req) -> do
           let team = toTeam req
           result <- runUseCase lock (createTeam team)
           case result of
@@ -1853,6 +1899,8 @@ main = do
             Right (Left teamErr) -> sendError (fromCreateTeam teamErr)
             Right (Right ()) -> do
               status status201
+              _ <- runUseCase lock (Repo.setTeamOwner (teamName team) uid)
+
               json (teamJson team)
 
               

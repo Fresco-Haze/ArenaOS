@@ -72,6 +72,9 @@ class Monad m => ParticipantRepository m where
     getTeam      :: TeamName -> m Team
     deleteTeam   :: TeamName -> m ()
     teamExists   :: TeamName -> m Bool
+    setTeamOwner :: TeamName -> UserId -> m ()
+    getTeamOwner :: TeamName -> m (Maybe UserId)
+    listTeamsByOwner :: UserId -> m [Team]
     listTeams    :: m [Team]
 
     resolveParticipant :: Participant -> m ParticipantId

@@ -10,17 +10,20 @@ module Application.UseCases.RegisterParticipant
   , removeParticipant
   , RemoveError(..)
   , listMyRegistrations
+  , joinTournamentAsTeam
+  , JoinTeamError(..)
   ) where
 
 import Data.Bifunctor (first)
+import Data.Time (UTCTime)
 import qualified Data.Text as T
 import Domain.User (Username(..), User(username, userId))
 
 import Domain.Ids (UserId)
-import Domain.Participant (Participant(..), Player(..), PlayerName(..))
+import Domain.Participant (Participant(..), Player(..), PlayerName(..), TeamName(..))
 import Domain.Registration (registrationParticipant, registrationId)
 import Domain.Tournament
-  (Tournament, TournamentId, TournamentState(RegistrationOpen), tournamentMaxParticipants, tournamentParticipantMode, tournamentRequireApproval, ParticipantMode(..))
+  (Tournament, TournamentId, TournamentState(RegistrationOpen), tournamentMaxParticipants, tournamentParticipantMode, tournamentRequireApproval, tournamentRegistrationDeadline, ParticipantMode(..))
 import Application.Internal.Authorization (AuthorizationError, requireTournamentOwner, requireVisibleToViewer)
 import Application.Internal.LifecycleTransition (requireTournamentState, LifecycleError)
 import Engine.TournamentValidation (ParticipantValidationError, validateParticipant, participantMatchesMode)
@@ -36,7 +39,7 @@ import Shell.Persistence.Port
   , NotificationRepository
   )
 import qualified Shell.Persistence.Port as Repo
-import Control.Monad (unless, forM_)
+import Control.Monad (unless, when, forM_)
 import Domain.JoinRequest (JoinRequestStatus(JoinDeclined))
 import Domain.Notification (NotificationKind(NoteRequestDeclined))
 
@@ -251,3 +254,69 @@ listMyRegistrations
 listMyRegistrations uid = do
   ids <- Repo.listRegisteredTournamentIds uid
   mapM Repo.getTournament ids
+
+-- ===== Team self-registration (v0.12) =====
+-- A team's creator registers it. The registration carries the account, so
+-- Withdraw and the Registered tab work as they do for individual players.
+
+data JoinTeamError
+  = JoinTeamNotVisible AuthorizationError
+  | JoinTeamLifecycle LifecycleError
+  | JoinTeamIndividualOnly
+  | JoinTeamApprovalRequired
+  | JoinTeamDeadlinePassed
+  | JoinTeamNotFound
+  | JoinTeamNotOwner
+  | JoinTeamAlreadyJoined
+  | JoinTeamAlreadyRegistered
+  | JoinTeamFull
+  deriving (Eq, Show)
+
+joinTournamentAsTeam
+  :: ( TournamentRepository m, ParticipantRepository m
+     , RegistrationRepository m, Transactional m )
+  => UTCTime
+  -> UserId
+  -> TournamentId
+  -> String
+  -> m (Either JoinTeamError RegistrationId)
+joinTournamentAsTeam now caller tid teamNameStr =
+  withTxEither $ do
+    tournament <- Repo.getTournament tid
+    case preChecks tournament of
+      Left err -> pure (Left err)
+      Right () -> do
+        exists <- Repo.teamExists (TeamName teamNameStr)
+        if not exists
+          then pure (Left JoinTeamNotFound)
+          else do
+            owner <- Repo.getTeamOwner (TeamName teamNameStr)
+            if owner /= Just caller
+              then pure (Left JoinTeamNotOwner)
+              else do
+                team <- Repo.getTeam (TeamName teamNameStr)
+                existing <- Repo.findUserRegistration tid caller
+                regs <- Repo.listRegistrations tid
+                let participant = Squad team
+                case existing of
+                  Just _ -> pure (Left JoinTeamAlreadyJoined)
+                  Nothing
+                    | participant `elem` map registrationParticipant regs ->
+                        pure (Left JoinTeamAlreadyRegistered)
+                    | length regs >= tournamentMaxParticipants tournament ->
+                        pure (Left JoinTeamFull)
+                    | otherwise -> do
+                        pid <- Repo.resolveParticipant participant
+                        Right <$> Repo.createUserRegistration caller NewRegistration
+                          { newRegistrationTournament  = tid
+                          , newRegistrationParticipant = pid
+                          }
+  where
+    preChecks t = do
+      first JoinTeamNotVisible (requireVisibleToViewer (Just caller) t)
+      first JoinTeamLifecycle (requireTournamentState RegistrationOpen t)
+      unless (tournamentParticipantMode t == SquadOnly) (Left JoinTeamIndividualOnly)
+      when (tournamentRequireApproval t) (Left JoinTeamApprovalRequired)
+      case tournamentRegistrationDeadline t of
+        Just d | now > d -> Left JoinTeamDeadlinePassed
+        _                -> Right ()
