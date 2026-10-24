@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { ApiError } from '../api'
 import ConfirmDialog from './ConfirmDialog'
+import { statusClass } from '../badges'
 import MatchActions from './MatchActions'
 import DetailsFields from './DetailsFields'
 import { deadlineError, detailsChanged, detailsFromTournament, prizeError, toPayload } from '../lib/details'
@@ -15,7 +16,7 @@ import {
   pauseTournament, resumeTournament, reopenTournament, updateDetails, updateFormat,
   setRequireApproval, listJoinRequests, approveJoinRequest, declineJoinRequest,
 } from '../lib/tournamentActions'
-import { formatLabel } from '../model'
+import { formatLabel, stateLabel } from '../model'
 import type { BracketView, JoinRequestRow, Team, Tournament, TournamentFormat } from '../model'
 
 function ActionButton({ label, busyLabel, onRun, primary }: { label: string; busyLabel?: string; primary?: boolean; onRun: () => Promise<void> }) {
@@ -457,6 +458,13 @@ function EditDetails({ tournament, registeredCount, onDone }: {
             <p className="muted">Can't go below the {registeredCount} already registered.</p>
           </>
         )}
+        <div className="edit-status">
+          <span>Status</span>
+          <span className={'badge ' + statusClass[tournament.state]}>{stateLabel[tournament.state]}</span>
+        </div>
+        <p className="muted">
+          Status changes with the buttons below: Publish, Open registration, Close registration, Start and Cancel.
+        </p>
         {problems.map((p) => (
           <p key={p} role="alert" className="form-error">{p}</p>
         ))}
