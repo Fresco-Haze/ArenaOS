@@ -72,9 +72,10 @@ import System.Entropy (getEntropy)
 import Shell.Persistence.SQLite.UserRepository ()
 import Shell.Infrastructure.PasswordHasher (hashPasswordIO, verifyPasswordPure)
 import qualified Application.UseCases.LoginUser as LU
-import Domain.User (User(..), Username(..), Email(..), AccountStatus(..), PasswordHash)
+import Domain.User (User(..), Username(..), Email(..), AccountStatus(..), PasswordHash(..))
 import qualified Application.UseCases.RegisterUser as RU
 import Engine.User (UserError(..))
+import Data.Time.Clock.POSIX (utcTimeToPOSIXSeconds)
 import qualified Engine.User as EU
 import qualified Application.UseCases.GetTournament as GetT
 import qualified Application.UseCases.ListMyTournaments as ListMine
@@ -1012,6 +1013,81 @@ instance FromJSON RegisterReq where
   parseJSON = withObject "register" $ \o ->
     RegisterReq <$> o .: "username" <*> o .: "email" <*> o .: "password" <*> o .:? "fullName"
 
+newtype ForgotReq = ForgotReq Text
+
+instance FromJSON ForgotReq where
+  parseJSON = withObject "forgot" $ \o -> ForgotReq <$> o .: "email"
+
+data ResetReq = ResetReq Text Text
+
+instance FromJSON ResetReq where
+  parseJSON = withObject "reset" $ \o -> ResetReq <$> o .: "token" <*> o .: "password"
+
+badResetLink :: ApiError
+badResetLink =
+  ApiError status400 "INVALID_RESET_LINK" "This reset link is invalid or has expired" (object [])
+
+-- Always does the same work, whether or not the account exists, so timing
+-- does not reveal which emails have accounts. Email sending comes later:
+-- for now the link is printed in the API console.
+issueReset :: Env -> Text -> ActionM ()
+issueReset lock e = do
+  tok <- liftIO newToken
+  hr <- liftIO (tryAny (withHashSlot lock (hashPasswordIO tok)))
+  mu <- runUseCase lock (Repo.findUserByEmail (Email e))
+  nowT <- liftIO getCurrentTime
+  let nowS = floor (utcTimeToPOSIXSeconds nowT) :: Int
+  case (hr, mu) of
+    (Right h, Right (Just u)) | accountStatus u == Active -> do
+      let PasswordHash hashText = h
+      r <- runUseCase lock (Repo.createPasswordReset (userId u) hashText (nowS + 1800))
+      case r of
+        Right rid -> liftIO (hPutStrLn stderr
+          ("[password reset] http://localhost:5173/reset-password?token=" ++ show rid ++ "." ++ T.unpack tok))
+        Left _ -> pure ()
+    _ -> pure ()
+
+applyReset :: Int -> UserId -> PasswordHash -> SQLiteM Bool
+applyReset rid uid newHash = do
+  mr <- Repo.findPasswordReset rid
+  case mr of
+    Just (_, _, _, False) -> do
+      Repo.updatePasswordHash uid newHash
+      Repo.consumePasswordResets uid
+      pure True
+    _ -> pure False
+
+redeemReset :: Env -> Text -> Text -> ActionM Bool
+redeemReset lock token pw = do
+  let (ridT, rest) = T.breakOn "." token
+      secret = T.drop 1 rest
+  case readMaybe (T.unpack ridT) :: Maybe Int of
+    Nothing -> pure False
+    Just rid -> do
+      mr <- runUseCase lock (Repo.findPasswordReset rid)
+      nowT <- liftIO getCurrentTime
+      let nowS = floor (utcTimeToPOSIXSeconds nowT) :: Int
+          stored = case mr of
+            Right (Just (uid, h, e, False)) | e > nowS -> Just (uid, h)
+            _ -> Nothing
+          hashToCheck = maybe (envDummyHash lock) (PasswordHash . snd) stored
+      v <- liftIO (tryAny (withHashSlot lock (evaluate (verifyPasswordPure secret hashToCheck))))
+      case (v, stored) of
+        (Right True, Just (uid, _)) -> do
+          hr <- liftIO (tryAny (withHashSlot lock (hashPasswordIO pw)))
+          case hr of
+            Right newHash -> do
+              r <- runUseCase lock (applyReset rid uid newHash)
+              case r of
+                Right True -> do
+                  -- sign the user out everywhere
+                  liftIO (atomicModifyIORef' (envTokens lock)
+                            (\m -> (Map.filter ((/= uid) . fst) m, ())))
+                  pure True
+                _ -> pure False
+            Left _ -> pure False
+        _ -> pure False
+
 nameTooLong :: ApiError
 nameTooLong =
   ApiError status400 "VALIDATION_FAILED" "Full name must be 60 characters or fewer"
@@ -1060,6 +1136,10 @@ loginUserRule, loginIpRule, registerIpRule :: RateRule
 loginUserRule  = RateRule "login-user"  900  5 (Just 300)
 loginIpRule    = RateRule "login-ip"    600 30 Nothing
 registerIpRule = RateRule "register-ip" 3600 10 Nothing
+
+forgotIpRule, resetIpRule :: RateRule
+forgotIpRule = RateRule "forgot-ip" 3600 5 Nothing
+resetIpRule  = RateRule "reset-ip"  3600 20 Nothing
 
 pruneHits :: UTCTime -> NominalDiffTime -> [UTCTime] -> [UTCTime]
 pruneHits now w = filter (\t -> diffUTCTime now t < w)
@@ -1463,6 +1543,43 @@ main = do
                            , "user"  .= object [ "id"       .= unUserId (userId user)
                                                , "username" .= uname
                                                , "fullName" .= fullName ] ])
+
+    post "/forgot-password" $ do
+      raw <- body
+      case eitherDecode raw of
+        Left reason -> sendError (invalidBody reason)
+        Right (ForgotReq e) -> do
+          ip <- clientIp lock
+          blocked <- liftIO (blockedFor lock forgotIpRule ip)
+          case blocked of
+            Just secs -> do
+              setHeader "Retry-After" (TL.pack (show secs))
+              sendError (tooMany secs)
+            Nothing -> do
+              liftIO (recordHit lock forgotIpRule ip)
+              issueReset lock (T.strip e)
+              json (object ["ok" .= True])
+
+    post "/reset-password" $ do
+      raw <- body
+      case eitherDecode raw of
+        Left reason -> sendError (invalidBody reason)
+        Right (ResetReq tok pw) -> do
+          ip <- clientIp lock
+          blocked <- liftIO (blockedFor lock resetIpRule ip)
+          case blocked of
+            Just secs -> do
+              setHeader "Retry-After" (TL.pack (show secs))
+              sendError (tooMany secs)
+            Nothing -> do
+              liftIO (recordHit lock resetIpRule ip)
+              case EU.validateRawPassword pw of
+                Left _ -> sendError (ApiError status400 "VALIDATION_FAILED"
+                            "Password must be at least 8 characters"
+                            (object ["field" .= ("password" :: Text), "minLength" .= (8 :: Int)]))
+                Right _ -> do
+                  ok <- redeemReset lock tok pw
+                  if ok then status status204 else sendError badResetLink
 
     post "/logout" $ do
       mTok <- bearerToken

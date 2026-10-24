@@ -164,4 +164,31 @@ instance UserRepository SQLiteM where
       (Only n : _) -> n
       []           -> Nothing
 
+  createPasswordReset :: UserId -> Text -> Int -> SQLiteM Int
+  createPasswordReset (UserId uid) secretHash expiresAt = do
+    conn <- asks envConnection
+    liftIO $ execute conn
+      "INSERT INTO password_resets (user_id, secret_hash, expires_at) VALUES (?, ?, ?)"
+      (uid, secretHash, expiresAt)
+    rowId <- liftIO $ lastInsertRowId conn
+    pure (fromIntegral rowId)
+
+  findPasswordReset :: Int -> SQLiteM (Maybe (UserId, Text, Int, Bool))
+  findPasswordReset rid = do
+    conn <- asks envConnection
+    rows <- liftIO (query conn
+      "SELECT user_id, secret_hash, expires_at, used_at IS NOT NULL FROM password_resets WHERE id = ?"
+      (Only rid)
+      :: IO [(Int, Text, Int, Int)])
+    pure $ case rows of
+      ((u, h, e, used) : _) -> Just (UserId u, h, e, used /= 0)
+      []                    -> Nothing
+
+  consumePasswordResets :: UserId -> SQLiteM ()
+  consumePasswordResets (UserId uid) = do
+    conn <- asks envConnection
+    liftIO $ execute conn
+      "UPDATE password_resets SET used_at = 1 WHERE user_id = ? AND used_at IS NULL"
+      (Only uid)
+
   

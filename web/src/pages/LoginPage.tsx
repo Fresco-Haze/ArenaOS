@@ -74,6 +74,7 @@ export default function LoginPage() {
           <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
           Remember me
         </label>
+        <p className="auth-forgot"><Link to="/forgot-password">Forgot password?</Link></p>
         {cooldown.message && <p role="alert" className="form-error">{cooldown.message}</p>}
         {error && <p role="alert" className="form-error">{error}</p>}
         <button type="submit" className="btn-primary auth-submit" disabled={busy || cooldown.cooling}>

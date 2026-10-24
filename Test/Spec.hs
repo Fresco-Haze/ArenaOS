@@ -6607,6 +6607,32 @@ spec = before_ resetTestDb $ do
         Left err -> expectationFailure (show err)
         Right r  -> r `shouldBe` (Nothing, Just "Jae Kim", Nothing)
 
+  describe "Password reset storage (v0.12)" $ do
+
+    it "stores a reset, finds it, and consumes all of a user's resets" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        uid <- createTestUser "pr-user-1"
+        rid <- Repo.createPasswordReset uid "hash-1" 2000000000
+        a <- Repo.findPasswordReset rid
+        Repo.consumePasswordResets uid
+        b <- Repo.findPasswordReset rid
+        pure (uid, rid, a, b)
+      case result of
+        Left err -> expectationFailure (show err)
+        Right (uid, rid, a, b) -> do
+          rid `shouldSatisfy` (> 0)
+          a `shouldBe` Just (uid, "hash-1", 2000000000, False)
+          b `shouldBe` Just (uid, "hash-1", 2000000000, True)
+
+    it "returns Nothing for an unknown reset id" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        Repo.findPasswordReset 999999
+      case result of
+        Left err -> expectationFailure (show err)
+        Right r  -> r `shouldBe` Nothing
+
   describe "Engine.User.validateRawPassword (pure)" $ do
 
     it "rejects a password shorter than 8 characters" $

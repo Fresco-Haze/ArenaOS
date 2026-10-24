@@ -206,6 +206,9 @@ class Monad m =>  UserRepository m where
   updateAccountStatus :: UserId -> AccountStatus -> m ()
   setFullName :: UserId -> Maybe Text -> m ()
   getFullName :: UserId -> m (Maybe Text)
+  createPasswordReset :: UserId -> Text -> Int -> m Int
+  findPasswordReset :: Int -> m (Maybe (UserId, Text, Int, Bool))
+  consumePasswordResets :: UserId -> m ()
 
 class Monad m => PasswordHasher m where
     hashPassword   :: Text -> m PasswordHash

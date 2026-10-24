@@ -31,6 +31,7 @@ initializeSchema conn = do
   migrateTournamentColumns conn
   migrateRegistrationColumns conn
   migrateUserColumns conn
+  migratePasswordResets conn
 
 -- v0.12: CREATE TABLE IF NOT EXISTS never adds columns to an existing
 -- database, so add any missing tournament columns here. Safe on every start.
@@ -67,6 +68,11 @@ migrateUserColumns conn = do
   let present = [ n | (_, n, _, _, _, _) <- cols ]
   when ("full_name" `notElem` present) $
     execute_ conn "ALTER TABLE users ADD COLUMN full_name TEXT"
+
+-- v0.12: password reset tokens. Only a hash of the secret is stored.
+migratePasswordResets :: Connection -> IO ()
+migratePasswordResets conn =
+  execute_ conn "CREATE TABLE IF NOT EXISTS password_resets (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), secret_hash TEXT NOT NULL, expires_at INTEGER NOT NULL, used_at INTEGER)"
 
 statements :: [Query]
 statements =
