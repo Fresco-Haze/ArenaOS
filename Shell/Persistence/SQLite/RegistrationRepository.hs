@@ -157,3 +157,13 @@ instance RegistrationRepository SQLiteM where
                 (Only uidInt)
              :: IO [Only Int])
         pure [ TournamentId t | Only t <- rows ]
+
+    listRegisteredUserIds :: TournamentId -> SQLiteM [UserId]
+    listRegisteredUserIds (TournamentId tidInt) = do
+        conn <- asks envConnection
+        rows <- liftIO $
+            (query conn
+                "SELECT user_id FROM registrations WHERE tournament_id = ? AND user_id IS NOT NULL"
+                (Only tidInt)
+             :: IO [Only Int])
+        pure [ UserId u | Only u <- rows ]

@@ -33,10 +33,12 @@ import Shell.Persistence.Port
   , NewRegistration(..)
   , UserRepository
   , JoinRequestRepository
+  , NotificationRepository
   )
 import qualified Shell.Persistence.Port as Repo
 import Control.Monad (unless, forM_)
 import Domain.JoinRequest (JoinRequestStatus(JoinDeclined))
+import Domain.Notification (NotificationKind(NoteRequestDeclined))
 
 -- ===== Original, unchanged =====
 
@@ -215,7 +217,7 @@ accountBehind _ (Squad _) _ = pure Nothing
 -- simply request again.
 removeParticipant
   :: ( TournamentRepository m, RegistrationRepository m, UserRepository m
-     , JoinRequestRepository m, Transactional m )
+     , JoinRequestRepository m, NotificationRepository m, Transactional m )
   => UserId
   -> TournamentId
   -> Participant
@@ -235,6 +237,7 @@ removeParticipant caller tid participant =
                         else pure Nothing
             Repo.deleteRegistration (registrationId r)
             forM_ target (\u -> Repo.saveJoinRequest tid u JoinDeclined)
+            forM_ target (\u -> Repo.addNotification u NoteRequestDeclined tid Nothing)
             pure (Right ())
   where
     preChecks t = do

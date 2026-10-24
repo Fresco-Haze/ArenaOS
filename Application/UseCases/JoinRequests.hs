@@ -19,11 +19,12 @@ import qualified Data.Text as T
 
 import Domain.Ids (UserId)
 import Domain.JoinRequest (JoinRequestStatus(..))
+import Domain.Notification (NotificationKind(..))
 import Domain.Participant (Participant(..), Player(..), PlayerName(..))
 import Domain.Registration (registrationParticipant)
 import Domain.Tournament
   ( Tournament, TournamentId, TournamentState(RegistrationOpen)
-  , tournamentMaxParticipants, tournamentParticipantMode, tournamentRequireApproval
+  , tournamentMaxParticipants, tournamentParticipantMode, tournamentRequireApproval, tournamentOwner
   , ParticipantMode(..) )
 import Domain.User (Username(..), User(username))
 
@@ -38,6 +39,7 @@ import Shell.Persistence.Port
   , RegistrationId
   , UserRepository
   , JoinRequestRepository
+  , NotificationRepository
   , NewRegistration(..)
   , Transactional(..)
   )
@@ -57,7 +59,7 @@ data JoinOrRequestError
 -- Approval off: exactly joinTournament. Approval on: record a Pending request.
 joinOrRequest
   :: ( TournamentRepository m, ParticipantRepository m, RegistrationRepository m
-     , UserRepository m, JoinRequestRepository m, Transactional m )
+     , UserRepository m, JoinRequestRepository m, NotificationRepository m, Transactional m )
   => UserId
   -> TournamentId
   -> m (Either JoinOrRequestError JoinOutcome)
@@ -68,7 +70,7 @@ joinOrRequest caller tid = do
     else bimap JoinFailed Joined <$> joinTournament caller tid
 
 requestPath
-  :: (UserRepository m, RegistrationRepository m, JoinRequestRepository m)
+  :: (UserRepository m, RegistrationRepository m, JoinRequestRepository m, NotificationRepository m)
   => UserId
   -> TournamentId
   -> Tournament
@@ -96,6 +98,8 @@ requestPath caller tid tournament =
                   pure (Left (JoinFailed JoinFull))
               | otherwise -> do
                   Repo.saveJoinRequest tid caller JoinPending
+                  Repo.addNotification (tournamentOwner tournament) NoteJoinRequested tid
+                    (Just (T.unpack (unUsername (username u))))
                   pure (Right RequestPending)
   where
     preChecks = do
@@ -139,7 +143,7 @@ data ApproveError
 -- Approves a Pending (or previously Declined) request: creates the registration.
 approveJoinRequest
   :: ( TournamentRepository m, ParticipantRepository m, RegistrationRepository m
-     , UserRepository m, JoinRequestRepository m, Transactional m )
+     , UserRepository m, JoinRequestRepository m, NotificationRepository m, Transactional m )
   => UserId
   -> TournamentId
   -> UserId
@@ -175,6 +179,7 @@ approveJoinRequest caller tid target =
                       , newRegistrationParticipant = pid
                       }
                     Repo.saveJoinRequest tid target JoinApproved
+                    Repo.addNotification target NoteRequestApproved tid Nothing
                     pure (Right rid)
   where
     approvePreChecks t = do
@@ -189,7 +194,7 @@ data DeclineError
 
 -- Declines a request; if the player is already registered, removes them too.
 declineJoinRequest
-  :: (TournamentRepository m, RegistrationRepository m, JoinRequestRepository m, Transactional m)
+  :: (TournamentRepository m, RegistrationRepository m, JoinRequestRepository m, NotificationRepository m, Transactional m)
   => UserId
   -> TournamentId
   -> UserId
@@ -207,6 +212,7 @@ declineJoinRequest caller tid target =
             existing <- Repo.findUserRegistration tid target
             forM_ existing Repo.deleteRegistration
             Repo.saveJoinRequest tid target JoinDeclined
+            Repo.addNotification target NoteRequestDeclined tid Nothing
             pure (Right ())
   where
     declinePreChecks t = do

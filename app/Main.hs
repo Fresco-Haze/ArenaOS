@@ -80,6 +80,7 @@ import Application.Internal.TournamentOverview (TournamentOverview(..), StateCou
 import Domain.Scoreable (EFootballScore, mkEFootballScore, unEFootballScore)
 import Application.UseCases.RecordEFootballResult( recordEFootballResult )
 import Shell.Persistence.SQLite.EFootballScoreRepository ()
+import Shell.Persistence.SQLite.NotificationRepository ()
 
 
 

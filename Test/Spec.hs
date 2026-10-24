@@ -111,6 +111,8 @@ import Application.UseCases.RecordEFootballResult
 import Domain.Scoreable (mkEFootballScore)
 import Shell.Persistence.SQLite.EFootballScoreRepository ()
 import Shell.Persistence.SQLite.JoinRequestRepository ()
+import Shell.Persistence.SQLite.NotificationRepository ()
+import qualified Domain.Notification as Notif
 import Domain.JoinRequest (JoinRequestStatus(..))
 import qualified Application.UseCases.RecordEFootballResult as REF
 import qualified Application.UseCases.UpdateTournamentName as UTN
@@ -6434,6 +6436,42 @@ spec = before_ resetTestDb $ do
         rc <- JRQ.approveJoinRequest owner tid c
         pure (apTag x, dcTag y, apTag ra, apTag rb, apTag rc)
       result `shouldBe` Right ("unauthorized", "unauthorized", "ok", "ok", "full")
+
+    it "Notifications: join requests notify the organizer, approve and decline notify the player, and read clears the count" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "nt-owner-1"
+        a <- createTestUser "nt-a-1"
+        b <- createTestUser "nt-b-1"
+        tid <- jnOpen owner "Notify Cup" 8 Public
+        _ <- unwrap =<< UTRA.updateTournamentRequireApproval owner tid True
+        _ <- JRQ.joinOrRequest a tid
+        _ <- JRQ.joinOrRequest b tid
+        ownerNotes <- Repo.listNotifications owner 20
+        _ <- unwrap =<< JRQ.approveJoinRequest owner tid a
+        _ <- unwrap =<< JRQ.declineJoinRequest owner tid b
+        aNotes <- Repo.listNotifications a 20
+        bNotes <- Repo.listNotifications b 20
+        unread1 <- Repo.countUnreadNotifications a
+        Repo.markAllNotificationsRead a
+        unread2 <- Repo.countUnreadNotifications a
+        pure ( map Notif.notificationKind ownerNotes, map Notif.notificationKind aNotes
+             , map Notif.notificationKind bNotes, unread1, unread2 )
+      result `shouldBe` Right
+        ( [Notif.NoteJoinRequested, Notif.NoteJoinRequested]
+        , [Notif.NoteRequestApproved], [Notif.NoteRequestDeclined], 1, 0 )
+
+    it "Notifications: registered account ids are listed, typed-in players have no account" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "nt-owner-2"
+        a <- createTestUser "nt-a-2"
+        tid <- jnOpen owner "Account Ids Cup" 8 Public
+        _ <- JRQ.joinOrRequest a tid
+        _ <- unwrap =<< RPC.registerParticipantChecked owner tid (Individual (Player (PlayerName "nt-typed")))
+        ids <- Repo.listRegisteredUserIds tid
+        pure (ids == [a])
+      result `shouldBe` Right True
 
     it "Recent activity: lists public events newest first, never private or draft tournaments" $ do
       result <- runSQLiteM testDbPath $ do

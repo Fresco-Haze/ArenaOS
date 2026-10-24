@@ -282,4 +282,15 @@ statements =
     \  status        TEXT NOT NULL CHECK (status IN ('Pending', 'Approved', 'Declined')), \
     \  UNIQUE (tournament_id, user_id) \
     \)"
+  , "CREATE TABLE IF NOT EXISTS notifications ( \
+    \  id            INTEGER PRIMARY KEY, \
+    \  user_id       INTEGER NOT NULL REFERENCES users(id), \
+    \  kind          TEXT NOT NULL CHECK (kind IN \
+    \                  ('JoinRequested', 'RequestApproved', 'RequestDeclined', 'TournamentStarted')), \
+    \  tournament_id INTEGER NOT NULL REFERENCES tournaments(id), \
+    \  detail        TEXT, \
+    \  created_at    TEXT NOT NULL, \
+    \  read_at       TEXT \
+    \)"
+  , "CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id)"
   ]

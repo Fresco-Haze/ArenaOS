@@ -100,9 +100,11 @@ import Control.Monad.Reader (ask)
 import Domain.Bracket (Bracket(..), BracketNode(..), MatchSlot(..))
 import Shell.Persistence.SQLite.EFootballScoreRepository ()
 import Shell.Persistence.SQLite.JoinRequestRepository ()
+import Shell.Persistence.SQLite.NotificationRepository ()
 import qualified Application.UseCases.JoinRequests as JRQ
 import Domain.JoinRequest (JoinRequestStatus(..))
 import qualified Domain.TournamentHistory as TH
+import qualified Domain.Notification as Notif
 import Domain.Participant (Participant(..), Player(..), PlayerName(..), Team(..), TeamName(..))
 import qualified Application.UseCases.CreateTeam as CT
 import Application.UseCases.CreateTeam (createTeam, CreateTeamError(..))
@@ -630,6 +632,24 @@ statsJson s = object
   , "teams"             .= statsTeams s
   , "prizePool"         .= statsPrizePool s
   , "byGame"            .= [ object ["game" .= gameText g, "count" .= n] | (g, n) <- statsByGame s ]
+  ]
+
+notificationKindText :: Notif.NotificationKind -> Text
+notificationKindText k = case k of
+  Notif.NoteJoinRequested     -> "JoinRequested"
+  Notif.NoteRequestApproved   -> "RequestApproved"
+  Notif.NoteRequestDeclined   -> "RequestDeclined"
+  Notif.NoteTournamentStarted -> "TournamentStarted"
+
+notificationJson :: Notif.Notification -> Value
+notificationJson n = object
+  [ "id"             .= Notif.notificationId n
+  , "kind"           .= notificationKindText (Notif.notificationKind n)
+  , "tournamentId"   .= unTournamentId (Notif.notificationTournamentId n)
+  , "tournamentName" .= Notif.notificationTournamentName n
+  , "detail"         .= Notif.notificationDetail n
+  , "at"             .= Notif.notificationAt n
+  , "read"           .= Notif.notificationRead n
   ]
 
 activityEventText :: TH.TournamentHistoryEvent -> Text
@@ -1685,6 +1705,26 @@ main = do
       case result of
         Left apiErr -> sendError apiErr
         Right s     -> json (statsJson s)
+
+    get "/me/notifications" $ do
+      mUser <- currentUser lock
+      case mUser of
+        Nothing  -> sendError unauthenticated
+        Just uid -> do
+          result <- runUseCase lock ((,) <$> Repo.listNotifications uid 20 <*> Repo.countUnreadNotifications uid)
+          case result of
+            Left apiErr -> sendError apiErr
+            Right (ns, unread) -> json (object ["unread" .= unread, "notifications" .= map notificationJson ns])
+
+    post "/me/notifications/read" $ do
+      mUser <- currentUser lock
+      case mUser of
+        Nothing  -> sendError unauthenticated
+        Just uid -> do
+          result <- runUseCase lock (Repo.markAllNotificationsRead uid)
+          case result of
+            Left apiErr -> sendError apiErr
+            Right ()    -> status status204
 
     -- public, no login: latest events of public tournaments past Draft
     get "/activity" $ do

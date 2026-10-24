@@ -7,7 +7,8 @@ import Domain.Tournament (Tournament(..), TournamentId, TournamentState(Registra
 import Domain.TournamentHistory (TournamentHistoryEvent(TournamentStarted))
 import Domain.Ids (UserId)
 
-import Shell.Persistence.Port (TournamentRepository, TournamentHistoryRepository, Transactional(..))
+import Shell.Persistence.Port (TournamentRepository, TournamentHistoryRepository, RegistrationRepository, NotificationRepository, Transactional(..))
+import Domain.Notification (NotificationKind(NoteTournamentStarted))
 import qualified Shell.Persistence.Port as Repo
 
 import Application.Internal.Authorization (AuthorizationError, requireTournamentOwner)
@@ -20,7 +21,7 @@ data StartTournamentError
     deriving (Eq, Show)
 
 startTournament
-    :: (TournamentRepository m, TournamentHistoryRepository m, Transactional m)
+    :: (TournamentRepository m, TournamentHistoryRepository m, RegistrationRepository m, NotificationRepository m, Transactional m)
     => UserId
     -> TournamentId
     -> m (Either StartTournamentError ())
@@ -38,4 +39,6 @@ startTournament currentUser tid = do
                             withTxN $ do
                                 Repo.updateTournamentState tid InProgress
                                 Repo.recordHistoryEvent tid TournamentStarted
+                                uids <- Repo.listRegisteredUserIds tid
+                                mapM_ (\u -> Repo.addNotification u NoteTournamentStarted tid Nothing) uids
                             pure (Right ())

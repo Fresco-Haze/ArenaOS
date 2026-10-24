@@ -37,6 +37,7 @@ module Shell.Persistence.Port
   ,AuditLogRepository(..)
   ,EFootballScoreRepository(..)
   ,JoinRequestRepository(..)
+  ,NotificationRepository(..)
   
   ) where
 
@@ -54,6 +55,7 @@ import Domain.Role (Role(..))
 import Domain.Audit (AuditEvent(..))
 import Domain.Scoreable (EFootballScore)
 import Domain.JoinRequest (JoinRequestStatus)
+import Domain.Notification (NotificationKind, Notification)
 import Data.Map.Strict (Map)
 import Data.Text (Text)
 import Data.Typeable (Typeable)
@@ -150,6 +152,7 @@ class Monad m => RegistrationRepository m where
     createUserRegistration :: UserId -> NewRegistration -> m RegistrationId
     findUserRegistration :: TournamentId -> UserId -> m (Maybe RegistrationId)
     listRegisteredTournamentIds :: UserId -> m [TournamentId]
+    listRegisteredUserIds :: TournamentId -> m [UserId]
 
 
 class Monad m => BracketRepository m where
@@ -240,4 +243,10 @@ class Monad m => JoinRequestRepository m where
   saveJoinRequest   :: TournamentId -> UserId -> JoinRequestStatus -> m ()
   deleteJoinRequest :: TournamentId -> UserId -> m ()
   listJoinRequests  :: TournamentId -> m [(UserId, JoinRequestStatus)]
+
+class Monad m => NotificationRepository m where
+  addNotification          :: UserId -> NotificationKind -> TournamentId -> Maybe String -> m ()
+  listNotifications        :: UserId -> Int -> m [Notification]
+  countUnreadNotifications :: UserId -> m Int
+  markAllNotificationsRead :: UserId -> m ()
 

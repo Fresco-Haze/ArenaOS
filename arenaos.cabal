@@ -99,6 +99,8 @@ library
                       Application.UseCases.JoinRequests
                       Domain.JoinRequest
                       Shell.Persistence.SQLite.JoinRequestRepository
+                      Shell.Persistence.SQLite.NotificationRepository
+                      Domain.Notification
 
 
     hs-source-dirs:   .
