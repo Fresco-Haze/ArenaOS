@@ -4,9 +4,16 @@ module Application.UseCases.JoinRequests
   , JoinOrRequestError(..)
   , cancelJoinRequest
   , CancelRequestError(..)
+  , approveJoinRequest
+  , ApproveError(..)
+  , declineJoinRequest
+  , DeclineError(..)
+  , listJoinRequestsForOwner
+  , ListRequestsError(..)
+  , JoinRequestEntry(..)
   ) where
 
-import Control.Monad (unless)
+import Control.Monad (unless, forM_)
 import Data.Bifunctor (bimap, first)
 import qualified Data.Text as T
 
@@ -20,8 +27,8 @@ import Domain.Tournament
   , ParticipantMode(..) )
 import Domain.User (Username(..), User(username))
 
-import Application.Internal.Authorization (requireVisibleToViewer)
-import Application.Internal.LifecycleTransition (requireTournamentState)
+import Application.Internal.Authorization (AuthorizationError, requireTournamentOwner, requireVisibleToViewer)
+import Application.Internal.LifecycleTransition (LifecycleError, requireTournamentState)
 import Application.UseCases.RegisterParticipant (JoinTournamentError(..), joinTournament)
 
 import Shell.Persistence.Port
@@ -31,6 +38,7 @@ import Shell.Persistence.Port
   , RegistrationId
   , UserRepository
   , JoinRequestRepository
+  , NewRegistration(..)
   , Transactional(..)
   )
 import qualified Shell.Persistence.Port as Repo
@@ -112,3 +120,116 @@ cancelJoinRequest caller tid =
         Repo.deleteJoinRequest tid caller
         pure (Right ())
       _ -> pure (Left NoPendingRequest)
+
+-- ===== Organizer: approve, decline, list =====
+
+data JoinRequestEntry = JoinRequestEntry UserId T.Text JoinRequestStatus
+  deriving (Eq, Show)
+
+data ApproveError
+  = ApproveUnauthorized AuthorizationError
+  | ApproveLifecycle LifecycleError
+  | ApproveNoRequest
+  | ApproveAlreadyJoined
+  | ApproveNameTaken
+  | ApproveFull
+  | ApproveAccountMissing
+  deriving (Eq, Show)
+
+-- Approves a Pending (or previously Declined) request: creates the registration.
+approveJoinRequest
+  :: ( TournamentRepository m, ParticipantRepository m, RegistrationRepository m
+     , UserRepository m, JoinRequestRepository m, Transactional m )
+  => UserId
+  -> TournamentId
+  -> UserId
+  -> m (Either ApproveError RegistrationId)
+approveJoinRequest caller tid target =
+  withTxEither $ do
+    tournament <- Repo.getTournament tid
+    case approvePreChecks tournament of
+      Left err -> pure (Left err)
+      Right () -> do
+        mReq <- Repo.getJoinRequest tid target
+        mUser <- Repo.findUserById target
+        case (mReq, mUser) of
+          (Nothing, _) -> pure (Left ApproveNoRequest)
+          (_, Nothing) -> pure (Left ApproveAccountMissing)
+          (Just _, Just u) -> do
+            existing <- Repo.findUserRegistration tid target
+            regs <- Repo.listRegistrations tid
+            let player = Player (PlayerName (T.unpack (unUsername (username u))))
+                participant = Individual player
+            case existing of
+              Just _ -> pure (Left ApproveAlreadyJoined)
+              Nothing
+                | participant `elem` map registrationParticipant regs ->
+                    pure (Left ApproveNameTaken)
+                | length regs >= tournamentMaxParticipants tournament ->
+                    pure (Left ApproveFull)
+                | otherwise -> do
+                    Repo.savePlayer player
+                    pid <- Repo.resolveParticipant participant
+                    rid <- Repo.createUserRegistration target NewRegistration
+                      { newRegistrationTournament  = tid
+                      , newRegistrationParticipant = pid
+                      }
+                    Repo.saveJoinRequest tid target JoinApproved
+                    pure (Right rid)
+  where
+    approvePreChecks t = do
+      first ApproveUnauthorized (requireTournamentOwner caller t)
+      first ApproveLifecycle (requireTournamentState RegistrationOpen t)
+
+data DeclineError
+  = DeclineUnauthorized AuthorizationError
+  | DeclineLifecycle LifecycleError
+  | DeclineNoRequest
+  deriving (Eq, Show)
+
+-- Declines a request; if the player is already registered, removes them too.
+declineJoinRequest
+  :: (TournamentRepository m, RegistrationRepository m, JoinRequestRepository m, Transactional m)
+  => UserId
+  -> TournamentId
+  -> UserId
+  -> m (Either DeclineError ())
+declineJoinRequest caller tid target =
+  withTxEither $ do
+    tournament <- Repo.getTournament tid
+    case declinePreChecks tournament of
+      Left err -> pure (Left err)
+      Right () -> do
+        mReq <- Repo.getJoinRequest tid target
+        case mReq of
+          Nothing -> pure (Left DeclineNoRequest)
+          Just _ -> do
+            existing <- Repo.findUserRegistration tid target
+            forM_ existing Repo.deleteRegistration
+            Repo.saveJoinRequest tid target JoinDeclined
+            pure (Right ())
+  where
+    declinePreChecks t = do
+      first DeclineUnauthorized (requireTournamentOwner caller t)
+      first DeclineLifecycle (requireTournamentState RegistrationOpen t)
+
+data ListRequestsError = ListUnauthorized AuthorizationError
+  deriving (Eq, Show)
+
+listJoinRequestsForOwner
+  :: (TournamentRepository m, UserRepository m, JoinRequestRepository m)
+  => UserId
+  -> TournamentId
+  -> m (Either ListRequestsError [JoinRequestEntry])
+listJoinRequestsForOwner caller tid = do
+  tournament <- Repo.getTournament tid
+  case requireTournamentOwner caller tournament of
+    Left e -> pure (Left (ListUnauthorized e))
+    Right () -> do
+      rows <- Repo.listJoinRequests tid
+      entries <- mapM toEntry rows
+      pure (Right [ e | Just e <- entries ])
+  where
+    toEntry (u, st) = do
+      mUser <- Repo.findUserById u
+      pure (fmap (\usr -> JoinRequestEntry u (unUsername (username usr)) st) mUser)

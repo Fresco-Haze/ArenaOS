@@ -99,6 +99,7 @@ import Domain.Bracket (Bracket(..), BracketNode(..), MatchSlot(..))
 import Shell.Persistence.SQLite.EFootballScoreRepository ()
 import Shell.Persistence.SQLite.JoinRequestRepository ()
 import qualified Application.UseCases.JoinRequests as JRQ
+import Domain.JoinRequest (JoinRequestStatus(..))
 import Domain.Participant (Participant(..), Player(..), PlayerName(..), Team(..), TeamName(..))
 import qualified Application.UseCases.CreateTeam as CT
 import Application.UseCases.CreateTeam (createTeam, CreateTeamError(..))
@@ -655,6 +656,7 @@ tournamentViewJson v = object
   , "participants"  .= map participantJson (GetT.tvParticipants v)
   , "viewerIsOwner" .= GetT.tvViewerIsOwner v
   , "viewerIsRegistered" .= GetT.tvViewerIsRegistered v
+  , "viewerRequestStatus" .= fmap requestStatusText (GetT.tvViewerRequestStatus v)
   ]
 
 fromJoin :: Register.JoinTournamentError -> ApiError
@@ -685,6 +687,43 @@ fromCancelRequest :: JRQ.CancelRequestError -> ApiError
 fromCancelRequest JRQ.NoPendingRequest =
   ApiError status404 "NO_PENDING_REQUEST"
     "You have no pending request for this tournament" (object [])
+
+requestStatusText :: JoinRequestStatus -> Text
+requestStatusText JoinPending  = "Pending"
+requestStatusText JoinApproved = "Approved"
+requestStatusText JoinDeclined = "Declined"
+
+newtype TargetUserReq = TargetUserReq Int
+
+instance FromJSON TargetUserReq where
+  parseJSON = withObject "target" $ \o -> TargetUserReq <$> o .: "userId"
+
+entryJson :: JRQ.JoinRequestEntry -> Value
+entryJson (JRQ.JoinRequestEntry (UserId u) name st) =
+  object [ "userId" .= u, "username" .= name, "status" .= requestStatusText st ]
+
+fromApprove :: JRQ.ApproveError -> ApiError
+fromApprove (JRQ.ApproveUnauthorized a) = fromAuthorization a
+fromApprove (JRQ.ApproveLifecycle l)    = fromLifecycle l
+fromApprove JRQ.ApproveNoRequest =
+  ApiError status404 "NO_REQUEST" "There is no request from that player" (object [])
+fromApprove JRQ.ApproveAlreadyJoined =
+  ApiError status409 "ALREADY_REGISTERED" "That player is already registered" (object [])
+fromApprove JRQ.ApproveNameTaken =
+  ApiError status409 "NAME_TAKEN" "A player with that name is already registered" (object [])
+fromApprove JRQ.ApproveFull =
+  ApiError status409 "REGISTRATION_CAPACITY_REACHED" "The tournament is full" (object [])
+fromApprove JRQ.ApproveAccountMissing =
+  ApiError status404 "NOT_FOUND" "Resource not found" (object [])
+
+fromDecline :: JRQ.DeclineError -> ApiError
+fromDecline (JRQ.DeclineUnauthorized a) = fromAuthorization a
+fromDecline (JRQ.DeclineLifecycle l)    = fromLifecycle l
+fromDecline JRQ.DeclineNoRequest =
+  ApiError status404 "NO_REQUEST" "There is no request from that player" (object [])
+
+fromListRequests :: JRQ.ListRequestsError -> ApiError
+fromListRequests (JRQ.ListUnauthorized a) = fromAuthorization a
 
 fromWithdraw :: Register.WithdrawError -> ApiError
 fromWithdraw (Register.WithdrawLifecycle l) = fromLifecycle l
@@ -1315,6 +1354,30 @@ main = do
 
     post "/tournaments/:id/cancel-request" $
       runAction lock JRQ.cancelJoinRequest fromCancelRequest (\() -> status status204)
+
+    get "/tournaments/:id/requests" $
+      runAction lock JRQ.listJoinRequestsForOwner fromListRequests $ \es ->
+        json (object ["requests" .= map entryJson es])
+
+    post "/tournaments/:id/requests/approve" $ do
+      raw <- body
+      case eitherDecode raw of
+        Left reason -> sendError (invalidBody reason)
+        Right (TargetUserReq target) ->
+          runAction lock
+            (\uid tid -> JRQ.approveJoinRequest uid tid (UserId target))
+            fromApprove $ \rid -> do
+              status status201
+              json (object ["registrationId" .= unRegistrationId rid])
+
+    post "/tournaments/:id/requests/decline" $ do
+      raw <- body
+      case eitherDecode raw of
+        Left reason -> sendError (invalidBody reason)
+        Right (TargetUserReq target) ->
+          runTransition lock
+            (\uid tid -> JRQ.declineJoinRequest uid tid (UserId target))
+            fromDecline
 
     post "/tournaments/:id/registrations/remove" $ do
       raw <- body

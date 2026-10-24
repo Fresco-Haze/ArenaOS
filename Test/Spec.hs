@@ -6395,6 +6395,45 @@ spec = before_ resetTestDb $ do
              , raTag c, tournamentRequireApproval t2, tournamentRequireApproval t3, tournamentRequireApproval t4 )
       result `shouldBe` Right (False, "unauthorized", "ok", True, "ok", False, True, False)
 
+    it "Join requests: approving registers the player, declining removes them, and a decline can be reversed" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "ap-owner-1"
+        a <- createTestUser "ap-a-1"
+        tid <- jnOpen owner "Approve Cup" 8 Public
+        _ <- unwrap =<< UTRA.updateTournamentRequireApproval owner tid True
+        _ <- JRQ.joinOrRequest a tid
+        r1 <- JRQ.approveJoinRequest owner tid a
+        regs1 <- length <$> Repo.listRegistrations tid
+        s1 <- Repo.getJoinRequest tid a
+        d1 <- JRQ.declineJoinRequest owner tid a
+        regs2 <- length <$> Repo.listRegistrations tid
+        s2 <- Repo.getJoinRequest tid a
+        r2 <- JRQ.approveJoinRequest owner tid a
+        regs3 <- length <$> Repo.listRegistrations tid
+        pure (apTag r1, regs1, s1, dcTag d1, regs2, s2, apTag r2, regs3)
+      result `shouldBe` Right ("ok", 1, Just JoinApproved, "ok", 0, Just JoinDeclined, "ok", 1)
+
+    it "Join requests: only the owner can approve or decline, and approval respects capacity" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "ap-owner-2"
+        a <- createTestUser "ap-a-2"
+        b <- createTestUser "ap-b-2"
+        c <- createTestUser "ap-c-2"
+        tid <- jnOpen owner "Capacity Approve Cup" 2 Public
+        _ <- unwrap =<< UTRA.updateTournamentRequireApproval owner tid True
+        _ <- JRQ.joinOrRequest a tid
+        _ <- JRQ.joinOrRequest b tid
+        _ <- JRQ.joinOrRequest c tid
+        x <- JRQ.approveJoinRequest a tid b
+        y <- JRQ.declineJoinRequest a tid b
+        ra <- JRQ.approveJoinRequest owner tid a
+        rb <- JRQ.approveJoinRequest owner tid b
+        rc <- JRQ.approveJoinRequest owner tid c
+        pure (apTag x, dcTag y, apTag ra, apTag rb, apTag rc)
+      result `shouldBe` Right ("unauthorized", "unauthorized", "ok", "ok", "full")
+
     it "Join requests: with approval off, joining registers immediately as before" $ do
       result <- runSQLiteM testDbPath $ do
         setupSchema
@@ -9129,6 +9168,17 @@ jrTag (Right (JRQ.Joined _))                   = "joined"
 jrTag (Left JRQ.JoinRequestAlreadyPending)     = "already-pending"
 jrTag (Left JRQ.JoinRequestDeclined)           = "declined"
 jrTag (Left (JRQ.JoinFailed _))                = "failed"
+
+apTag :: Either JRQ.ApproveError a -> String
+apTag (Right _)                          = "ok"
+apTag (Left (JRQ.ApproveUnauthorized _)) = "unauthorized"
+apTag (Left JRQ.ApproveFull)             = "full"
+apTag (Left _)                           = "other"
+
+dcTag :: Either JRQ.DeclineError () -> String
+dcTag (Right ())                         = "ok"
+dcTag (Left (JRQ.DeclineUnauthorized _)) = "unauthorized"
+dcTag (Left _)                           = "other"
 
 cqTag :: Either JRQ.CancelRequestError () -> String
 cqTag (Right ())                  = "ok"

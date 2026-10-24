@@ -12,7 +12,8 @@ import Domain.Participant (Participant)
 import Domain.Registration (Registration(..))
 import Domain.Tournament (Tournament(..), TournamentId)
 
-import Shell.Persistence.Port (TournamentRepository, RegistrationRepository)
+import Shell.Persistence.Port (TournamentRepository, RegistrationRepository, JoinRequestRepository)
+import Domain.JoinRequest (JoinRequestStatus)
 import qualified Shell.Persistence.Port as Repo
 
 import Application.Internal.Authorization (AuthorizationError, requireVisibleToViewer)
@@ -26,10 +27,11 @@ data TournamentView = TournamentView
   , tvParticipants  :: [Participant]
   , tvViewerIsOwner :: Bool
   , tvViewerIsRegistered :: Bool
+  , tvViewerRequestStatus :: Maybe JoinRequestStatus
   } deriving (Eq, Show)
 
 getTournament
-  :: (TournamentRepository m, RegistrationRepository m)
+  :: (TournamentRepository m, RegistrationRepository m, JoinRequestRepository m)
   => Maybe UserId
   -> TournamentId
   -> m (Either GetTournamentError TournamentView)
@@ -40,9 +42,11 @@ getTournament viewer tid = do
     Right () -> do
       regs <- Repo.listRegistrations tid
       registered <- maybe (pure False) (\u -> isJust <$> Repo.findUserRegistration tid u) viewer
+      reqStatus <- maybe (pure Nothing) (\u -> Repo.getJoinRequest tid u) viewer
       pure (Right TournamentView
         { tvTournament    = tournament
         , tvParticipants  = map registrationParticipant regs
         , tvViewerIsOwner = viewer == Just (tournamentOwner tournament)
         , tvViewerIsRegistered = registered
+        , tvViewerRequestStatus = reqStatus
         })

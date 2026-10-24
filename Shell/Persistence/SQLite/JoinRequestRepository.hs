@@ -55,3 +55,13 @@ instance JoinRequestRepository SQLiteM where
     liftIO $ execute conn
       "DELETE FROM join_requests WHERE tournament_id = ? AND user_id = ?"
       (tidInt, uidInt)
+
+  listJoinRequests :: TournamentId -> SQLiteM [(UserId, JoinRequestStatus)]
+  listJoinRequests (TournamentId tidInt) = do
+    conn <- asks envConnection
+    rows <- liftIO $
+      (query conn
+        "SELECT user_id, status FROM join_requests WHERE tournament_id = ? ORDER BY id"
+        (Only tidInt)
+       :: IO [(Int, String)])
+    liftIO (mapM (\(u, s) -> do { st <- textToStatus s; pure (UserId u, st) }) rows)

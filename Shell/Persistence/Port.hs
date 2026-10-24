@@ -233,4 +233,5 @@ class Monad m => JoinRequestRepository m where
   getJoinRequest    :: TournamentId -> UserId -> m (Maybe JoinRequestStatus)
   saveJoinRequest   :: TournamentId -> UserId -> JoinRequestStatus -> m ()
   deleteJoinRequest :: TournamentId -> UserId -> m ()
+  listJoinRequests  :: TournamentId -> m [(UserId, JoinRequestStatus)]
 
