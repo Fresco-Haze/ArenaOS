@@ -141,6 +141,22 @@ export const ActivityItem = z.object({
 export type ActivityItem = z.infer<typeof ActivityItem>
 export const ActivityList = z.object({ activity: z.array(ActivityItem) })
 
+export const NotificationItem = z.object({
+  id: z.number(),
+  kind: z.enum(['JoinRequested', 'RequestApproved', 'RequestDeclined', 'TournamentStarted']),
+  tournamentId: z.number(),
+  tournamentName: z.string(),
+  detail: z.string().nullish(),
+  at: z.string(),
+  read: z.boolean(),
+})
+export type NotificationItem = z.infer<typeof NotificationItem>
+export const NotificationList = z.object({
+  unread: z.number(),
+  notifications: z.array(NotificationItem),
+})
+export type NotificationList = z.infer<typeof NotificationList>
+
 export const LoginResponse = z.object({
   token: z.string(),
   user: z.object({ id: z.number(), username: z.string(), fullName: z.string().nullish() }),

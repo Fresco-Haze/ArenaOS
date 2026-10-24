@@ -1,5 +1,5 @@
 import { api, apiVoid } from '../api'
-import { Match, Tournament, RegistrationResult, BracketIdResult, CreateTournamentResponse, CreateTeamResponse, TeamList, JoinRequestList, type Game, type Participant, type TournamentFormat } from '../model'
+import { Match, Tournament, RegistrationResult, BracketIdResult, CreateTournamentResponse, CreateTeamResponse, TeamList, JoinRequestList, NotificationList, type Game, type Participant, type TournamentFormat } from '../model'
 
 export function publish(id: number) {
   return apiVoid(`/tournaments/${id}/publish`, { method: 'POST' })
@@ -229,4 +229,12 @@ export function declineJoinRequest(id: number, userId: number) {
     method: 'POST',
     body: JSON.stringify({ userId }),
   })
+}
+
+export function fetchNotifications() {
+  return api('/me/notifications', NotificationList)
+}
+
+export function markNotificationsRead() {
+  return apiVoid('/me/notifications/read', { method: 'POST' })
 }

@@ -1,7 +1,10 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import { Link, NavLink, useLocation, useNavigate } from 'react-router'
 import { useAuth } from '../auth/context'
+import { fetchNotifications, markNotificationsRead } from '../lib/tournamentActions'
+import { timeAgo } from '../lib/cardDate'
+import type { NotificationItem, NotificationList } from '../model'
 import Logo from './Logo'
 
 const ICONS = {
@@ -17,6 +20,7 @@ const ICONS = {
   plus: 'M12 5v14M5 12h14',
   search: 'M11 18a7 7 0 1 1 0-14 7 7 0 0 1 0 14zM20 20l-4-4',
   chevron: 'M6 9l6 6 6-6',
+  bell: 'M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15zM10 20a2 2 0 0 0 4 0',
 } as const
 
 type IconName = keyof typeof ICONS
@@ -112,6 +116,138 @@ function UserMenu() {
       )}
     </div>
   )
+}
+
+const NOTIFICATION_POLL_MS = 30_000
+
+function noteText(n: NotificationItem): string {
+  switch (n.kind) {
+    case 'JoinRequested':
+      return `${n.detail ?? 'A player'} asked to join`
+    case 'RequestApproved':
+      return 'Your request to join was approved'
+    case 'RequestDeclined':
+      return 'The organizer declined your request'
+    case 'TournamentStarted':
+      return 'The tournament has started'
+  }
+}
+
+function BellInner() {
+  const [data, setData] = useState<NotificationList | null>(null)
+  const [now, setNow] = useState(() => Date.now())
+  const [open, setOpen] = useState(false)
+  const [freshIds, setFreshIds] = useState<number[]>([])
+  const ref = useRef<HTMLDivElement>(null)
+
+  const load = useCallback(() => {
+    fetchNotifications()
+      .then((d) => {
+        setData(d)
+        setNow(Date.now())
+      })
+      .catch(() => {
+        /* keep the last list; the next poll tries again */
+      })
+  }, [])
+
+  // Poll only while the tab is visible, and catch up right away when it returns.
+  useEffect(() => {
+    let timer: ReturnType<typeof setInterval> | undefined
+    function stop() {
+      if (timer !== undefined) clearInterval(timer)
+      timer = undefined
+    }
+    function start() {
+      stop()
+      timer = setInterval(load, NOTIFICATION_POLL_MS)
+    }
+    function onVisibility() {
+      if (document.visibilityState === 'visible') {
+        load()
+        start()
+      } else {
+        stop()
+      }
+    }
+    if (document.visibilityState === 'visible') {
+      load()
+      start()
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      stop()
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
+  }, [load])
+
+  useEffect(() => {
+    if (!open) return
+    function onDown(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  function toggle() {
+    if (!open) {
+      const unreadIds = (data?.notifications ?? []).filter((n) => !n.read).map((n) => n.id)
+      setFreshIds(unreadIds)
+      if ((data?.unread ?? 0) > 0) {
+        markNotificationsRead().then(load).catch(() => {})
+      }
+    }
+    setOpen((o) => !o)
+  }
+
+  const unread = data?.unread ?? 0
+  return (
+    <div className="bell" ref={ref}>
+      <button
+        type="button"
+        className="bell-trigger"
+        aria-label={unread > 0 ? `Notifications, ${unread} unread` : 'Notifications'}
+        aria-expanded={open}
+        onClick={toggle}
+      >
+        <Icon name="bell" />
+        {unread > 0 && <span className="bell-badge" aria-hidden="true">{unread > 9 ? '9+' : unread}</span>}
+      </button>
+      {open && (
+        <div className="bell-panel">
+          {data === null || data.notifications.length === 0 ? (
+            <p className="muted bell-empty">No notifications yet.</p>
+          ) : (
+            data.notifications.map((n) => (
+              <Link
+                key={n.id}
+                to={`/tournaments/${n.tournamentId}`}
+                className={'note-item' + (freshIds.includes(n.id) ? ' note-new' : '')}
+                onClick={() => setOpen(false)}
+              >
+                <p className="note-title">{noteText(n)}</p>
+                <p className="note-sub">{n.tournamentName} &bull; {timeAgo(n.at, now)}</p>
+              </Link>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function Bell() {
+  const { user } = useAuth()
+  if (!user) return null
+  return <BellInner key={user.id} />
 }
 
 function SideLink({ to, icon, end, children }: { to: string; icon: IconName; end?: boolean; children: ReactNode }) {
@@ -223,6 +359,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
           >
             <Icon name="search" />
           </button>
+          <Bell />
           <UserMenu />
         </div>
       </header>
