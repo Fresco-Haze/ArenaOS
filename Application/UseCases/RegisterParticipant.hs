@@ -14,13 +14,13 @@ module Application.UseCases.RegisterParticipant
 
 import Data.Bifunctor (first)
 import qualified Data.Text as T
-import Domain.User (Username(..), User(username))
+import Domain.User (Username(..), User(username, userId))
 
 import Domain.Ids (UserId)
 import Domain.Participant (Participant(..), Player(..), PlayerName(..))
 import Domain.Registration (registrationParticipant, registrationId)
 import Domain.Tournament
-  (Tournament, TournamentId, TournamentState(RegistrationOpen), tournamentMaxParticipants, tournamentParticipantMode, ParticipantMode(..))
+  (Tournament, TournamentId, TournamentState(RegistrationOpen), tournamentMaxParticipants, tournamentParticipantMode, tournamentRequireApproval, ParticipantMode(..))
 import Application.Internal.Authorization (AuthorizationError, requireTournamentOwner, requireVisibleToViewer)
 import Application.Internal.LifecycleTransition (requireTournamentState, LifecycleError)
 import Engine.TournamentValidation (ParticipantValidationError, validateParticipant, participantMatchesMode)
@@ -32,9 +32,11 @@ import Shell.Persistence.Port
   , Transactional(..)
   , NewRegistration(..)
   , UserRepository
+  , JoinRequestRepository
   )
 import qualified Shell.Persistence.Port as Repo
-import Control.Monad (unless)
+import Control.Monad (unless, forM_)
+import Domain.JoinRequest (JoinRequestStatus(JoinDeclined))
 
 -- ===== Original, unchanged =====
 
@@ -193,9 +195,27 @@ data RemoveError
   | RemoveNotRegistered
   deriving (Eq, Show)
 
--- Organizer removes a participant while registration is open (plain remove).
+-- The account behind a self-registered player: the account whose username is
+-- the player name AND which owns this very registration. Organizer-typed
+-- players have no account, so they give Nothing.
+accountBehind
+  :: (UserRepository m, RegistrationRepository m)
+  => TournamentId -> Participant -> RegistrationId -> m (Maybe UserId)
+accountBehind tid (Individual (Player (PlayerName n))) rid = do
+  mUser <- Repo.findUserByUsername (Username (T.pack n))
+  case mUser of
+    Nothing -> pure Nothing
+    Just u -> do
+      owned <- Repo.findUserRegistration tid (userId u)
+      pure (if owned == Just rid then Just (userId u) else Nothing)
+accountBehind _ (Squad _) _ = pure Nothing
+
+-- Organizer removes a participant while registration is open. On an approval
+-- tournament a self-registered player is also marked Declined, so they cannot
+-- simply request again.
 removeParticipant
-  :: (TournamentRepository m, RegistrationRepository m, Transactional m)
+  :: ( TournamentRepository m, RegistrationRepository m, UserRepository m
+     , JoinRequestRepository m, Transactional m )
   => UserId
   -> TournamentId
   -> Participant
@@ -210,7 +230,11 @@ removeParticipant caller tid participant =
         case filter ((== participant) . registrationParticipant) regs of
           []      -> pure (Left RemoveNotRegistered)
           (r : _) -> do
+            target <- if tournamentRequireApproval tournament
+                        then accountBehind tid participant (registrationId r)
+                        else pure Nothing
             Repo.deleteRegistration (registrationId r)
+            forM_ target (\u -> Repo.saveJoinRequest tid u JoinDeclined)
             pure (Right ())
   where
     preChecks t = do

@@ -212,8 +212,10 @@ export default function TournamentPage({ id }: { id: string }) {
         onClose={() => setRemoving(null)}
       >
         <p>
-          Remove {removing ? participantName(removing) : ''} from this tournament? They can register
-          again while registration is open.
+          Remove {removing ? participantName(removing) : ''} from this tournament?{' '}
+          {t.requireApproval && removing?.type === 'Individual'
+            ? 'If they joined themselves, they will not be able to request to join again unless you approve them.'
+            : 'They can register again while registration is open.'}
         </p>
       </ConfirmDialog>
 

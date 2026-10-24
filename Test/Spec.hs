@@ -6478,6 +6478,39 @@ spec = before_ resetTestDb $ do
         pure (jrTag ra, cqTag c1, cqTag c2, sb)
       result `shouldBe` Right ("declined", "ok", "none", Nothing)
 
+    it "Organizer removes a participant: on an approval tournament a self-registered player is declined, a typed-in one is plainly removed" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "rd-owner-1"
+        a <- createTestUser "rd-a-1"
+        tid <- jnOpen owner "Remove Decline Cup" 8 Public
+        _ <- unwrap =<< UTRA.updateTournamentRequireApproval owner tid True
+        _ <- JRQ.joinOrRequest a tid
+        _ <- unwrap =<< JRQ.approveJoinRequest owner tid a
+        let pa    = Individual (Player (PlayerName "rd-a-1"))
+            typed = Individual (Player (PlayerName "rd-typed"))
+        _ <- unwrap =<< RPC.registerParticipantChecked owner tid typed
+        r1 <- RPC.removeParticipant owner tid pa
+        s1 <- Repo.getJoinRequest tid a
+        again <- JRQ.joinOrRequest a tid
+        r2 <- RPC.removeParticipant owner tid typed
+        regs <- length <$> Repo.listRegistrations tid
+        pure (rmTag r1, s1, jrTag again, rmTag r2, regs)
+      result `shouldBe` Right ("ok", Just JoinDeclined, "declined", "ok", 0)
+
+    it "Organizer removes a participant: on an open tournament a removed self-registered player can join again" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "rd-owner-2"
+        a <- createTestUser "rd-a-2"
+        tid <- jnOpen owner "Remove Open Cup" 8 Public
+        _ <- JRQ.joinOrRequest a tid
+        r1 <- RPC.removeParticipant owner tid (Individual (Player (PlayerName "rd-a-2")))
+        s1 <- Repo.getJoinRequest tid a
+        again <- JRQ.joinOrRequest a tid
+        pure (rmTag r1, s1, jrTag again)
+      result `shouldBe` Right ("ok", Nothing, "joined")
+
     it "Organizer removes a participant: removes, and the player can register again" $ do
       result <- runSQLiteM testDbPath $ do
         setupSchema
