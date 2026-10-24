@@ -143,4 +143,25 @@ instance UserRepository SQLiteM where
     when (n == 0) $
       liftIO $ throwIO (NotFound ("User not found: " ++ show uid))
 
+  setFullName :: UserId -> Maybe Text -> SQLiteM ()
+  setFullName (UserId uid) mName = do
+    conn <- asks envConnection
+    liftIO $ execute conn
+      "UPDATE users SET full_name = ? WHERE id = ?"
+      (mName, uid)
+    n <- liftIO $ changes conn
+    when (n == 0) $
+      liftIO $ throwIO (NotFound ("User not found: " ++ show uid))
+
+  getFullName :: UserId -> SQLiteM (Maybe Text)
+  getFullName (UserId uid) = do
+    conn <- asks envConnection
+    rows <- liftIO (query conn
+      "SELECT full_name FROM users WHERE id = ?"
+      (Only uid)
+      :: IO [Only (Maybe Text)])
+    pure $ case rows of
+      (Only n : _) -> n
+      []           -> Nothing
+
   

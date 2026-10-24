@@ -6586,6 +6586,27 @@ spec = before_ resetTestDb $ do
         Left err -> expectationFailure (show err)
         Right r  -> r `shouldBe` Left RPC.JoinSquadOnly
 
+  describe "Full name (v0.12)" $ do
+
+    it "trims a valid name, treats blank as none, and rejects one over 60 characters" $ do
+      EU.validateFullName "  Jae Kim  " `shouldBe` Right (Just "Jae Kim")
+      EU.validateFullName "   " `shouldBe` Right Nothing
+      EU.validateFullName "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" `shouldBe` Left EU.FullNameTooLong
+
+    it "stores, reads back and clears a full name" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        uid <- createTestUser "fn-user-1"
+        a <- Repo.getFullName uid
+        Repo.setFullName uid (Just "Jae Kim")
+        b <- Repo.getFullName uid
+        Repo.setFullName uid Nothing
+        c <- Repo.getFullName uid
+        pure (a, b, c)
+      case result of
+        Left err -> expectationFailure (show err)
+        Right r  -> r `shouldBe` (Nothing, Just "Jae Kim", Nothing)
+
   describe "Engine.User.validateRawPassword (pure)" $ do
 
     it "rejects a password shorter than 8 characters" $

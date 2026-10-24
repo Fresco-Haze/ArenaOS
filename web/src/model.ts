@@ -134,7 +134,7 @@ export const TournamentList = z.object({ tournaments: z.array(Tournament) })
 
 export const LoginResponse = z.object({
   token: z.string(),
-  user: z.object({ id: z.number(), username: z.string() }),
+  user: z.object({ id: z.number(), username: z.string(), fullName: z.string().nullish() }),
 })
 export type LoginResponse = z.infer<typeof LoginResponse>
 export const RegistrationResult = z.object({ registrationId: z.number() })

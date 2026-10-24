@@ -75,6 +75,7 @@ import qualified Application.UseCases.LoginUser as LU
 import Domain.User (User(..), Username(..), Email(..), AccountStatus(..), PasswordHash)
 import qualified Application.UseCases.RegisterUser as RU
 import Engine.User (UserError(..))
+import qualified Engine.User as EU
 import qualified Application.UseCases.GetTournament as GetT
 import qualified Application.UseCases.ListMyTournaments as ListMine
 import qualified Application.UseCases.StartTournament as StartT
@@ -1005,11 +1006,16 @@ fromLogin (LU.AccountNotActive s) =
   ApiError status403 "ACCOUNT_NOT_ACTIVE" "This account cannot log in"
     (object ["status" .= show s])
 
-data RegisterReq = RegisterReq Text Text Text
+data RegisterReq = RegisterReq Text Text Text (Maybe Text)
 
 instance FromJSON RegisterReq where
   parseJSON = withObject "register" $ \o ->
-    RegisterReq <$> o .: "username" <*> o .: "email" <*> o .: "password"
+    RegisterReq <$> o .: "username" <*> o .: "email" <*> o .: "password" <*> o .:? "fullName"
+
+nameTooLong :: ApiError
+nameTooLong =
+  ApiError status400 "VALIDATION_FAILED" "Full name must be 60 characters or fewer"
+    (object ["field" .= ("fullName" :: Text)])
 
 fromRegisterUser :: RU.RegisterUserError -> ApiError
 fromRegisterUser (RU.InvalidUser err) = case err of
@@ -1450,9 +1456,13 @@ main = do
               liftIO (atomicModifyIORef' (envTokens lock)
                         (\m -> (Map.insert tok (userId user, expiresAt) (Map.filter ((> nowT) . snd) m), ())))
               let Username uname = username user
+              fullResult <- runUseCase lock (Repo.getFullName (userId user))
+              let fullName = either (const Nothing) id fullResult
+
               json (object [ "token" .= tok
                            , "user"  .= object [ "id"       .= unUserId (userId user)
-                                               , "username" .= uname ] ])
+                                               , "username" .= uname
+                                               , "fullName" .= fullName ] ])
 
     post "/logout" $ do
       mTok <- bearerToken
@@ -1466,17 +1476,19 @@ main = do
       raw <- body
       case eitherDecode raw of
         Left reason -> sendError (invalidBody reason)
-        Right (RegisterReq u e p) -> do
+        Right (RegisterReq u e p mFull) -> do
           ip <- clientIp lock
           blocked <- liftIO (blockedFor lock registerIpRule ip)
           let regReq = RU.RegisterUserRequest (Username u) (Email e) p
+              nameCheck = maybe (Right Nothing) EU.validateFullName mFull
           result <- case blocked of
             Just secs -> do
               setHeader "Retry-After" (TL.pack (show secs))
               pure (Left (tooMany secs))
-            Nothing -> case RU.validateRegistration regReq of
-              Left verr -> pure (Right (Left verr))
-              Right () -> do
+            Nothing -> case (nameCheck, RU.validateRegistration regReq) of
+              (Left _, _) -> pure (Left nameTooLong)
+              (_, Left verr) -> pure (Right (Left verr))
+              (Right _, Right ()) -> do
                 liftIO (recordHit lock registerIpRule ip)
                 hr <- liftIO (tryAny (withHashSlot lock (hashPasswordIO p)))
                 case hr of
@@ -1490,6 +1502,9 @@ main = do
             Right (Right user) -> do
               status status201
               let Username uname = username user
+              let fullToSave = either (const Nothing) id nameCheck
+              _ <- runUseCase lock (Repo.setFullName (userId user) fullToSave)
+
               json (object [ "id" .= unUserId (userId user)
                            , "username" .= uname ])
     

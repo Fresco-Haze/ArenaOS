@@ -5,6 +5,8 @@ module Engine.User
   , validatePasswordHash
   , validateUser
   , validateRawPassword
+  , FullNameError(..)
+  , validateFullName
   ) where
 
 import Domain.User (Username(..), Email(..), PasswordHash(..), User(..))
@@ -56,3 +58,14 @@ validateRawPassword t
   | T.null t          = Left EmptyPassword
   | T.length t < 8    = Left PasswordTooShort
   | otherwise         = Right t
+
+data FullNameError = FullNameTooLong
+  deriving (Eq, Show)
+
+-- Trimmed; blank means "no name"; at most 60 characters.
+validateFullName :: Text -> Either FullNameError (Maybe Text)
+validateFullName raw
+  | T.null s        = Right Nothing
+  | T.length s > 60 = Left FullNameTooLong
+  | otherwise       = Right (Just s)
+  where s = T.strip raw

@@ -49,7 +49,8 @@ export default function ProfilePage() {
       <section className="profile-head" aria-label="Profile">
         <span className="profile-avatar" aria-hidden="true">{user.username.charAt(0).toUpperCase()}</span>
         <div>
-          <h1 className="profile-name">{user.username}</h1>
+          <h1 className="profile-name">{user.fullName || user.username}</h1>
+          {user.fullName && <p className="muted">@{user.username}</p>}
           {items !== null && items.length > 0 && <span className="profile-chip">Organizer</span>}
         </div>
       </section>

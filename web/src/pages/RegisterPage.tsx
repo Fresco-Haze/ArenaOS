@@ -9,7 +9,7 @@ import { retrySeconds, useCooldown } from '../lib/rateLimit'
 import AuthBrand from '../components/AuthBrand'
 import AuthField from '../components/AuthField'
 
-type Field = 'username' | 'email' | 'password'
+type Field = 'fullName' | 'username' | 'email' | 'password'
 
 function fieldOf(err: ApiError): Field | null {
   if (err.code === 'USERNAME_TAKEN') return 'username'
@@ -27,6 +27,7 @@ export default function RegisterPage() {
   const [params] = useSearchParams()
   const next = safeNext(params.get('next'))
 
+  const [fullName, setFullName] = useState('')
   const [username, setUsername] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -44,7 +45,7 @@ export default function RegisterPage() {
     setBusy(true)
 
     try {
-      await registerUser(username, email, password)
+      await registerUser(username, email, password, fullName.trim())
     } catch (err) {
       setBusy(false)
       const wait = retrySeconds(err)
@@ -81,6 +82,19 @@ export default function RegisterPage() {
       <p className="muted auth-sub">Join the ArenaOS community</p>
       <form onSubmit={onSubmit} className="auth-form">
         <AuthField
+          label="Full Name"
+          icon="user"
+          placeholder="John Doe"
+          value={fullName}
+          onChange={(e) => setFullName(e.target.value)}
+          autoComplete="name"
+          maxLength={60}
+          autoFocus
+          required
+          error={fieldErrors.fullName}
+        />
+
+        <AuthField
           label="Email"
           icon="mail"
           type="email"
@@ -88,7 +102,6 @@ export default function RegisterPage() {
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           autoComplete="email"
-          autoFocus
           required
           error={fieldErrors.email}
         />

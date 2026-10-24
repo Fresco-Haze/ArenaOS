@@ -204,6 +204,8 @@ class Monad m =>  UserRepository m where
   updateUsername :: UserId -> Username -> m ()
   updateEmail    :: UserId -> Email -> m ()
   updateAccountStatus :: UserId -> AccountStatus -> m ()
+  setFullName :: UserId -> Maybe Text -> m ()
+  getFullName :: UserId -> m (Maybe Text)
 
 class Monad m => PasswordHasher m where
     hashPassword   :: Text -> m PasswordHash
