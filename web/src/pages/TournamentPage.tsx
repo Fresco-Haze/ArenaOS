@@ -21,7 +21,7 @@ import JoinBar from '../components/JoinBar'
 import ConfirmDialog from '../components/ConfirmDialog'
 import { removeParticipant } from '../lib/tournamentActions'
 
-type TabId = 'bracket' | 'players'
+type TabId = 'overview' | 'bracket' | 'players'
 
 function PeopleIcon() {
   return (
@@ -54,7 +54,7 @@ function TrophyIcon() {
 export default function TournamentPage({ id }: { id: string }) {
   const { user } = useAuth()
   const { state, reload } = useTournament(id)
-  const [tab, setTab] = useState<TabId>('bracket')
+  const [tab, setTab] = useState<TabId>('overview')
   const [removing, setRemoving] = useState<Participant | null>(null)
 
   if (state.kind === 'loading') {
@@ -103,7 +103,11 @@ export default function TournamentPage({ id }: { id: string }) {
 
   return (
     <div className="tp">
-      <Link to="/tournaments" className="tp-back">&larr; Tournaments</Link>
+      <nav aria-label="Breadcrumb" className="tp-crumbs muted">
+        <Link to="/tournaments">Tournaments</Link>
+        <span aria-hidden="true">&rsaquo;</span>
+        <span>{t.name}</span>
+      </nav>
 
       <section className="tp-head" aria-labelledby="tp-title">
         <div className="tp-art" data-game={t.game ?? 'none'}>
@@ -127,10 +131,10 @@ export default function TournamentPage({ id }: { id: string }) {
               {t.prize != null && <li className="tp-prize"><TrophyIcon />{formatKes(t.prize)}</li>}
             </ul>
           )}
-          {t.description && <p className="tp-about">{t.description}</p>}
           {t.registrationDeadline && <p className="muted">Registration closes {formatCardDate(t.registrationDeadline)}</p>}
 
           <JoinBar tournament={t} signedIn={!!user} registered={view.viewerIsRegistered} requestStatus={view.viewerRequestStatus} onDone={reload} />
+          <p className="muted tp-count">{view.participants.length}/{t.maxParticipants} registered</p>
         </div>
       </section>
 
@@ -139,12 +143,29 @@ export default function TournamentPage({ id }: { id: string }) {
         active={tab}
         onChange={setTab}
         tabs={[
+          { id: 'overview', label: 'Overview' },
           { id: 'bracket', label: 'Bracket' },
           { id: 'players', label: squads ? 'Teams' : 'Players', count: view.participants.length },
         ]}
       />
 
-      {tab === 'bracket' ? (
+      {tab === 'overview' ? (
+        <div role="tabpanel" id="panel-overview" aria-labelledby="tab-overview">
+          <section className="tp-card">
+            <h2 className="tp-section-title">About this tournament</h2>
+            {t.description ? (
+              <p className="tp-about-text">{t.description}</p>
+            ) : (
+              <p className="muted">The organizer has not added a description.</p>
+            )}
+            <ul className="tp-tiles">
+              <li className="tp-tile"><span className="muted">Format</span><strong>{formatLabel[t.format]}</strong></li>
+              {gameName && <li className="tp-tile"><span className="muted">Game</span><strong>{gameName}</strong></li>}
+              <li className="tp-tile"><span className="muted">Mode</span><strong>{squads ? 'Squads' : 'Individual players'}</strong></li>
+            </ul>
+          </section>
+        </div>
+      ) : tab === 'bracket' ? (
         <div role="tabpanel" id="panel-bracket" aria-labelledby="tab-bracket">
           <h2 className="tp-section-title">Bracket</h2>
           {t.state === 'Cancelled' && (
