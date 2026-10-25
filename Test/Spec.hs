@@ -161,6 +161,7 @@ import qualified Application.UseCases.CreateTournament as CreateApproval
 import qualified Engine.TournamentValidation as TV
 import qualified Application.UseCases.LoginUser as LU
 import qualified Application.UseCases.RegisterUser as RU
+import qualified Application.UseCases.ListMyTournaments as LMT
 import Shell.Infrastructure.PasswordHasher ()
 import qualified Engine.User as EU
 import qualified Application.UseCases.GetTournament as GetT
@@ -6871,6 +6872,76 @@ spec = before_ resetTestDb $ do
         Left err -> expectationFailure (show err)
         Right r  -> r `shouldBe` Left RPC.JoinTeamDeadlinePassed
 
+  describe "My match summary (v0.12)" $ do
+
+    it "gives a player in a running tournament a next match and no wins yet" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "ms-owner-1"
+        a <- createTestUser "ms-a-1"
+        b <- createTestUser "ms-b-1"
+        tid <- msTwo owner a b "Summary Cup 1"
+        _ <- unwrap =<< startTournament owner tid
+        s <- LMT.myMatchSummary a
+        pure (fmap (tournamentId . fst) (LMT.msNext s), LMT.msWon s, tid)
+      case result of
+        Left err -> expectationFailure (show err)
+        Right (next, won, tid) -> do
+          next `shouldBe` Just tid
+          won `shouldBe` 0
+
+    it "gives nothing to someone who is not registered" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "ms-owner-2"
+        a <- createTestUser "ms-a-2"
+        b <- createTestUser "ms-b-2"
+        outsider <- createTestUser "ms-out-2"
+        tid <- msTwo owner a b "Summary Cup 2"
+        _ <- unwrap =<< startTournament owner tid
+        s <- LMT.myMatchSummary outsider
+        pure (fmap (tournamentId . fst) (LMT.msNext s), LMT.msWon s)
+      case result of
+        Left err -> expectationFailure (show err)
+        Right r  -> r `shouldBe` (Nothing, 0)
+
+    it "has no next match before the bracket exists" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "ms-owner-3"
+        a <- createTestUser "ms-a-3"
+        tid <- jnOpen owner "Summary Cup 3" 2 Public
+        _ <- unwrap =<< RPC.joinTournament a tid
+        s <- LMT.myMatchSummary a
+        pure (fmap (tournamentId . fst) (LMT.msNext s), LMT.msWon s)
+      case result of
+        Left err -> expectationFailure (show err)
+        Right r  -> r `shouldBe` (Nothing, 0)
+
+    it "counts a title only for the champion of a completed tournament" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "ms-owner-4"
+        a <- createTestUser "ms-a-4"
+        b <- createTestUser "ms-b-4"
+        tid <- msTwo owner a b "Summary Cup 4"
+        t <- Repo.getTournament tid
+        let Just bid = tournamentBracket t
+        ms <- Repo.listMatchesForBracket bid
+        let champ = Individual (Player (PlayerName "ms-a-4"))
+        forM_ ms $ \m -> do
+          _ <- unwrap =<< startMatch owner (matchId m)
+          _ <- unwrap =<< recordMatchResult owner (matchId m) (Winner champ)
+          pure ()
+        _ <- unwrap =<< startTournament owner tid
+        _ <- unwrap =<< completeTournament owner tid
+        sa <- LMT.myMatchSummary a
+        sb <- LMT.myMatchSummary b
+        pure (LMT.msWon sa, LMT.msWon sb)
+      case result of
+        Left err -> expectationFailure (show err)
+        Right r  -> r `shouldBe` (1, 0)
+
   describe "Engine.User.validateRawPassword (pure)" $ do
 
     it "rejects a password shorter than 8 characters" $
@@ -9556,4 +9627,14 @@ stOpen owner name mx = do
                                , newTournamentMaxParticipants = mx }) noDetails
   _ <- unwrap =<< publishTournament owner tid
   _ <- unwrap =<< openRegistration owner tid
+  pure tid
+
+-- Two account-linked players in a tournament with a generated bracket (registration closed).
+msTwo :: UserId -> UserId -> UserId -> String -> SQLiteM TournamentId
+msTwo owner a b name = do
+  tid <- jnOpen owner name 2 Public
+  _ <- unwrap =<< RPC.joinTournament a tid
+  _ <- unwrap =<< RPC.joinTournament b tid
+  _ <- unwrap =<< closeRegistration owner tid
+  _ <- unwrap =<< generateBracket owner tid
   pure tid
