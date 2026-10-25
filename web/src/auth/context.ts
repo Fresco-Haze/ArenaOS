@@ -9,6 +9,7 @@ export type AuthValue = {
   dismissExpired: () => void
   login: (username: string, password: string, remember?: boolean) => Promise<void>
   logout: () => Promise<void>
+  updateFullName: (name: SessionUser['fullName']) => void
 }
 
 export const AuthContext = createContext<AuthValue | null>(null)

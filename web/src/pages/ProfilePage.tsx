@@ -9,6 +9,8 @@ const PATHS = {
   list: 'M5 4h14v16H5zM9 9h6M9 13h6M9 17h3',
   teams: 'M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM3 20c0-3 3-5 6-5s6 2 6 5M17 11a2.5 2.5 0 1 0 0-6M16 15c3 0 5 2 5 5',
   logout: 'M10 4H5v16h5M15 8l4 4-4 4M19 12H9',
+  settings: 'M4 7h9M17 7h3M4 17h3M11 17h9M15 4v6M9 14v6',
+  help: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.5M12 17h.01',
 } as const
 
 function Icon({ name }: { name: keyof typeof PATHS }) {
@@ -87,6 +89,20 @@ export default function ProfilePage() {
           <Link to="/teams/new" className="menu-row">
             <Icon name="teams" />
             <span>Teams</span>
+            <span className="menu-chevron" aria-hidden="true">&rsaquo;</span>
+          </Link>
+        </li>
+        <li>
+          <Link to="/settings" className="menu-row">
+            <Icon name="settings" />
+            <span>Settings</span>
+            <span className="menu-chevron" aria-hidden="true">&rsaquo;</span>
+          </Link>
+        </li>
+        <li>
+          <Link to="/help" className="menu-row">
+            <Icon name="help" />
+            <span>Help</span>
             <span className="menu-chevron" aria-hidden="true">&rsaquo;</span>
           </Link>
         </li>

@@ -50,6 +50,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setExpired(false)
   }
 
+  function updateFullName(name: SessionUser['fullName']) {
+    if (!user) return
+    const next = { ...user, fullName: name }
+    const store = localStorage.getItem(USER_KEY) !== null ? localStorage : sessionStorage
+    store.setItem(USER_KEY, JSON.stringify(next))
+    setUser(next)
+  }
+
   async function logout() {
     try {
       await apiVoid('/logout', { method: 'POST' })
@@ -64,7 +72,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ user, expired, dismissExpired: () => setExpired(false), login, logout }}
+      value={{ user, expired, dismissExpired: () => setExpired(false), login, logout, updateFullName }}
     >
       {children}
     </AuthContext.Provider>

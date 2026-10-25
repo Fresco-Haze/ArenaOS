@@ -6,6 +6,8 @@ import RankingsPage from './pages/RankingsPage'
 import GamesPage from './pages/GamesPage'
 import PlayersPage from './pages/PlayersPage'
 import PlayerPage from './pages/PlayerPage'
+import SettingsPage from './pages/SettingsPage'
+import HelpPage from './pages/HelpPage'
 import ProfilePage from './pages/ProfilePage'
 import LoginPage from './pages/LoginPage'
 import TournamentPage from './pages/TournamentPage'
@@ -60,6 +62,15 @@ export default function App() {
           <Route path="/games" element={<GamesPage />} />
           <Route path="/players" element={<PlayersPage />} />
           <Route path="/players/:name" element={<PlayerPage />} />
+          <Route path="/help" element={<HelpPage />} />
+          <Route
+            path="/settings"
+            element={
+              <ProtectedRoute>
+                <SettingsPage />
+              </ProtectedRoute>
+            }
+          />
           <Route
             path="/profile"
             element={

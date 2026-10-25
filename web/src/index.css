@@ -1339,3 +1339,7 @@ main > .form { max-width: 32rem; }
 
 .player-search { margin: var(--space-3) 0; }
 .player-search input { width: 100%; max-width: 24rem; }
+
+.help-section { margin: var(--space-4) 0; max-width: 42rem; }
+.help-section h2 { margin: 0 0 var(--space-2); }
+.help-section ol, .help-section ul { padding-left: 1.25rem; display: flex; flex-direction: column; gap: var(--space-2); }

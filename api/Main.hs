@@ -105,6 +105,7 @@ import qualified Application.UseCases.JoinRequests as JRQ
 import Domain.JoinRequest (JoinRequestStatus(..))
 import qualified Domain.TournamentHistory as TH
 import qualified Domain.Notification as Notif
+import qualified Application.UseCases.ChangePassword as ChgPw
 import qualified Application.UseCases.GetRankings as GRK
 import qualified Engine.Rankings as Rk
 import qualified Application.UseCases.GetPlayers as GPL
@@ -1229,6 +1230,26 @@ nameTooLong =
   ApiError status400 "VALIDATION_FAILED" "Full name must be 60 characters or fewer"
     (object ["field" .= ("fullName" :: Text)])
 
+data PasswordChangeReq = PasswordChangeReq Text Text
+
+instance FromJSON PasswordChangeReq where
+  parseJSON = withObject "password" $ \o ->
+    PasswordChangeReq <$> o .: "currentPassword" <*> o .: "newPassword"
+
+newtype ProfileUpdateReq = ProfileUpdateReq (Maybe Text)
+
+instance FromJSON ProfileUpdateReq where
+  parseJSON = withObject "profile" $ \o -> ProfileUpdateReq <$> o .:? "fullName"
+
+fromChangePassword :: ChgPw.ChangePasswordError -> ApiError
+fromChangePassword ChgPw.UserNotFound = unauthenticated
+fromChangePassword ChgPw.InvalidCurrentPassword =
+  ApiError status400 "VALIDATION_FAILED" "Current password is incorrect"
+    (object ["field" .= ("currentPassword" :: Text)])
+fromChangePassword (ChgPw.InvalidNewPassword _) =
+  ApiError status400 "VALIDATION_FAILED" "New password must be at least 8 characters"
+    (object ["field" .= ("newPassword" :: Text)])
+
 fromRegisterUser :: RU.RegisterUserError -> ApiError
 fromRegisterUser (RU.InvalidUser err) = case err of
   InvalidUsername _ ->
@@ -1797,6 +1818,38 @@ main = do
               json (object [ "id" .= unUserId (userId user)
                            , "username" .= uname ])
     
+    post "/me/password" $ do
+      mUser <- currentUser lock
+      raw <- body
+      case (mUser, eitherDecode raw) of
+        (Nothing, _) -> sendError unauthenticated
+        (_, Left reason) -> sendError (invalidBody reason)
+        (Just uid, Right (PasswordChangeReq cur new)) -> do
+          result <- runUseCase lock (ChgPw.changePassword (ChgPw.ChangePasswordRequest uid cur new))
+          case result of
+            Left apiErr -> sendError apiErr
+            Right (Left e) -> sendError (fromChangePassword e)
+            Right (Right ()) -> do
+              mTok <- bearerToken
+              liftIO (atomicModifyIORef' (envTokens lock)
+                (\m -> (Map.filterWithKey (\t (u, _) -> u /= uid || Just t == mTok) m, ())))
+              status status204
+
+    put "/me/profile" $ do
+      mUser <- currentUser lock
+      raw <- body
+      case (mUser, eitherDecode raw) of
+        (Nothing, _) -> sendError unauthenticated
+        (_, Left reason) -> sendError (invalidBody reason)
+        (Just uid, Right (ProfileUpdateReq mFull)) ->
+          case maybe (Right Nothing) EU.validateFullName mFull of
+            Left _ -> sendError nameTooLong
+            Right toSave -> do
+              result <- runUseCase lock (Repo.setFullName uid toSave)
+              case result of
+                Left apiErr -> sendError apiErr
+                Right ()    -> status status204
+
     get "/me/tournaments" $ do
       mUser <- currentUser lock
       case mUser of
