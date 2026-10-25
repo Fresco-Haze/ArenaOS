@@ -145,6 +145,17 @@ export const ActivityList = z.object({ activity: z.array(ActivityItem) })
 export const RankingRow = z.object({ rank: z.number(), player: z.string(), titles: z.number(), wins: z.number() })
 export const RankingList = z.object({ rankings: z.array(RankingRow) })
 
+export const PlayerRow = z.object({ name: z.string(), tournaments: z.number(), titles: z.number(), wins: z.number() })
+export const PlayerList = z.object({ players: z.array(PlayerRow) })
+export const PlayerProfileView = z.object({
+  name: z.string(),
+  tournaments: z.number(),
+  titles: z.number(),
+  wins: z.number(),
+  history: z.array(z.object({ tournament: Tournament, champion: z.boolean() })),
+})
+export type PlayerProfileView = z.infer<typeof PlayerProfileView>
+
 export const NotificationItem = z.object({
   id: z.number(),
   kind: z.enum(['JoinRequested', 'RequestApproved', 'RequestDeclined', 'TournamentStarted']),

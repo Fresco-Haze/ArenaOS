@@ -52,7 +52,7 @@ export default function RankingsPage() {
             {rows.map((r) => (
               <tr key={r.player}>
                 <td className="num">{r.rank}</td>
-                <td>{r.player}</td>
+                <td><Link to={`/players/${encodeURIComponent(r.player)}`}>{r.player}</Link></td>
                 <td className="num">{r.titles}</td>
                 <td className="num">{r.wins}</td>
               </tr>

@@ -4,6 +4,8 @@ import HomePage from './pages/HomePage'
 import TournamentsPage from './pages/TournamentsPage'
 import RankingsPage from './pages/RankingsPage'
 import GamesPage from './pages/GamesPage'
+import PlayersPage from './pages/PlayersPage'
+import PlayerPage from './pages/PlayerPage'
 import ProfilePage from './pages/ProfilePage'
 import LoginPage from './pages/LoginPage'
 import TournamentPage from './pages/TournamentPage'
@@ -56,6 +58,8 @@ export default function App() {
           <Route path="/tournaments" element={<TournamentsPage />} />
           <Route path="/rankings" element={<RankingsPage />} />
           <Route path="/games" element={<GamesPage />} />
+          <Route path="/players" element={<PlayersPage />} />
+          <Route path="/players/:name" element={<PlayerPage />} />
           <Route
             path="/profile"
             element={

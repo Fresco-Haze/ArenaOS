@@ -107,6 +107,8 @@ import qualified Domain.TournamentHistory as TH
 import qualified Domain.Notification as Notif
 import qualified Application.UseCases.GetRankings as GRK
 import qualified Engine.Rankings as Rk
+import qualified Application.UseCases.GetPlayers as GPL
+import qualified Engine.Players as Pl
 import Domain.Participant (Participant(..), Player(..), PlayerName(..), Team(..), TeamName(..))
 import qualified Application.UseCases.CreateTeam as CT
 import Application.UseCases.CreateTeam (createTeam, CreateTeamError(..))
@@ -654,6 +656,39 @@ parseRankingsQuery mg ml = do
     bad :: Text -> ApiError
     bad f = ApiError status400 "VALIDATION_FAILED" "Invalid query parameter"
       (object ["field" .= f])
+
+parsePlayersQuery :: Maybe Text -> Maybe Text -> Either ApiError (Maybe String, Int)
+parsePlayersQuery mq ml = do
+  limitN <- case fmap T.strip ml of
+    Nothing -> Right 50
+    Just l -> case readMaybe (T.unpack l) of
+      Just n | n >= 1 -> Right (min 100 n)
+      _               -> Left badLimit
+  let q = case fmap T.strip mq of
+        Just s | not (T.null s) -> Just (T.unpack s)
+        _                       -> Nothing
+  Right (q, limitN)
+  where
+    badLimit = ApiError status400 "VALIDATION_FAILED" "Invalid query parameter"
+      (object ["field" .= ("limit" :: Text)])
+
+playerSummaryJson :: Pl.PlayerSummary -> Value
+playerSummaryJson s = object
+  [ "name"        .= Pl.psName s
+  , "tournaments" .= Pl.psEntered s
+  , "titles"      .= Pl.psTitles s
+  , "wins"        .= Pl.psWins s
+  ]
+
+playerProfileJson :: GPL.PlayerProfile -> Value
+playerProfileJson p = object
+  [ "name"        .= Pl.psName s
+  , "tournaments" .= Pl.psEntered s
+  , "titles"      .= Pl.psTitles s
+  , "wins"        .= Pl.psWins s
+  , "history"     .= [ object ["tournament" .= tournamentJson t, "champion" .= c] | (t, c) <- GPL.ppHistory p ]
+  ]
+  where s = GPL.ppSummary p
 
 rankingJson :: (Int, Rk.RankingEntry) -> Value
 rankingJson (r, e) = object
@@ -1823,6 +1858,26 @@ main = do
           case result of
             Left apiErr -> sendError apiErr
             Right ()    -> status status204
+
+    -- public, no login: player directory and profiles (public tournaments only)
+    get "/players" $ do
+      qRaw <- (queryParamMaybe "q" :: ActionM (Maybe Text))
+      lRaw <- (queryParamMaybe "limit" :: ActionM (Maybe Text))
+      case parsePlayersQuery qRaw lRaw of
+        Left apiErr -> sendError apiErr
+        Right (mq, limitN) -> do
+          result <- runUseCase lock (GPL.getPlayers mq limitN)
+          case result of
+            Left apiErr -> sendError apiErr
+            Right ss    -> json (object ["players" .= map playerSummaryJson ss])
+
+    get "/players/:name" $ do
+      rawName <- pathParam "name" :: ActionM Text
+      result <- runUseCase lock (GPL.getPlayerProfile (T.unpack rawName))
+      case result of
+        Left apiErr    -> sendError apiErr
+        Right Nothing  -> sendError (ApiError status404 "NOT_FOUND" "Player not found" (object []))
+        Right (Just p) -> json (playerProfileJson p)
 
     -- public, no login: top players by titles, then match wins
     get "/rankings" $ do

@@ -1,5 +1,7 @@
 module Application.UseCases.GetRankings
   ( getRankings
+  , counted
+  , tournamentFacts
   ) where
 
 import Data.Maybe (mapMaybe)

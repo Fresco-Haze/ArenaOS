@@ -1336,3 +1336,6 @@ main > .form { max-width: 32rem; }
 .rtable th { color: var(--muted); font-weight: 600; font-size: 0.8125rem; }
 .rtable th.num, .rtable td.num { text-align: right; }
 .rtable td:nth-child(2) { font-weight: 600; }
+
+.player-search { margin: var(--space-3) 0; }
+.player-search input { width: 100%; max-width: 24rem; }

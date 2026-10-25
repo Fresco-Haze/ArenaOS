@@ -143,7 +143,7 @@ function TopPlayersPanel() {
           {rows.map((r) => (
             <li key={r.player} className="rrow">
               <span className="rrow-rank num">{r.rank}</span>
-              <span className="rrow-name">{r.player}</span>
+              <Link to={`/players/${encodeURIComponent(r.player)}`} className="rrow-name">{r.player}</Link>
               <span className="rrow-stat num">
                 {r.titles} {r.titles === 1 ? 'title' : 'titles'} &bull; {r.wins} {r.wins === 1 ? 'win' : 'wins'}
               </span>

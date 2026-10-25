@@ -115,6 +115,8 @@ import Shell.Persistence.SQLite.NotificationRepository ()
 import qualified Domain.Notification as Notif
 import qualified Engine.Rankings as Rk
 import qualified Application.UseCases.GetRankings as GRK
+import qualified Application.UseCases.GetPlayers as GPL
+import qualified Engine.Players as Pl
 import Domain.JoinRequest (JoinRequestStatus(..))
 import qualified Application.UseCases.RecordEFootballResult as REF
 import qualified Application.UseCases.UpdateTournamentName as UTN
@@ -6475,6 +6477,30 @@ spec = before_ resetTestDb $ do
         ids <- Repo.listRegisteredUserIds tid
         pure (ids == [a])
       result `shouldBe` Right True
+
+    it "Players: entered counts once per tournament, titles and wins add up, ordered by titles then wins" $ do
+      Pl.summarize
+        [ Pl.PlayerFact ["ann", "bob"] (Just "ann") ["ann", "ann", "bob"]
+        , Pl.PlayerFact ["bob", "bob"] Nothing ["bob"] ]
+        `shouldBe` [Pl.PlayerSummary "ann" 1 1 2, Pl.PlayerSummary "bob" 2 0 2]
+
+    it "Players: only public tournaments count, and an unknown name has no profile" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "pl-owner-1"
+        tid <- jnOpen owner "Players Cup" 8 Public
+        _ <- unwrap =<< RPC.registerParticipantChecked owner tid (Individual (Player (PlayerName "pl-ann")))
+        priv <- jnOpen owner "Private Players Cup" 8 Private
+        _ <- unwrap =<< RPC.registerParticipantChecked owner priv (Individual (Player (PlayerName "pl-secret")))
+        ann <- GPL.getPlayerProfile "pl-ann"
+        secret <- GPL.getPlayerProfile "pl-secret"
+        nobody <- GPL.getPlayerProfile "pl-nobody"
+        everyone <- GPL.getPlayers Nothing 50
+        pure ( fmap (Pl.psEntered . GPL.ppSummary) ann
+             , fmap (Pl.psEntered . GPL.ppSummary) secret
+             , fmap (Pl.psEntered . GPL.ppSummary) nobody
+             , map Pl.psName everyone )
+      result `shouldBe` Right (Just 1, Nothing, Nothing, ["pl-ann"])
 
     it "Rankings: equal titles and wins share a rank, and the next rank skips" $ do
       map fst (Rk.assignRanks [Rk.RankingEntry "a" 1 3, Rk.RankingEntry "b" 0 2, Rk.RankingEntry "c" 0 2, Rk.RankingEntry "d" 0 1])

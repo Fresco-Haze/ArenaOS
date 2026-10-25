@@ -103,6 +103,8 @@ library
                       Engine.Champion
                       Engine.Rankings
                       Application.UseCases.GetRankings
+                      Engine.Players
+                      Application.UseCases.GetPlayers
                       Domain.Notification
 
 

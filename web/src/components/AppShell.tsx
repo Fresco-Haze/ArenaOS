@@ -287,7 +287,7 @@ function SideNav() {
         <hr className="side-rule" />
         <ul className="side-list" aria-label="Coming soon">
           <SideLink to="/games" icon="games">Games</SideLink>
-          <SoonItem icon="players">Players</SoonItem>
+          <SideLink to="/players" icon="players">Players</SideLink>
           <SideLink to="/rankings" icon="rankings">Rankings</SideLink>
           <SoonItem icon="news">News</SoonItem>
           <SoonItem icon="store">Store</SoonItem>
