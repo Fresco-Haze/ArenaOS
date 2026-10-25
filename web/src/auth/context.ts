@@ -10,6 +10,8 @@ export type AuthValue = {
   login: (username: string, password: string, remember?: boolean) => Promise<void>
   logout: () => Promise<void>
   updateFullName: (name: SessionUser['fullName']) => void
+  setHasAvatar: (has: boolean) => void
+  avatarVersion: number
 }
 
 export const AuthContext = createContext<AuthValue | null>(null)

@@ -13,3 +13,15 @@ export function saveFullName(fullName: string | null) {
     body: JSON.stringify({ fullName }),
   })
 }
+
+export function uploadAvatar(image: Blob) {
+  return apiVoid('/me/avatar', {
+    method: 'PUT',
+    body: image,
+    headers: { 'Content-Type': 'image/jpeg' },
+  })
+}
+
+export function removeAvatar() {
+  return apiVoid('/me/avatar', { method: 'DELETE' })
+}

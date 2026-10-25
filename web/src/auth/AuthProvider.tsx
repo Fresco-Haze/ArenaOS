@@ -27,6 +27,7 @@ function loadUser(): SessionUser | null {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<SessionUser | null>(loadUser)
   const [expired, setExpired] = useState(false)
+  const [avatarVersion, setAvatarVersion] = useState(0)
 
   useEffect(() => {
     // api.ts calls this when the server says a token we sent is dead.
@@ -58,6 +59,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(next)
   }
 
+  function setHasAvatar(has: boolean) {
+    if (!user) return
+    const next = { ...user, hasAvatar: has }
+    const store = localStorage.getItem(USER_KEY) !== null ? localStorage : sessionStorage
+    store.setItem(USER_KEY, JSON.stringify(next))
+    setUser(next)
+    setAvatarVersion((v) => v + 1)
+  }
+
   async function logout() {
     try {
       await apiVoid('/logout', { method: 'POST' })
@@ -72,7 +82,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ user, expired, dismissExpired: () => setExpired(false), login, logout, updateFullName }}
+      value={{ user, expired, dismissExpired: () => setExpired(false), login, logout, updateFullName, setHasAvatar, avatarVersion }}
     >
       {children}
     </AuthContext.Provider>

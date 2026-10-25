@@ -303,4 +303,9 @@ statements =
     \  read_at       TEXT \
     \)"
   , "CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id)"
+  , "CREATE TABLE IF NOT EXISTS user_avatars ( \
+    \  user_id    INTEGER PRIMARY KEY REFERENCES users(id), \
+    \  image      BLOB NOT NULL, \
+    \  updated_at TEXT NOT NULL \
+    \)"
   ]

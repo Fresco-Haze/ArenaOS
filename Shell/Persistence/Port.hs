@@ -38,6 +38,7 @@ module Shell.Persistence.Port
   ,EFootballScoreRepository(..)
   ,JoinRequestRepository(..)
   ,NotificationRepository(..)
+  ,AvatarRepository(..)
   
   ) where
 
@@ -58,6 +59,7 @@ import Domain.JoinRequest (JoinRequestStatus)
 import Domain.Notification (NotificationKind, Notification)
 import Data.Map.Strict (Map)
 import Data.Text (Text)
+import Data.ByteString (ByteString)
 import Data.Typeable (Typeable)
 -- Owns Participant identity (ADR-006) and its constituents (Player, Team).
 -- resolveParticipant is the one operation every other repository depends
@@ -252,4 +254,10 @@ class Monad m => NotificationRepository m where
   listNotifications        :: UserId -> Int -> m [Notification]
   countUnreadNotifications :: UserId -> m Int
   markAllNotificationsRead :: UserId -> m ()
+
+class Monad m => AvatarRepository m where
+  setAvatar    :: UserId -> ByteString -> m ()
+  getAvatar    :: UserId -> m (Maybe ByteString)
+  hasAvatar    :: UserId -> m Bool
+  deleteAvatar :: UserId -> m ()
 

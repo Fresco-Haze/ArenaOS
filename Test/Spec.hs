@@ -112,6 +112,8 @@ import Domain.Scoreable (mkEFootballScore)
 import Shell.Persistence.SQLite.EFootballScoreRepository ()
 import Shell.Persistence.SQLite.JoinRequestRepository ()
 import Shell.Persistence.SQLite.NotificationRepository ()
+import Shell.Persistence.SQLite.AvatarRepository ()
+import qualified Data.ByteString as BSX
 import qualified Domain.Notification as Notif
 import qualified Engine.Rankings as Rk
 import qualified Application.UseCases.GetRankings as GRK
@@ -6501,6 +6503,22 @@ spec = before_ resetTestDb $ do
              , fmap (Pl.psEntered . GPL.ppSummary) nobody
              , map Pl.psName everyone )
       result `shouldBe` Right (Just 1, Nothing, Nothing, ["pl-ann"])
+
+    it "Avatars: a picture can be saved, replaced, read back, checked and removed" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        u <- createTestUser "av-user-1"
+        v <- createTestUser "av-user-2"
+        none <- Repo.getAvatar u
+        Repo.setAvatar u (BSX.pack [1, 2, 3])
+        Repo.setAvatar u (BSX.pack [4, 5, 6, 7])
+        got <- Repo.getAvatar u
+        has <- Repo.hasAvatar u
+        other <- Repo.hasAvatar v
+        Repo.deleteAvatar u
+        gone <- Repo.hasAvatar u
+        pure (none, got, has, other, gone)
+      result `shouldBe` Right (Nothing, Just (BSX.pack [4, 5, 6, 7]), True, False, False)
 
     it "Rankings: equal titles and wins share a rank, and the next rank skips" $ do
       map fst (Rk.assignRanks [Rk.RankingEntry "a" 1 3, Rk.RankingEntry "b" 0 2, Rk.RankingEntry "c" 0 2, Rk.RankingEntry "d" 0 1])

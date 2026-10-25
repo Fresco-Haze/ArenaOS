@@ -6,6 +6,7 @@ import { fetchNotifications, markNotificationsRead } from '../lib/tournamentActi
 import { timeAgo } from '../lib/cardDate'
 import type { NotificationItem, NotificationList } from '../model'
 import Logo from './Logo'
+import Avatar from './Avatar'
 
 const ICONS = {
   home: 'M3 11l9-8 9 8M5 10v10h5v-6h4v6h5V10',
@@ -94,7 +95,7 @@ function UserMenu() {
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
       >
-        <span className="avatar" aria-hidden="true">{user.username.charAt(0).toUpperCase()}</span>
+        <Avatar />
         <span className="user-name">{user.username}</span>
         <Icon name="chevron" />
       </button>

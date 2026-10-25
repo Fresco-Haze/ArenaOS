@@ -1343,3 +1343,7 @@ main > .form { max-width: 32rem; }
 .help-section { margin: var(--space-4) 0; max-width: 42rem; }
 .help-section h2 { margin: 0 0 var(--space-2); }
 .help-section ol, .help-section ul { padding-left: 1.25rem; display: flex; flex-direction: column; gap: var(--space-2); }
+
+img.avatar, img.profile-avatar { object-fit: cover; border-radius: 50%; display: block; }
+.avatar-row { display: flex; align-items: center; gap: var(--space-4); }
+.avatar-form input[type="file"] { max-width: 100%; }

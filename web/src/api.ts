@@ -51,7 +51,7 @@ async function request(path: string, options: Options): Promise<Response> {
   const headers = new Headers(init.headers)
   const token = auth.get()
   if (token) headers.set('Authorization', `Bearer ${token}`)
-  if (init.body) headers.set('Content-Type', 'application/json')
+  if (init.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
 
   let res: Response
   try {

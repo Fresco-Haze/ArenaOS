@@ -101,6 +101,8 @@ import Domain.Bracket (Bracket(..), BracketNode(..), MatchSlot(..))
 import Shell.Persistence.SQLite.EFootballScoreRepository ()
 import Shell.Persistence.SQLite.JoinRequestRepository ()
 import Shell.Persistence.SQLite.NotificationRepository ()
+import Shell.Persistence.SQLite.AvatarRepository ()
+import qualified Data.ByteString.Lazy as BL
 import qualified Application.UseCases.JoinRequests as JRQ
 import Domain.JoinRequest (JoinRequestStatus(..))
 import qualified Domain.TournamentHistory as TH
@@ -1250,6 +1252,17 @@ fromChangePassword (ChgPw.InvalidNewPassword _) =
   ApiError status400 "VALIDATION_FAILED" "New password must be at least 8 characters"
     (object ["field" .= ("newPassword" :: Text)])
 
+avatarMaxBytes :: Int
+avatarMaxBytes = 262144
+
+avatarTooLarge :: ApiError
+avatarTooLarge = ApiError status400 "VALIDATION_FAILED" "The picture is too large"
+  (object ["field" .= ("avatar" :: Text)])
+
+avatarNotJpeg :: ApiError
+avatarNotJpeg = ApiError status400 "VALIDATION_FAILED" "The picture must be a JPEG"
+  (object ["field" .= ("avatar" :: Text)])
+
 fromRegisterUser :: RU.RegisterUserError -> ApiError
 fromRegisterUser (RU.InvalidUser err) = case err of
   InvalidUsername _ ->
@@ -1731,11 +1744,14 @@ main = do
               let Username uname = username user
               fullResult <- runUseCase lock (Repo.getFullName (userId user))
               let fullName = either (const Nothing) id fullResult
+              avResult <- runUseCase lock (Repo.hasAvatar (userId user))
+              let hasAv = either (const False) id avResult
 
               json (object [ "token" .= tok
                            , "user"  .= object [ "id"       .= unUserId (userId user)
                                                , "username" .= uname
-                                               , "fullName" .= fullName ] ])
+                                               , "fullName" .= fullName
+                                               , "hasAvatar" .= hasAv ] ])
 
     post "/forgot-password" $ do
       raw <- body
@@ -1849,6 +1865,53 @@ main = do
               case result of
                 Left apiErr -> sendError apiErr
                 Right ()    -> status status204
+
+    put "/me/avatar" $ do
+      mUser <- currentUser lock
+      case mUser of
+        Nothing  -> sendError unauthenticated
+        Just uid -> do
+          mLen <- header "Content-Length"
+          let declared = (mLen >>= readMaybe . TL.unpack) :: Maybe Int
+          case declared of
+            Just n | n > avatarMaxBytes -> sendError avatarTooLarge
+            _ -> do
+              bytes <- body
+              if BL.length bytes > fromIntegral avatarMaxBytes
+                then sendError avatarTooLarge
+                else if BL.take 3 bytes /= BL.pack [0xFF, 0xD8, 0xFF]
+                  then sendError avatarNotJpeg
+                  else do
+                    result <- runUseCase lock (Repo.setAvatar uid (BL.toStrict bytes))
+                    case result of
+                      Left apiErr -> sendError apiErr
+                      Right ()    -> status status204
+
+    delete "/me/avatar" $ do
+      mUser <- currentUser lock
+      case mUser of
+        Nothing  -> sendError unauthenticated
+        Just uid -> do
+          result <- runUseCase lock (Repo.deleteAvatar uid)
+          case result of
+            Left apiErr -> sendError apiErr
+            Right ()    -> status status204
+
+    -- public: an <img> tag cannot send a login token
+    get "/avatars/:userId" $ do
+      rawId <- pathParam "userId" :: ActionM Text
+      case readMaybe (T.unpack rawId) of
+        Nothing -> sendError (ApiError status404 "NOT_FOUND" "No picture" (object []))
+        Just n -> do
+          result <- runUseCase lock (Repo.getAvatar (UserId n))
+          case result of
+            Left apiErr -> sendError apiErr
+            Right Nothing -> sendError (ApiError status404 "NOT_FOUND" "No picture" (object []))
+            Right (Just bytes) -> do
+              setHeader "Content-Type" "image/jpeg"
+              setHeader "X-Content-Type-Options" "nosniff"
+              setHeader "Cache-Control" "no-cache"
+              raw (BL.fromStrict bytes)
 
     get "/me/tournaments" $ do
       mUser <- currentUser lock

@@ -4,6 +4,7 @@ import { useAuth } from '../auth/context'
 import { useApi } from '../hooks/useApi'
 import { MyMatchSummary, TournamentList } from '../model'
 import ErrorBanner from '../components/ErrorBanner'
+import Avatar from '../components/Avatar'
 
 const PATHS = {
   list: 'M5 4h14v16H5zM9 9h6M9 13h6M9 17h3',
@@ -50,7 +51,7 @@ export default function ProfilePage() {
   return (
     <div className="profile">
       <section className="profile-head" aria-label="Profile">
-        <span className="profile-avatar" aria-hidden="true">{user.username.charAt(0).toUpperCase()}</span>
+        <Avatar className="profile-avatar" />
         <div>
           <h1 className="profile-name">{user.fullName || user.username}</h1>
           {user.fullName && <p className="muted">@{user.username}</p>}
