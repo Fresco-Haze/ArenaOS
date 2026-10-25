@@ -2,9 +2,11 @@ import { useState } from 'react'
 import type { ReactNode } from 'react'
 import { Link } from 'react-router'
 import { useApi } from '../hooks/useApi'
-import { startsIn, timeAgo } from '../lib/cardDate'
+import { formatCardDate, startsIn, timeAgo } from '../lib/cardDate'
+import { participantName } from '../lib/participants'
+import { useAuth } from '../auth/context'
 import { formatKes } from '../lib/money'
-import { ActivityList, gameLabel, PublicStatsView, RankingList, TournamentList } from '../model'
+import { ActivityList, gameLabel, MyMatchSummary, PublicStatsView, RankingList, TournamentList } from '../model'
 import type { ActivityItem, Game } from '../model'
 import EmptyState from '../components/EmptyState'
 import ErrorBanner from '../components/ErrorBanner'
@@ -189,7 +191,31 @@ function ActivityPanel() {
   )
 }
 
+function NextMatchPanel() {
+  const s = useApi('/me/match-summary', MyMatchSummary)
+  const nm = s.data ? s.data.nextMatch : null
+  return (
+    <RailPanel id="next-match-heading" icon="calendar" title="Next Match">
+      {s.error ? (
+        <ErrorBanner message={s.error} onRetry={s.retry} />
+      ) : s.data === null ? (
+        <LoadingBlock label="Loading your next match" />
+      ) : nm === null ? (
+        <p className="muted rail-empty">No upcoming match.</p>
+      ) : (
+        <>
+          <p className="muted">{nm.tournamentName}</p>
+          <p>{participantName(nm.match.competitorA)} vs {participantName(nm.match.competitorB)}</p>
+          <p className="muted">{nm.match.scheduledStart ? formatCardDate(nm.match.scheduledStart) : 'Time not set'}</p>
+          <Link to={`/tournaments/${nm.tournamentId}`} className="button-link btn-primary">View Bracket &rarr;</Link>
+        </>
+      )}
+    </RailPanel>
+  )
+}
+
 export default function HomePage() {
+  const { user } = useAuth()
   const list = useApi('/tournaments', TournamentList, true)
   const stats = useApi('/stats', PublicStatsView, true)
 
@@ -288,9 +314,13 @@ export default function HomePage() {
       </div>
 
       <aside className="home-rail" aria-label="Side panels">
-        <RailPanel id="next-match-heading" icon="calendar" title="Next Match" soon>
-          <p className="muted rail-empty">Not available yet. This will show your next scheduled match.</p>
-        </RailPanel>
+        {user ? (
+          <NextMatchPanel />
+        ) : (
+          <RailPanel id="next-match-heading" icon="calendar" title="Next Match">
+            <p className="muted rail-empty">Sign in to see your next match.</p>
+          </RailPanel>
+        )}
         <UpcomingPanel />
         <ActivityPanel />
         <TopPlayersPanel />

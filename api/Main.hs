@@ -1619,6 +1619,21 @@ main = do
             Left apiErr -> sendError apiErr
             Right ts    -> json (object ["teams" .= map teamJson ts])
 
+    get "/me/match-summary" $ do
+      mUser <- currentUser lock
+      case mUser of
+        Nothing  -> sendError unauthenticated
+        Just uid -> do
+          result <- runUseCase lock (ListMine.myMatchSummary uid)
+          case result of
+            Left apiErr -> sendError apiErr
+            Right s -> json (object
+              [ "nextMatch" .= fmap (\(t, m) -> object
+                  [ "tournamentId"   .= unTournamentId (tournamentId t)
+                  , "tournamentName" .= unTournamentName (tournamentName t)
+                  , "match"          .= matchJson m ]) (ListMine.msNext s)
+              , "tournamentsWon" .= ListMine.msWon s ])
+
     post "/login" $ do
       raw <- body
       case eitherDecode raw of

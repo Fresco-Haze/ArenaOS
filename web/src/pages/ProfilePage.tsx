@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { useAuth } from '../auth/context'
 import { useApi } from '../hooks/useApi'
-import { TournamentList } from '../model'
+import { MyMatchSummary, TournamentList } from '../model'
 import ErrorBanner from '../components/ErrorBanner'
 
 const PATHS = {
@@ -23,6 +23,7 @@ export default function ProfilePage() {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
   const list = useApi('/me/tournaments', TournamentList)
+  const summary = useApi('/me/match-summary', MyMatchSummary)
   const [now] = useState(() => Date.now())
 
   // ProtectedRoute guarantees this, but keep TypeScript honest.
@@ -62,6 +63,10 @@ export default function ProfilePage() {
           <li>
             <span className="num profile-stat-value">{items ? items.length : '...'}</span>
             <span className="profile-stat-label">Tournaments</span>
+          </li>
+          <li>
+            <span className="num profile-stat-value">{summary.data ? summary.data.tournamentsWon : '...'}</span>
+            <span className="profile-stat-label">Won</span>
           </li>
           <li>
             <span className="num profile-stat-value">{upcoming ?? '...'}</span>

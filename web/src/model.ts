@@ -220,3 +220,11 @@ export const PublicStatsView = z.object({
   byGame: z.array(z.object({ game: Game, count: z.number() })),
 })
 export type PublicStatsView = z.infer<typeof PublicStatsView>
+
+export const MyMatchSummary = z.object({
+  nextMatch: z
+    .object({ tournamentId: z.number(), tournamentName: z.string(), match: Match })
+    .nullable(),
+  tournamentsWon: z.number(),
+})
+export type MyMatchSummary = z.infer<typeof MyMatchSummary>
