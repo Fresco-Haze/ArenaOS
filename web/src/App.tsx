@@ -3,6 +3,7 @@ import { useAuth } from './auth/context'
 import HomePage from './pages/HomePage'
 import TournamentsPage from './pages/TournamentsPage'
 import RankingsPage from './pages/RankingsPage'
+import GamesPage from './pages/GamesPage'
 import ProfilePage from './pages/ProfilePage'
 import LoginPage from './pages/LoginPage'
 import TournamentPage from './pages/TournamentPage'
@@ -54,6 +55,7 @@ export default function App() {
           <Route path="/" element={<HomePage />} />
           <Route path="/tournaments" element={<TournamentsPage />} />
           <Route path="/rankings" element={<RankingsPage />} />
+          <Route path="/games" element={<GamesPage />} />
           <Route
             path="/profile"
             element={
