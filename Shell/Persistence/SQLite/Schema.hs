@@ -34,6 +34,7 @@ initializeSchema conn = do
   migrateUserColumns conn
   migratePasswordResets conn
   migrateTeamColumns conn
+  migrateBanners conn
 
 -- v0.12: CREATE TABLE IF NOT EXISTS never adds columns to an existing
 -- database, so add any missing tournament columns here. Safe on every start.
@@ -93,6 +94,11 @@ migrateTeamColumns conn = do
   let present = [ n | (_, n, _, _, _, _) <- cols ]
   when ("owner_user_id" `notElem` present) $
     execute_ conn "ALTER TABLE teams ADD COLUMN owner_user_id INTEGER REFERENCES users(id)"
+
+-- v0.12: tournament banner pictures (JPEG bytes, one per tournament).
+migrateBanners :: Connection -> IO ()
+migrateBanners conn =
+  execute_ conn "CREATE TABLE IF NOT EXISTS tournament_banners (tournament_id INTEGER PRIMARY KEY REFERENCES tournaments(id), image BLOB NOT NULL, updated_at TEXT NOT NULL)"
 
 statements :: [Query]
 statements =

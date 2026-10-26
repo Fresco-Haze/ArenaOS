@@ -39,6 +39,7 @@ module Shell.Persistence.Port
   ,JoinRequestRepository(..)
   ,NotificationRepository(..)
   ,AvatarRepository(..)
+  ,BannerRepository(..)
   
   ) where
 
@@ -260,4 +261,10 @@ class Monad m => AvatarRepository m where
   getAvatar    :: UserId -> m (Maybe ByteString)
   hasAvatar    :: UserId -> m Bool
   deleteAvatar :: UserId -> m ()
+
+class Monad m => BannerRepository m where
+  setBanner    :: TournamentId -> ByteString -> m ()
+  getBanner    :: TournamentId -> m (Maybe ByteString)
+  hasBanner    :: TournamentId -> m Bool
+  deleteBanner :: TournamentId -> m ()
 

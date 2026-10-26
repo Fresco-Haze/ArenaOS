@@ -6504,6 +6504,23 @@ spec = before_ resetTestDb $ do
              , map Pl.psName everyone )
       result `shouldBe` Right (Just 1, Nothing, Nothing, ["pl-ann"])
 
+    it "Banners: a banner can be saved, replaced, read back, checked and removed" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "bn-owner-1"
+        t1 <- jnOpen owner "Banner Cup 1" 4 Public
+        t2 <- jnOpen owner "Banner Cup 2" 4 Public
+        none <- Repo.getBanner t1
+        Repo.setBanner t1 (BSX.pack [1, 2, 3])
+        Repo.setBanner t1 (BSX.pack [4, 5, 6, 7])
+        got <- Repo.getBanner t1
+        has <- Repo.hasBanner t1
+        other <- Repo.hasBanner t2
+        Repo.deleteBanner t1
+        gone <- Repo.hasBanner t1
+        pure (none, got, has, other, gone)
+      result `shouldBe` Right (Nothing, Just (BSX.pack [4, 5, 6, 7]), True, False, False)
+
     it "Avatars: a picture can be saved, replaced, read back, checked and removed" $ do
       result <- runSQLiteM testDbPath $ do
         setupSchema

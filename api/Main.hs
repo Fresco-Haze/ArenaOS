@@ -1252,6 +1252,38 @@ fromChangePassword (ChgPw.InvalidNewPassword _) =
   ApiError status400 "VALIDATION_FAILED" "New password must be at least 8 characters"
     (object ["field" .= ("newPassword" :: Text)])
 
+bannerMaxBytes :: Int
+bannerMaxBytes = 307200
+
+bannerTooLarge :: ApiError
+bannerTooLarge = ApiError status400 "VALIDATION_FAILED" "The banner is too large"
+  (object ["field" .= ("banner" :: Text)])
+
+bannerNotJpeg :: ApiError
+bannerNotJpeg = ApiError status400 "VALIDATION_FAILED" "The banner must be a JPEG"
+  (object ["field" .= ("banner" :: Text)])
+
+bannerLocked :: ApiError
+bannerLocked = ApiError status409 "FORBIDDEN_STATE" "The banner can't change once the tournament is finished"
+  (object [])
+
+-- Owner-only, and not once the tournament is Completed or Cancelled.
+withBannerOwner :: Env -> (TournamentId -> ActionM ()) -> ActionM ()
+withBannerOwner lock k = do
+  mUser <- currentUser lock
+  rawId <- pathParam "id" :: ActionM Text
+  case (mUser, readMaybe (T.unpack rawId)) of
+    (Nothing, _) -> sendError unauthenticated
+    (_, Nothing) -> sendError (ApiError status404 "NOT_FOUND" "Resource not found" (object []))
+    (Just uid, Just n) -> do
+      tr <- runUseCase lock (Repo.getTournament (TournamentId n))
+      case tr of
+        Left e -> sendError e
+        Right t
+          | tournamentOwner t /= uid -> sendError (fromAuthorization NotTournamentOwner)
+          | show (tournamentState t) `elem` ["Completed", "Cancelled"] -> sendError bannerLocked
+          | otherwise -> k (TournamentId n)
+
 avatarMaxBytes :: Int
 avatarMaxBytes = 262144
 
@@ -1752,6 +1784,47 @@ main = do
                                                , "username" .= uname
                                                , "fullName" .= fullName
                                                , "hasAvatar" .= hasAv ] ])
+
+    put "/tournaments/:id/banner" $
+      withBannerOwner lock $ \tid -> do
+        mLen <- header "Content-Length"
+        let declared = (mLen >>= readMaybe . TL.unpack) :: Maybe Int
+        case declared of
+          Just n | n > bannerMaxBytes -> sendError bannerTooLarge
+          _ -> do
+            bytes <- body
+            if BL.length bytes > fromIntegral bannerMaxBytes
+              then sendError bannerTooLarge
+              else if BL.take 3 bytes /= BL.pack [0xFF, 0xD8, 0xFF]
+                then sendError bannerNotJpeg
+                else do
+                  result <- runUseCase lock (Repo.setBanner tid (BL.toStrict bytes))
+                  case result of
+                    Left apiErr -> sendError apiErr
+                    Right ()    -> status status204
+
+    delete "/tournaments/:id/banner" $
+      withBannerOwner lock $ \tid -> do
+        result <- runUseCase lock (Repo.deleteBanner tid)
+        case result of
+          Left apiErr -> sendError apiErr
+          Right ()    -> status status204
+
+    -- public: an <img> tag cannot send a login token
+    get "/tournaments/:id/banner" $ do
+      rawId <- pathParam "id" :: ActionM Text
+      case readMaybe (T.unpack rawId) of
+        Nothing -> sendError (ApiError status404 "NOT_FOUND" "No banner" (object []))
+        Just n -> do
+          result <- runUseCase lock (Repo.getBanner (TournamentId n))
+          case result of
+            Left apiErr -> sendError apiErr
+            Right Nothing -> sendError (ApiError status404 "NOT_FOUND" "No banner" (object []))
+            Right (Just bytes) -> do
+              setHeader "Content-Type" "image/jpeg"
+              setHeader "X-Content-Type-Options" "nosniff"
+              setHeader "Cache-Control" "no-cache"
+              raw (BL.fromStrict bytes)
 
     post "/forgot-password" $ do
       raw <- body

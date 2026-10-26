@@ -247,3 +247,15 @@ export function joinTeam(id: number, teamName: string) {
     body: JSON.stringify({ teamName }),
   })
 }
+
+export function uploadBanner(id: number, image: Blob) {
+  return apiVoid(`/tournaments/${id}/banner`, {
+    method: 'PUT',
+    body: image,
+    headers: { 'Content-Type': 'image/jpeg' },
+  })
+}
+
+export function removeBanner(id: number) {
+  return apiVoid(`/tournaments/${id}/banner`, { method: 'DELETE' })
+}
