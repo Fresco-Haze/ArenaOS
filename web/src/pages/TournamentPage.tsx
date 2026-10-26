@@ -19,6 +19,7 @@ import PlayerLookup from '../components/PlayerLookup'
 import Tabs from '../components/Tabs'
 import JoinBar from '../components/JoinBar'
 import BannerImg from '../components/BannerImg'
+import BannerEditor from '../components/BannerEditor'
 import ConfirmDialog from '../components/ConfirmDialog'
 import { removeParticipant } from '../lib/tournamentActions'
 
@@ -113,6 +114,9 @@ export default function TournamentPage({ id }: { id: string }) {
       <section className="tp-head" aria-labelledby="tp-title">
         <div className="tp-art" data-game={t.game ?? 'none'}>
           <BannerImg tournamentId={t.tournamentId} />
+          {view.viewerIsOwner && t.state !== 'Completed' && t.state !== 'Cancelled' && (
+            <BannerEditor tournamentId={t.tournamentId} />
+          )}
           <span className={'badge tp-status ' + statusClass[t.state]}>{stateLabel[t.state]}</span>
         </div>
         <div className="tp-info">

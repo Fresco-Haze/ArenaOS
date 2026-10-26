@@ -1,12 +1,9 @@
 import { Link } from 'react-router'
 import { useEffect, useState } from 'react'
-import type { ChangeEvent, FormEvent } from 'react'
+import type { FormEvent } from 'react'
 import { ApiError } from '../api'
 import ConfirmDialog from './ConfirmDialog'
 import { statusClass } from '../badges'
-import { resizeBannerToJpeg } from '../lib/bannerImage'
-import { bumpBanner } from '../lib/banner'
-import { removeBanner, uploadBanner } from '../lib/tournamentActions'
 import MatchActions from './MatchActions'
 import DetailsFields from './DetailsFields'
 import { deadlineError, detailsChanged, detailsFromTournament, prizeError, toPayload } from '../lib/details'
@@ -336,65 +333,6 @@ function describeFormatChange(from: TournamentFormat, to: TournamentFormat, thir
   return base
 }
 
-function BannerForm({ tournament }: { tournament: Tournament }) {
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [note, setNote] = useState<string | null>(null)
-
-  async function onPick(e: ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    e.target.value = ''
-    if (!file) return
-    setError(null)
-    setNote(null)
-    if (!file.type.startsWith('image/')) {
-      setError('Choose an image file')
-      return
-    }
-    if (file.size > 10 * 1024 * 1024) {
-      setError('That image is too large (10 MB at most)')
-      return
-    }
-    setBusy(true)
-    try {
-      const blob = await resizeBannerToJpeg(file)
-      await uploadBanner(tournament.tournamentId, blob)
-      bumpBanner()
-      setNote('Banner saved.')
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : err instanceof Error ? err.message : 'Could not use that image')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function onRemove() {
-    setError(null)
-    setNote(null)
-    setBusy(true)
-    try {
-      await removeBanner(tournament.tournamentId)
-      bumpBanner()
-      setNote('Banner removed. The game art shows instead.')
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Could not reach the server')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <div className="inline-form banner-form">
-      <h3>Banner</h3>
-      <input type="file" accept="image/*" onChange={(e) => void onPick(e)} disabled={busy} aria-label="Choose a banner image" />
-      <button type="button" onClick={() => void onRemove()} disabled={busy}>Remove banner</button>
-      <p className="muted">Cropped to 16:9 and shrunk before it is uploaded. Without one, the game art is used.</p>
-      {error && <p role="alert" className="form-error">{error}</p>}
-      {note && <p role="status">{note}</p>}
-    </div>
-  )
-}
-
 function EditDetails({ tournament, registeredCount, onDone }: {
   tournament: Tournament
   registeredCount: number
@@ -533,7 +471,6 @@ function EditDetails({ tournament, registeredCount, onDone }: {
         {saved && <p role="status">Saved.</p>}
         <button type="submit" className="btn-primary" disabled={busy || !changed || prizeError(details.prize) !== null || deadlineError(details) !== null}>{busy ? 'Saving' : 'Save changes'}</button>
       </form>
-      <BannerForm tournament={tournament} />
     </details>
   )
 }
