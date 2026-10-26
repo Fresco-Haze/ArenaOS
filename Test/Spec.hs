@@ -6521,6 +6521,30 @@ spec = before_ resetTestDb $ do
         pure (none, got, has, other, gone)
       result `shouldBe` Right (Nothing, Just (BSX.pack [4, 5, 6, 7]), True, False, False)
 
+    it "Profile: bio is saved and cleared, and a new account records when it joined" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        u <- createTestUser "pf-user-1"
+        b0 <- Repo.getBio u
+        Repo.setBio u (Just "hello")
+        b1 <- Repo.getBio u
+        Repo.setBio u Nothing
+        b2 <- Repo.getBio u
+        since <- Repo.getMemberSince u
+        pure (b0, b1, b2, fmap (const True) since)
+      result `shouldBe` Right (Nothing, Just "hello", Nothing, Just True)
+
+    it "Profile: an owner's activity includes their private tournaments and none of anyone else's" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "pf-owner-2"
+        other <- createTestUser "pf-other-2"
+        _ <- jnOpen owner "Mine Private Cup" 8 Private
+        _ <- jnOpen other "Theirs Public Cup" 8 Public
+        mine <- Repo.recentOwnerActivity owner 5
+        pure (map (\i -> (ActH.activityTournamentName i, ActH.activityEvent i)) mine)
+      result `shouldBe` Right [("Mine Private Cup", ActH.RegistrationOpened), ("Mine Private Cup", ActH.TournamentPublished)]
+
     it "Avatars: a picture can be saved, replaced, read back, checked and removed" $ do
       result <- runSQLiteM testDbPath $ do
         setupSchema

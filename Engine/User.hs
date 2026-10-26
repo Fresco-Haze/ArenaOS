@@ -7,6 +7,8 @@ module Engine.User
   , validateRawPassword
   , FullNameError(..)
   , validateFullName
+  , BioError(..)
+  , validateBio
   ) where
 
 import Domain.User (Username(..), Email(..), PasswordHash(..), User(..))
@@ -68,4 +70,15 @@ validateFullName raw
   | T.null s        = Right Nothing
   | T.length s > 60 = Left FullNameTooLong
   | otherwise       = Right (Just s)
+  where s = T.strip raw
+
+data BioError = BioTooLong
+  deriving (Eq, Show)
+
+-- Trimmed; blank means "no bio"; at most 160 characters.
+validateBio :: Text -> Either BioError (Maybe Text)
+validateBio raw
+  | T.null s         = Right Nothing
+  | T.length s > 160 = Left BioTooLong
+  | otherwise        = Right (Just s)
   where s = T.strip raw

@@ -33,7 +33,7 @@ instance UserRepository SQLiteM where
   createUser nu = do
     conn <- asks envConnection
     liftIO $ execute conn
-      "INSERT INTO users (username, email, password_hash) VALUES (?, ?, ?)"
+      "INSERT INTO users (username, email, password_hash, created_at) VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))"
       ( unUsername (newUserUsername nu)
       , unEmail (newUserEmail nu)
       , unPasswordHash (newUserPasswordHash nu)
@@ -162,6 +162,38 @@ instance UserRepository SQLiteM where
       :: IO [Only (Maybe Text)])
     pure $ case rows of
       (Only n : _) -> n
+      []           -> Nothing
+
+  setBio :: UserId -> Maybe Text -> SQLiteM ()
+  setBio (UserId uid) mBio = do
+    conn <- asks envConnection
+    liftIO $ execute conn
+      "UPDATE users SET bio = ? WHERE id = ?"
+      (mBio, uid)
+    n <- liftIO $ changes conn
+    when (n == 0) $
+      liftIO $ throwIO (NotFound ("User not found: " ++ show uid))
+
+  getBio :: UserId -> SQLiteM (Maybe Text)
+  getBio (UserId uid) = do
+    conn <- asks envConnection
+    rows <- liftIO (query conn
+      "SELECT bio FROM users WHERE id = ?"
+      (Only uid)
+      :: IO [Only (Maybe Text)])
+    pure $ case rows of
+      (Only b : _) -> b
+      []           -> Nothing
+
+  getMemberSince :: UserId -> SQLiteM (Maybe Text)
+  getMemberSince (UserId uid) = do
+    conn <- asks envConnection
+    rows <- liftIO (query conn
+      "SELECT created_at FROM users WHERE id = ?"
+      (Only uid)
+      :: IO [Only (Maybe Text)])
+    pure $ case rows of
+      (Only s : _) -> s
       []           -> Nothing
 
   createPasswordReset :: UserId -> Text -> Int -> SQLiteM Int

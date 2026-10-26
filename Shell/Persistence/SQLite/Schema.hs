@@ -72,6 +72,10 @@ migrateUserColumns conn = do
   let present = [ n | (_, n, _, _, _, _) <- cols ]
   when ("full_name" `notElem` present) $
     execute_ conn "ALTER TABLE users ADD COLUMN full_name TEXT"
+  when ("created_at" `notElem` present) $
+    execute_ conn "ALTER TABLE users ADD COLUMN created_at TEXT"
+  when ("bio" `notElem` present) $
+    execute_ conn "ALTER TABLE users ADD COLUMN bio TEXT"
 
 -- v0.12: password reset tokens. Only a hash of the secret is stored.
 migratePasswordResets :: Connection -> IO ()

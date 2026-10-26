@@ -10,7 +10,7 @@ import Control.Monad.Reader (asks)
 
 import Database.SQLite.Simple (Only(..), execute, query)
 
-import Domain.Ids (TournamentId(..))
+import Domain.Ids (TournamentId(..), UserId(..))
 import Domain.TournamentHistory
     ( TournamentHistoryEvent(..)
     , TournamentHistoryEntry(..)
@@ -133,6 +133,31 @@ instance TournamentHistoryRepository SQLiteM where
         liftIO (mapM decodeItem rows)
       where
         decodeItem (tid, name, eventType, reason, field, at) = do
+            event <- rowToEvent eventType reason field
+            pure ActivityItem
+                { activityTournamentId   = TournamentId tid
+                , activityTournamentName = name
+                , activityEvent          = event
+                , activityAt             = at
+                }
+
+    recentOwnerActivity :: UserId -> Int -> SQLiteM [ActivityItem]
+    recentOwnerActivity (UserId uidInt) limitN = do
+        conn <- asks envConnection
+        rows <- liftIO $
+            (query conn
+                "SELECT h.tournament_id, t.name, h.event_type, h.cancellation_reason, h.changed_field, h.occurred_at \
+                \FROM tournament_history h JOIN tournaments t ON t.id = h.tournament_id \
+                \WHERE t.owner_id = ? \
+                \AND h.occurred_at IS NOT NULL \
+                \AND h.event_type IN ('TournamentPublished', 'RegistrationOpened', 'TournamentStarted', \
+                \                     'TournamentCompleted', 'TournamentCancelled', 'TournamentReopened') \
+                \ORDER BY h.occurred_at DESC, h.id DESC LIMIT ?"
+                (uidInt, limitN)
+             :: IO [(Int, String, String, Maybe String, Maybe String, String)])
+        liftIO (mapM decodeOwnerItem rows)
+      where
+        decodeOwnerItem (tid, name, eventType, reason, field, at) = do
             event <- rowToEvent eventType reason field
             pure ActivityItem
                 { activityTournamentId   = TournamentId tid

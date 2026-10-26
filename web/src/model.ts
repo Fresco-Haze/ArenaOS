@@ -145,6 +145,12 @@ export const ActivityList = z.object({ activity: z.array(ActivityItem) })
 export const RankingRow = z.object({ rank: z.number(), player: z.string(), titles: z.number(), wins: z.number() })
 export const RankingList = z.object({ rankings: z.array(RankingRow) })
 
+export const MeProfile = z.object({
+  email: z.string(),
+  bio: z.string().nullish(),
+  memberSince: z.string().nullish(),
+})
+
 export const PlayerRow = z.object({ name: z.string(), tournaments: z.number(), titles: z.number(), wins: z.number() })
 export const PlayerList = z.object({ players: z.array(PlayerRow) })
 export const PlayerProfileView = z.object({

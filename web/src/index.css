@@ -1383,3 +1383,5 @@ img.avatar, img.profile-avatar { object-fit: cover; border-radius: 50%; display:
   border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface);
 }
 .pf-team-name { font-weight: 600; }
+
+.pf-bio { margin: var(--space-1) 0 0; color: var(--muted); max-width: 28rem; overflow-wrap: anywhere; }

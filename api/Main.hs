@@ -1243,6 +1243,15 @@ newtype ProfileUpdateReq = ProfileUpdateReq (Maybe Text)
 instance FromJSON ProfileUpdateReq where
   parseJSON = withObject "profile" $ \o -> ProfileUpdateReq <$> o .:? "fullName"
 
+newtype BioReq = BioReq (Maybe Text)
+
+instance FromJSON BioReq where
+  parseJSON = withObject "bio" $ \o -> BioReq <$> o .:? "bio"
+
+bioTooLong :: ApiError
+bioTooLong = ApiError status400 "VALIDATION_FAILED" "Bio must be at most 160 characters"
+  (object ["field" .= ("bio" :: Text)])
+
 fromChangePassword :: ChgPw.ChangePasswordError -> ApiError
 fromChangePassword ChgPw.UserNotFound = unauthenticated
 fromChangePassword ChgPw.InvalidCurrentPassword =
@@ -1923,6 +1932,43 @@ main = do
               liftIO (atomicModifyIORef' (envTokens lock)
                 (\m -> (Map.filterWithKey (\t (u, _) -> u /= uid || Just t == mTok) m, ())))
               status status204
+
+    get "/me" $ do
+      mUser <- currentUser lock
+      case mUser of
+        Nothing  -> sendError unauthenticated
+        Just uid -> do
+          result <- runUseCase lock ((,,) <$> Repo.findUserById uid <*> Repo.getBio uid <*> Repo.getMemberSince uid)
+          case result of
+            Left apiErr -> sendError apiErr
+            Right (Nothing, _, _) -> sendError unauthenticated
+            Right (Just u, bio, since) ->
+              json (object [ "email" .= unEmail (email u), "bio" .= bio, "memberSince" .= since ])
+
+    put "/me/bio" $ do
+      mUser <- currentUser lock
+      raw <- body
+      case (mUser, eitherDecode raw) of
+        (Nothing, _) -> sendError unauthenticated
+        (_, Left reason) -> sendError (invalidBody reason)
+        (Just uid, Right (BioReq mBio)) ->
+          case maybe (Right Nothing) EU.validateBio mBio of
+            Left _ -> sendError bioTooLong
+            Right toSave -> do
+              result <- runUseCase lock (Repo.setBio uid toSave)
+              case result of
+                Left apiErr -> sendError apiErr
+                Right ()    -> status status204
+
+    get "/me/activity" $ do
+      mUser <- currentUser lock
+      case mUser of
+        Nothing  -> sendError unauthenticated
+        Just uid -> do
+          result <- runUseCase lock (Repo.recentOwnerActivity uid 5)
+          case result of
+            Left apiErr -> sendError apiErr
+            Right items -> json (object ["activity" .= map activityJson items])
 
     put "/me/profile" $ do
       mUser <- currentUser lock

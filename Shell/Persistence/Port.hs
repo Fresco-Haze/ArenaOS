@@ -215,6 +215,9 @@ class Monad m =>  UserRepository m where
   updateAccountStatus :: UserId -> AccountStatus -> m ()
   setFullName :: UserId -> Maybe Text -> m ()
   getFullName :: UserId -> m (Maybe Text)
+  setBio :: UserId -> Maybe Text -> m ()
+  getBio :: UserId -> m (Maybe Text)
+  getMemberSince :: UserId -> m (Maybe Text)
   createPasswordReset :: UserId -> Text -> Int -> m Int
   findPasswordReset :: Int -> m (Maybe (UserId, Text, Int, Bool))
   consumePasswordResets :: UserId -> m ()
@@ -227,6 +230,7 @@ class TournamentHistoryRepository m where
     recordHistoryEvent  :: TournamentId -> TournamentHistoryEvent -> m ()
     getTournamentHistory :: TournamentId -> m [TournamentHistoryEntry]
     recentPublicActivity :: Int -> m [ActivityItem]
+    recentOwnerActivity :: UserId -> Int -> m [ActivityItem]
 
 
 class Monad m => RoleRepository m where

@@ -3,9 +3,11 @@ import type { ChangeEvent, FormEvent } from 'react'
 import { ApiError } from '../api'
 import { useAuth } from '../auth/context'
 import type { SessionUser } from '../auth/context'
-import { changePassword, removeAvatar, saveFullName, uploadAvatar } from '../lib/accountActions'
+import { changePassword, removeAvatar, saveBio, saveFullName, uploadAvatar } from '../lib/accountActions'
 import { resizeToJpeg } from '../lib/avatarImage'
 import PageHeader from '../components/PageHeader'
+import { useApi } from '../hooks/useApi'
+import { MeProfile } from '../model'
 import Avatar from '../components/Avatar'
 
 function AvatarForm() {
@@ -67,6 +69,51 @@ function AvatarForm() {
       {error && <p role="alert" className="form-error">{error}</p>}
     </div>
   )
+}
+
+function BioEditor({ initial }: { initial: string }) {
+  const [bio, setBio] = useState(initial)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [saved, setSaved] = useState(false)
+
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault()
+    setError(null)
+    setSaved(false)
+    setBusy(true)
+    const trimmed = bio.trim()
+    try {
+      await saveBio(trimmed === '' ? null : trimmed)
+      setBio(trimmed)
+      setSaved(true)
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Could not reach the server')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <form onSubmit={onSubmit} className="form">
+      <h2 className="form-section-title">Bio</h2>
+      <label>
+        About you
+        <textarea value={bio} onChange={(e) => setBio(e.target.value)} maxLength={160} rows={3} />
+      </label>
+      <p className="muted">{bio.length}/160. Shown under your name on your profile.</p>
+      {error && <p role="alert" className="form-error">{error}</p>}
+      {saved && <p role="status">Saved.</p>}
+      <button type="submit" className="btn-primary" disabled={busy}>{busy ? 'Saving' : 'Save bio'}</button>
+    </form>
+  )
+}
+
+function BioForm() {
+  const me = useApi('/me', MeProfile)
+  if (me.error) return <p role="alert" className="form-error">{me.error}</p>
+  if (me.data === null) return null
+  return <BioEditor initial={me.data.bio ?? ''} />
 }
 
 function NameForm() {
@@ -171,6 +218,7 @@ export default function SettingsPage() {
       <PageHeader title="Settings" />
       <AvatarForm />
       <NameForm />
+      <BioForm />
       <PasswordForm />
     </>
   )

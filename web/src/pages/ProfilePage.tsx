@@ -2,8 +2,9 @@ import { useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { useAuth } from '../auth/context'
 import { useApi } from '../hooks/useApi'
-import { MyMatchSummary, TeamList, TournamentList } from '../model'
-import type { Tournament } from '../model'
+import { ActivityList, MeProfile, MyMatchSummary, TeamList, TournamentList } from '../model'
+import { timeAgo } from '../lib/cardDate'
+import type { ActivityItem, Tournament } from '../model'
 import Avatar from '../components/Avatar'
 import EmptyState from '../components/EmptyState'
 import ErrorBanner from '../components/ErrorBanner'
@@ -23,6 +24,23 @@ const PATHS = {
 } as const
 
 type TabId = 'overview' | 'tournaments' | 'teams'
+
+const ACTIVITY_TEXT: Record<ActivityItem['event'], string> = {
+  Published: 'Published',
+  RegistrationOpened: 'Registration opened',
+  Started: 'Started',
+  Completed: 'Completed',
+  Cancelled: 'Cancelled',
+  Reopened: 'Reopened',
+  Other: 'Updated',
+}
+
+function formatMemberSince(value: string | null | undefined): string {
+  if (!value) return 'Not recorded'
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return 'Not recorded'
+  return d.toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })
+}
 
 function Icon({ name }: { name: keyof typeof PATHS }) {
   return (
@@ -85,7 +103,10 @@ export default function ProfilePage() {
   const joined = useApi('/me/registrations', TournamentList)
   const teams = useApi('/me/teams', TeamList)
   const summary = useApi('/me/match-summary', MyMatchSummary)
+  const me = useApi('/me', MeProfile)
+  const activity = useApi('/me/activity', ActivityList)
   const [tab, setTab] = useState<TabId>('overview')
+  const [now] = useState(() => Date.now())
 
   // ProtectedRoute guarantees this, but keep TypeScript honest.
   if (!user) return null
@@ -108,6 +129,7 @@ export default function ProfilePage() {
           <div>
             <h1 className="profile-name">{user.fullName || user.username}</h1>
             {user.fullName && <p className="muted">@{user.username}</p>}
+            {me.data?.bio && <p className="pf-bio">{me.data.bio}</p>}
             <div className="pf-badges">
               {createdItems !== null && createdItems.length > 0 && <span className="profile-chip">Organizer</span>}
               <Link to="/settings" className="button-link pf-edit">Edit profile</Link>
@@ -148,6 +170,18 @@ export default function ProfilePage() {
                 <div>
                   <dt>Full name</dt>
                   <dd>{user.fullName || 'Not set'}</dd>
+                </div>
+                <div>
+                  <dt>Email</dt>
+                  <dd>{me.data ? me.data.email : me.error ? 'Unavailable' : '...'}</dd>
+                </div>
+                <div>
+                  <dt>Role</dt>
+                  <dd>{createdItems === null ? '...' : createdItems.length > 0 ? 'Organizer' : 'Player'}</dd>
+                </div>
+                <div>
+                  <dt>Member since</dt>
+                  <dd>{me.data ? formatMemberSince(me.data.memberSince) : me.error ? 'Unavailable' : '...'}</dd>
                 </div>
               </dl>
             </section>
@@ -192,6 +226,28 @@ export default function ProfilePage() {
                   </button>
                 </li>
               </ul>
+            </section>
+
+            <section className="pf-panel" aria-labelledby="pf-activity">
+              <div className="pf-panel-head">
+                <h2 id="pf-activity">Recent Activity</h2>
+              </div>
+              {activity.error ? (
+                <ErrorBanner message={activity.error} onRetry={activity.retry} />
+              ) : activity.data === null ? (
+                <LoadingBlock label="Loading activity" />
+              ) : activity.data.activity.length === 0 ? (
+                <p className="muted">Activity from tournaments you organize appears here.</p>
+              ) : (
+                <ul className="arows">
+                  {activity.data.activity.map((a, i) => (
+                    <li key={i} className="arow">
+                      <Link to={`/tournaments/${a.tournamentId}`} className="arow-name">{a.name}</Link>
+                      <p className="arow-sub">{ACTIVITY_TEXT[a.event]} &bull; {timeAgo(a.at, now)}</p>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </section>
           </div>
         )}

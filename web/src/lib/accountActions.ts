@@ -25,3 +25,10 @@ export function uploadAvatar(image: Blob) {
 export function removeAvatar() {
   return apiVoid('/me/avatar', { method: 'DELETE' })
 }
+
+export function saveBio(bio: string | null) {
+  return apiVoid('/me/bio', {
+    method: 'PUT',
+    body: JSON.stringify({ bio }),
+  })
+}
