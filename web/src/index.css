@@ -1347,3 +1347,39 @@ main > .form { max-width: 32rem; }
 img.avatar, img.profile-avatar { object-fit: cover; border-radius: 50%; display: block; }
 .avatar-row { display: flex; align-items: center; gap: var(--space-4); }
 .avatar-form input[type="file"] { max-width: 100%; }
+
+.pf { max-width: 64rem; margin: 0 auto; }
+.pf-head {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: var(--space-4); padding: var(--space-4) var(--space-6); margin-bottom: var(--space-4);
+  border: 1px solid var(--line); border-radius: var(--radius-lg);
+  background: linear-gradient(120deg, var(--surface) 35%, rgba(11, 110, 245, 0.2));
+}
+.pf-id { display: flex; align-items: center; gap: var(--space-4); min-width: 0; }
+.pf-head .profile-avatar { width: 6rem; height: 6rem; font-size: 2.5rem; }
+.pf-badges { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); margin-top: var(--space-2); }
+.pf-edit { padding: var(--space-1) var(--space-3); font-size: var(--font-sm); }
+.pf-stats { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--space-3); }
+.pf-stat {
+  display: flex; flex-direction: column; gap: var(--space-1); text-align: center; min-width: 7rem;
+  padding: var(--space-3) var(--space-4); border: 1px solid var(--line);
+  border-radius: var(--radius-lg); background: var(--surface);
+}
+.pf-panels { display: grid; grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr)); gap: var(--space-4); }
+.pf-panel {
+  padding: var(--space-4); border: 1px solid var(--line);
+  border-radius: var(--radius-lg); background: var(--surface);
+}
+.pf-panel-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); margin-bottom: var(--space-3); }
+.pf-panel-head h2 { margin: 0; font-size: 1.125rem; }
+.pf-panel .menu-list { border: 0; border-radius: 0; background: none; }
+.pf-dl { margin: 0; display: flex; flex-direction: column; gap: var(--space-3); }
+.pf-dl dt { color: var(--muted); font-size: var(--font-sm); }
+.pf-dl dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+.pf-section { margin-bottom: var(--space-4); }
+.pf-teams { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-3); }
+.pf-team {
+  display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface);
+}
+.pf-team-name { font-weight: 600; }
