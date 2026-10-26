@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { Game, gameLabel } from '../model'
-import { DESCRIPTION_MAX, deadlineError, prizeError } from '../lib/details'
+import { DESCRIPTION_MAX, PLATFORMS, RULES_MAX, deadlineError, feeError, prizeError } from '../lib/details'
 import type { DetailsValues } from '../lib/details'
 
 // start is "YYYY-MM-DDTHH:mm" in the device's time zone ("" when unset).
@@ -30,6 +30,7 @@ export default function DetailsFields({
     onChange({ ...values, deadline: `${nextDate}T${nextDate ? nextTime || '18:00' : nextTime}` })
   }
   const prizeProblem = values.prize.trim() === '' ? null : prizeError(values.prize)
+  const feeProblem = values.entryFee.trim() === '' ? null : feeError(values.entryFee)
 
   function setStart(nextDate: string, nextTime: string) {
     if (!nextDate && !nextTime) {
@@ -88,6 +89,29 @@ export default function DetailsFields({
         {prizeProblem && <span role="alert" className="form-error">{prizeProblem}</span>}
       </label>
       <label>
+        Entry fee (optional)
+        <span className="kes-input">
+          <span className="kes-prefix" aria-hidden="true">KSh</span>
+          <input
+            inputMode="numeric"
+            value={values.entryFee}
+            placeholder="0 for free"
+            onChange={(e) => onChange({ ...values, entryFee: e.target.value })}
+          />
+        </span>
+        {feeProblem && <span role="alert" className="form-error">{feeProblem}</span>}
+      </label>
+      <p className="muted">Shown to players only. ArenaOS does not collect payments, so you collect the fee yourself.</p>
+      <label>
+        Platform (optional)
+        <select value={values.platform} onChange={(e) => onChange({ ...values, platform: e.target.value })}>
+          <option value="">Not set</option>
+          {PLATFORMS.map((p) => (
+            <option key={p.value} value={p.value}>{p.label}</option>
+          ))}
+        </select>
+      </label>
+      <label>
         Description (optional)
         <textarea
           value={values.description}
@@ -97,6 +121,17 @@ export default function DetailsFields({
           onChange={(e) => onChange({ ...values, description: e.target.value })}
         />
         <span className="muted">{values.description.length}/{DESCRIPTION_MAX}</span>
+      </label>
+      <label>
+        Tournament rules (optional)
+        <textarea
+          value={values.rules}
+          maxLength={RULES_MAX}
+          rows={5}
+          placeholder="One rule per line"
+          onChange={(e) => onChange({ ...values, rules: e.target.value })}
+        />
+        <span className="muted">{values.rules.length}/{RULES_MAX}</span>
       </label>
     </>
   )

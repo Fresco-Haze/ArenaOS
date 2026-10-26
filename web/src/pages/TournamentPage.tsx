@@ -8,6 +8,7 @@ import { useTournament } from '../hooks/useTournament'
 import { participantName } from '../lib/participants'
 import { formatCardDate } from '../lib/cardDate'
 import { formatKes } from '../lib/money'
+import { PLATFORMS } from '../lib/details'
 import { formatLabel, gameLabel, stateLabel, type Participant } from '../model'
 
 import Bracket from '../components/Bracket'
@@ -102,6 +103,9 @@ export default function TournamentPage({ id }: { id: string }) {
   const gameName = t.game && t.game !== 'Other' ? gameLabel[t.game] : null
   const when = t.startTime ? formatCardDate(t.startTime) : ''
   const canRemove = view.viewerIsOwner && t.state === 'RegistrationOpen'
+  const platformName = PLATFORMS.find((p) => p.value === t.platform)?.label ?? null
+  const feeText = t.entryFee == null ? null : t.entryFee === 0 ? 'Free' : formatKes(t.entryFee)
+  const rulesList = (t.rules ?? '').split('\n').map((r) => r.trim()).filter((r) => r.length > 0)
 
   return (
     <div className="tp">
@@ -168,7 +172,19 @@ export default function TournamentPage({ id }: { id: string }) {
               <li className="tp-tile"><span className="muted">Format</span><strong>{formatLabel[t.format]}</strong></li>
               {gameName && <li className="tp-tile"><span className="muted">Game</span><strong>{gameName}</strong></li>}
               <li className="tp-tile"><span className="muted">Mode</span><strong>{squads ? 'Squads' : 'Individual players'}</strong></li>
+              {platformName && <li className="tp-tile"><span className="muted">Platform</span><strong>{platformName}</strong></li>}
+              {feeText && <li className="tp-tile"><span className="muted">Entry fee</span><strong>{feeText}</strong></li>}
             </ul>
+            {rulesList.length > 0 && (
+              <>
+                <h3 className="tp-rules-title">Tournament rules</h3>
+                <ul className="tp-rules">
+                  {rulesList.map((r, i) => (
+                    <li key={i}>{r}</li>
+                  ))}
+                </ul>
+              </>
+            )}
           </section>
         </div>
       ) : tab === 'bracket' ? (

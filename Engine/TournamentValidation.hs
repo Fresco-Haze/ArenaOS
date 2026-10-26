@@ -78,6 +78,9 @@ data DetailsValidationError
   = PrizeOutOfRange Int
   | DescriptionTooLong Int
   | DeadlineAfterStart
+  | EntryFeeOutOfRange Int
+  | PlatformInvalid
+  | RulesTooLong Int
   deriving (Eq, Show)
 
 maxPrizeKes :: Int
@@ -86,18 +89,29 @@ maxPrizeKes = 1000000000
 maxDescriptionLength :: Int
 maxDescriptionLength = 500
 
+maxRulesLength :: Int
+maxRulesLength = 1000
+
+platforms :: [String]
+platforms = ["PC", "Console", "Mobile", "CrossPlatform"]
+
 validateDetails :: TournamentDetails -> Either DetailsValidationError TournamentDetails
 validateDetails d =
   case (detailsPrize d, trimmed) of
     (Just n, _) | n < 0 || n > maxPrizeKes -> Left (PrizeOutOfRange n)
     (_, Just s) | length s > maxDescriptionLength -> Left (DescriptionTooLong (length s))
+    _ | Just n <- detailsEntryFee d, n < 0 || n > maxPrizeKes -> Left (EntryFeeOutOfRange n)
+    _ | Just p <- detailsPlatform d, p `notElem` platforms -> Left PlatformInvalid
+    _ | Just r <- trimmedRules, length r > maxRulesLength -> Left (RulesTooLong (length r))
     _ | deadlineAfterStart -> Left DeadlineAfterStart
     _ -> Right d { detailsPrize = detailsPrize d >>= nonZero
                  , detailsDescription = trimmed >>= nonBlank
                  , detailsStartTime = truncSecs <$> detailsStartTime d
-                 , detailsRegistrationDeadline = truncSecs <$> detailsRegistrationDeadline d }
+                 , detailsRegistrationDeadline = truncSecs <$> detailsRegistrationDeadline d
+                 , detailsRules = trimmedRules >>= nonBlank }
   where
     trimmed = trim <$> detailsDescription d
+    trimmedRules = trim <$> detailsRules d
     deadlineAfterStart = case (detailsRegistrationDeadline d, detailsStartTime d) of
       (Just r, Just s) -> r > s
       _ -> False

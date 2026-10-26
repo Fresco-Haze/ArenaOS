@@ -602,7 +602,10 @@ instance FromJSON DetailsReq where
     pz <- o .:? "prize"
     ds <- o .:? "description"
     rd <- o .:? "registrationDeadline"
-    pure (DetailsReq (TournamentDetails g st pz ds rd))
+    ef <- o .:? "entryFee"
+    pf <- o .:? "platform"
+    ru <- o .:? "rules"
+    pure (DetailsReq (TournamentDetails g st pz ds rd ef pf ru))
 
 -- ?q= (name contains), ?game= (eFootball | PubgMobile | CallOfDuty | Other), ?limit= (1..100)
 parseListFilter :: UTCTime -> Maybe Text -> Maybe Text -> Maybe Text -> Maybe Text -> Either ApiError ListPublic.PublicFilter
@@ -772,6 +775,9 @@ tournamentPairs t =
   , "thirdPlaceMatch" .= tournamentThirdPlaceMatch t
   , "requireApproval" .= tournamentRequireApproval t
   , "registrationDeadline" .= tournamentRegistrationDeadline t
+  , "entryFee" .= tournamentEntryFee t
+  , "platform" .= tournamentPlatform t
+  , "rules" .= tournamentRules t
   , "participantMode" .= T.pack (show (tournamentParticipantMode t))
   , "bracketId"       .= fmap unBracketId (tournamentBracket t)
   ]
@@ -957,6 +963,15 @@ fromDetailsValidation (PrizeOutOfRange n) =
 fromDetailsValidation DeadlineAfterStart =
   ApiError status400 "VALIDATION_FAILED" "Registration deadline must not be after the start time"
     (object ["field" .= ("registrationDeadline" :: Text)])
+fromDetailsValidation (EntryFeeOutOfRange n) =
+  ApiError status400 "VALIDATION_FAILED" "Entry fee must be a whole number of KSh, up to 1,000,000,000"
+    (object ["field" .= ("entryFee" :: Text), "maximum" .= (1000000000 :: Int), "actual" .= n])
+fromDetailsValidation PlatformInvalid =
+  ApiError status400 "VALIDATION_FAILED" "Platform must be PC, Console, Mobile or CrossPlatform"
+    (object ["field" .= ("platform" :: Text)])
+fromDetailsValidation (RulesTooLong n) =
+  ApiError status400 "VALIDATION_FAILED" "Rules must be 1,000 characters or fewer"
+    (object ["field" .= ("rules" :: Text), "maximum" .= (1000 :: Int), "actual" .= n])
 fromDetailsValidation (DescriptionTooLong n) =
   ApiError status400 "VALIDATION_FAILED" "Description must be 500 characters or fewer"
     (object ["field" .= ("description" :: Text), "maximum" .= (500 :: Int), "actual" .= n])

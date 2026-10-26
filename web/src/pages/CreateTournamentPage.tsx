@@ -5,7 +5,7 @@ import { ApiError } from '../api'
 import { useAuth } from '../auth/context'
 import { createTournament } from '../lib/tournamentActions'
 import DetailsFields from '../components/DetailsFields'
-import { deadlineError, emptyDetails, prizeError, toPayload } from '../lib/details'
+import { deadlineError, emptyDetails, feeError, prizeError, toPayload } from '../lib/details'
 import type { DetailsValues } from '../lib/details'
 
 type Field = 'name' | 'organizer' | 'maxParticipants' | 'prize'
@@ -65,7 +65,7 @@ export default function CreateTournamentPage() {
     setError(null)
     setFieldErrors({})
 
-    if (prizeError(details.prize) || deadlineError(details)) return
+    if (prizeError(details.prize) || feeError(details.entryFee) || deadlineError(details)) return
 
     const parsedMax = Number(maxParticipants)
     if (!Number.isFinite(parsedMax)) {

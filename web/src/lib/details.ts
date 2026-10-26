@@ -3,18 +3,40 @@ import type { Tournament } from '../model'
 
 export const PRIZE_MAX = 1000000000
 export const DESCRIPTION_MAX = 500
+export const RULES_MAX = 1000
+
+export const PLATFORMS = [
+  { value: 'PC', label: 'PC' },
+  { value: 'Console', label: 'Console' },
+  { value: 'Mobile', label: 'Mobile' },
+  { value: 'CrossPlatform', label: 'Cross-platform' },
+] as const
 
 // What the form holds: strings only. `start` and `deadline` are datetime-local values in the device's time zone.
-export type DetailsValues = { game: string; start: string; deadline: string; prize: string; description: string }
+export type DetailsValues = {
+  game: string
+  start: string
+  deadline: string
+  prize: string
+  entryFee: string
+  platform: string
+  description: string
+  rules: string
+}
 export type DetailsPayload = {
   game: Game | null
   startTime: string | null
   registrationDeadline: string | null
   prize: number | null
+  entryFee: number | null
+  platform: string | null
   description: string | null
+  rules: string | null
 }
 
-export const emptyDetails: DetailsValues = { game: '', start: '', deadline: '', prize: '', description: '' }
+export const emptyDetails: DetailsValues = {
+  game: '', start: '', deadline: '', prize: '', entryFee: '', platform: '', description: '', rules: '',
+}
 
 const pad = (n: number) => ('0' + n).slice(-2)
 
@@ -30,6 +52,19 @@ export function parsePrize(raw: string): number | null | undefined {
 
 export function prizeError(raw: string): string | null {
   return parsePrize(raw) === undefined ? 'Enter a whole number of KSh, up to 1,000,000,000.' : null
+}
+
+// '' -> null (not stated); '0' -> 0 (free); '500' -> 500; anything else -> undefined (invalid).
+export function parseFee(raw: string): number | null | undefined {
+  const s = raw.replace(/[\s,]/g, '')
+  if (s === '') return null
+  if (!/^\d+$/.test(s)) return undefined
+  const n = Number(s)
+  return n > PRIZE_MAX ? undefined : n
+}
+
+export function feeError(raw: string): string | null {
+  return parseFee(raw) === undefined ? 'Enter a whole number of KSh, up to 1,000,000,000.' : null
 }
 
 // Only checked when both the start and the deadline are filled in.
@@ -61,7 +96,10 @@ export function detailsFromTournament(t: Tournament): DetailsValues {
     start: isoToLocalInput(t.startTime),
     deadline: isoToLocalInput(t.registrationDeadline),
     prize: t.prize != null ? String(t.prize) : '',
+    entryFee: t.entryFee != null ? String(t.entryFee) : '',
+    platform: t.platform ?? '',
     description: t.description ?? '',
+    rules: t.rules ?? '',
   }
 }
 
@@ -76,12 +114,16 @@ export function toPayload(v: DetailsValues, original?: Tournament): DetailsPaylo
     registrationDeadline = original.registrationDeadline
   }
   const description = v.description.trim()
+  const rules = v.rules.trim()
   return {
     game: game.success ? game.data : null,
     startTime,
     registrationDeadline,
     prize: parsePrize(v.prize) ?? null,
+    entryFee: parseFee(v.entryFee) ?? null,
+    platform: v.platform === '' ? null : v.platform,
     description: description === '' ? null : description,
+    rules: rules === '' ? null : rules,
   }
 }
 
@@ -92,6 +134,9 @@ export function detailsChanged(v: DetailsValues, t: Tournament): boolean {
     p.startTime !== (t.startTime ?? null) ||
     p.registrationDeadline !== (t.registrationDeadline ?? null) ||
     p.prize !== (t.prize ?? null) ||
-    p.description !== (t.description ?? null)
+    p.entryFee !== (t.entryFee ?? null) ||
+    p.platform !== (t.platform ?? null) ||
+    p.description !== (t.description ?? null) ||
+    p.rules !== (t.rules ?? null)
   )
 }

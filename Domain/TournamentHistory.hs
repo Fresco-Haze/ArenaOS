@@ -20,6 +20,9 @@ data ChangedField
     | FieldPrize
     | FieldDescription
     | FieldRegistrationDeadline
+    | FieldEntryFee
+    | FieldPlatform
+    | FieldRules
     deriving (Show, Eq)
 
 data TournamentHistoryEvent

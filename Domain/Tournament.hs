@@ -53,10 +53,13 @@ data TournamentDetails = TournamentDetails
     , detailsPrize     :: Maybe Int
     , detailsDescription :: Maybe String
     , detailsRegistrationDeadline :: Maybe UTCTime
+    , detailsEntryFee :: Maybe Int
+    , detailsPlatform :: Maybe String
+    , detailsRules :: Maybe String
     } deriving (Show, Eq)
 
 noDetails :: TournamentDetails
-noDetails = TournamentDetails Nothing Nothing Nothing Nothing Nothing
+noDetails = TournamentDetails Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing
 
 -- v0.12: public counts for the home page. "Public" means visibility Public
 -- and past Draft, the same set the public list shows.
@@ -92,5 +95,8 @@ data Tournament = Tournament
     , tournamentDescription :: Maybe String
     , tournamentRequireApproval :: Bool
     , tournamentRegistrationDeadline :: Maybe UTCTime
+    , tournamentEntryFee :: Maybe Int
+    , tournamentPlatform :: Maybe String
+    , tournamentRules :: Maybe String
     } deriving (Show, Eq)
 

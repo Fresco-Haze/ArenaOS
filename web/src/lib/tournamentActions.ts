@@ -67,6 +67,9 @@ export function createTournament(input: {
   prize?: number | null
   description?: string | null
   registrationDeadline?: string | null
+  entryFee?: number | null
+  platform?: string | null
+  rules?: string | null
 }) {
   return api('/tournaments', CreateTournamentResponse, {
     method: 'POST',
@@ -183,7 +186,7 @@ export function createTeam(input: { name: string; captain: string; members: stri
 // Replaces game, start time and prize; null clears a field.
 export function updateDetails(
   id: number,
-  details: { game: Game | null; startTime: string | null; registrationDeadline: string | null; prize: number | null; description: string | null },
+  details: { game: Game | null; startTime: string | null; registrationDeadline: string | null; prize: number | null; entryFee: number | null; platform: string | null; description: string | null; rules: string | null },
 ) {
   return apiVoid(`/tournaments/${id}/details`, {
     method: 'PUT',
