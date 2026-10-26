@@ -6480,6 +6480,19 @@ spec = before_ resetTestDb $ do
         pure (ids == [a])
       result `shouldBe` Right True
 
+    it "Public facts: the shared facts give the same rankings and players as the direct queries" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "pc-owner-1"
+        tid <- jnOpen owner "Cache Cup" 8 Public
+        _ <- unwrap =<< RPC.registerParticipantChecked owner tid (Individual (Player (PlayerName "pc-ann")))
+        facts <- GRK.loadPublicFacts
+        directRanks <- GRK.getRankings Nothing 5
+        directPlayers <- GPL.getPlayers Nothing 50
+        pure ( directRanks == GRK.rankingsFrom Nothing 5 facts
+             , directPlayers == GPL.playersFrom Nothing 50 facts )
+      result `shouldBe` Right (True, True)
+
     it "Players: entered counts once per tournament, titles and wins add up, ordered by titles then wins" $ do
       Pl.summarize
         [ Pl.PlayerFact ["ann", "bob"] (Just "ann") ["ann", "ann", "bob"]

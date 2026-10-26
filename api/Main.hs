@@ -675,6 +675,25 @@ parsePlayersQuery mq ml = do
     badLimit = ApiError status400 "VALIDATION_FAILED" "Invalid query parameter"
       (object ["field" .= ("limit" :: Text)])
 
+factsTtl :: NominalDiffTime
+factsTtl = 60
+
+-- Rankings and Players share this: the per-tournament scan runs at most once a
+-- minute, so a corrected result can take up to a minute to show there.
+cachedFacts :: Env -> ActionM (Either ApiError [GRK.PublicFact])
+cachedFacts lock = do
+  now <- liftIO getCurrentTime
+  cached <- liftIO (readIORef (envFacts lock))
+  case cached of
+    Just (at, fs) | diffUTCTime now at < factsTtl -> pure (Right fs)
+    _ -> do
+      result <- runUseCase lock GRK.loadPublicFacts
+      case result of
+        Left e   -> pure (Left e)
+        Right fs -> do
+          liftIO (atomicModifyIORef' (envFacts lock) (\_ -> (Just (now, fs), ())))
+          pure (Right fs)
+
 playerSummaryJson :: Pl.PlayerSummary -> Value
 playerSummaryJson s = object
   [ "name"        .= Pl.psName s
@@ -1089,6 +1108,7 @@ data Env = Env
   , envHits :: IORef (Map.Map (Text, Text) [UTCTime])  -- rate-limit hit log
   , envRateOn :: Bool
   , envTrustProxy :: Bool
+  , envFacts :: IORef (Maybe (UTCTime, [GRK.PublicFact]))  -- shared rankings and players facts
   }
 
 unauthenticated :: ApiError
@@ -1525,7 +1545,7 @@ main = do
   lock <- Env <$> newMVar () <*> newIORef Map.empty <*> pure dbFile
                 <*> newQSem 2 <*> pure dummyHash
                 <*> pure (fromIntegral ttlSecs) <*> newIORef Map.empty
-                <*> pure rateOn <*> pure trustProxy
+                <*> pure rateOn <*> pure trustProxy <*> newIORef Nothing
   let opts = Options
         { verbose  = 1
         , settings = setHost (fromString host) (setPort port defaultSettings)
@@ -2101,14 +2121,14 @@ main = do
       case parsePlayersQuery qRaw lRaw of
         Left apiErr -> sendError apiErr
         Right (mq, limitN) -> do
-          result <- runUseCase lock (GPL.getPlayers mq limitN)
+          result <- fmap (fmap (GPL.playersFrom mq limitN)) (cachedFacts lock)
           case result of
             Left apiErr -> sendError apiErr
             Right ss    -> json (object ["players" .= map playerSummaryJson ss])
 
     get "/players/:name" $ do
       rawName <- pathParam "name" :: ActionM Text
-      result <- runUseCase lock (GPL.getPlayerProfile (T.unpack rawName))
+      result <- fmap (fmap (GPL.profileFrom (T.unpack rawName))) (cachedFacts lock)
       case result of
         Left apiErr    -> sendError apiErr
         Right Nothing  -> sendError (ApiError status404 "NOT_FOUND" "Player not found" (object []))
@@ -2121,7 +2141,7 @@ main = do
       case parseRankingsQuery gRaw lRaw of
         Left apiErr -> sendError apiErr
         Right (mGame, limitN) -> do
-          result <- runUseCase lock (GRK.getRankings mGame limitN)
+          result <- fmap (fmap (GRK.rankingsFrom mGame limitN)) (cachedFacts lock)
           case result of
             Left apiErr -> sendError apiErr
             Right es    -> json (object ["rankings" .= map rankingJson (Rk.assignRanks es)])
