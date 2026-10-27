@@ -106,6 +106,8 @@ export default function TournamentPage({ id }: { id: string }) {
   const platformName = PLATFORMS.find((p) => p.value === t.platform)?.label ?? null
   const feeText = t.entryFee == null ? null : t.entryFee === 0 ? 'Free' : formatKes(t.entryFee)
   const rulesList = (t.rules ?? '').split('\n').map((r) => r.trim()).filter((r) => r.length > 0)
+  // Player profiles are built from public tournaments past Draft, so only link there.
+  const profileLinks = t.visibility === 'Public' && t.state !== 'Draft' && t.state !== 'Cancelled'
 
   return (
     <div className="tp">
@@ -230,7 +232,11 @@ export default function TournamentPage({ id }: { id: string }) {
                     {participantName(p).charAt(0).toUpperCase()}
                   </span>
                   <span className="prow-main">
-                    <span className="prow-name">{participantName(p)}</span>
+                    {profileLinks && p.type === 'Individual' ? (
+                      <Link className="prow-name prow-link" to={`/players/${encodeURIComponent(p.player)}`}>{p.player}</Link>
+                    ) : (
+                      <span className="prow-name">{participantName(p)}</span>
+                    )}
                     {p.type === 'Squad' && (
                       <span className="prow-members">{p.team.members.join(', ')}</span>
                     )}

@@ -206,3 +206,7 @@
   flex: 0 0 auto;
   gap: var(--space-1);
 }
+
+/* v0.12: player names on the Players tab link to their profile */
+.prow-link { color: inherit; text-decoration: none; }
+.prow-link:hover { text-decoration: underline; }
