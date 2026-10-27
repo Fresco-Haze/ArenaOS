@@ -4,6 +4,7 @@ import { formatKes } from '../lib/money'
 import { formatLabel, gameLabel, stateLabel } from '../model'
 import type { Tournament } from '../model'
 import { statusClass } from '../badges'
+import BannerImg from './BannerImg'
 
 function FormatIcon() {
   return (
@@ -48,6 +49,7 @@ export default function TournamentCard({ tournament: t, showOrganizer = false }:
   return (
     <li className="tcard">
       <div className="tcard-art" data-game={t.game ?? 'none'}>
+        {t.hasBanner && <BannerImg tournamentId={t.tournamentId} />}
         {gameName && <span className="tcard-chip">{gameName}</span>}
         <span className={'badge tcard-status ' + statusClass[t.state]}>{stateLabel[t.state]}</span>
       </div>

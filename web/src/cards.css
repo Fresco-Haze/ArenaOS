@@ -96,3 +96,7 @@
   text-align: center;
 }
 .tcard:hover .tcard-cta { filter: brightness(1.1); }
+
+/* banner pictures fill the art box; chip and status stay on top */
+.tcard-art { position: relative; overflow: hidden; }
+.tcard-art .tcard-chip, .tcard-art .tcard-status { z-index: 1; }

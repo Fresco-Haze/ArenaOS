@@ -571,6 +571,16 @@ tournamentJson t = object (tournamentPairs t)
 tournamentJsonCounted :: Int -> Tournament -> Value
 tournamentJsonCounted n t = object (("registeredCount" .= n) : tournamentPairs t)
 
+-- v0.12: the public list also says which tournaments have a banner picture.
+listWithBanners flt = do
+  ts <- ListPublic.listPublicTournamentsFiltered flt
+  counts <- Repo.countRegistrationsByTournament
+  flags <- mapM (Repo.hasBanner . tournamentId) ts
+  pure (ts, counts, flags)
+
+tournamentJsonListed :: Int -> Bool -> Tournament -> Value
+tournamentJsonListed n has t = object (("registeredCount" .= n) : ("hasBanner" .= has) : tournamentPairs t)
+
 countFor :: [(TournamentId, Int)] -> Tournament -> Int
 countFor cs t = fromMaybe 0 (lookup (tournamentId t) cs)
 
@@ -2189,10 +2199,10 @@ main = do
           nowT <- liftIO getCurrentTime
           result <- case parseListFilter nowT qRaw gRaw lRaw uRaw of
             Left apiErr -> pure (Left apiErr)
-            Right flt   -> runUseCase lock ((,) <$> ListPublic.listPublicTournamentsFiltered flt <*> Repo.countRegistrationsByTournament)
+            Right flt   -> runUseCase lock (listWithBanners flt)
           case result of
             Left apiErr -> sendError apiErr
-            Right ts    -> json (object ["tournaments" .= map (\t -> tournamentJsonCounted (countFor (snd ts) t) t) (fst ts)])
+            Right (ts, counts, flags) -> json (object ["tournaments" .= zipWith (\t b -> tournamentJsonListed (countFor counts t) b t) ts flags])
 
     put "/tournaments/:id/name" $ do
       raw <- body

@@ -38,6 +38,7 @@ export const Tournament = z.object({
   prize: z.number().nullish(),
   description: z.string().nullish(),
   registeredCount: z.number().nullish(),
+  hasBanner: z.boolean().optional(),
   bracketId: z.number().nullable(),
 })
 export type Tournament = z.infer<typeof Tournament>
