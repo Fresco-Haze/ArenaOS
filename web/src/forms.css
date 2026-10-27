@@ -126,3 +126,20 @@
 .create-review dt { color: var(--muted, inherit); font-weight: 600; }
 .create-review dd { margin: 0; overflow-wrap: anywhere; }
 .create-review-rules { white-space: pre-wrap; }
+
+/* Banner upload card (create tournament) */
+.banner-field-label { display: block; font-weight: 600; margin-bottom: var(--space-2); }
+.banner-card {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: var(--space-2); text-align: center; padding: var(--space-4);
+  border: 2px dashed color-mix(in srgb, var(--accent) 45%, transparent);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--accent) 6%, var(--surface));
+}
+.banner-card p { margin: 0; }
+.banner-card-icon { color: var(--accent); }
+.banner-card-choose { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+.banner-card-hint, .banner-card-name { color: var(--muted); font-size: var(--font-sm); }
+.banner-card-name { overflow-wrap: anywhere; }
+.banner-card-preview { width: 100%; max-width: 28rem; aspect-ratio: 16 / 9; object-fit: cover; border-radius: var(--radius); }
+.banner-card-actions { display: flex; gap: var(--space-2); }

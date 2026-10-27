@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, FormEvent } from 'react'
 import { useNavigate } from 'react-router'
 import { ApiError } from '../api'
@@ -66,6 +66,9 @@ export default function CreateTournamentPage() {
   const [details, setDetails] = useState<DetailsValues>(emptyDetails)
   const [bannerFile, setBannerFile] = useState<File | null>(null)
   const [bannerNote, setBannerNote] = useState<string | null>(null)
+  const bannerInput = useRef<HTMLInputElement>(null)
+  const bannerPreview = useMemo(() => (bannerFile ? URL.createObjectURL(bannerFile) : null), [bannerFile])
+  useEffect(() => () => { if (bannerPreview) URL.revokeObjectURL(bannerPreview) }, [bannerPreview])
 
   // ProtectedRoute guarantees this, but keep TypeScript honest.
   if (!user) return null
@@ -101,6 +104,12 @@ export default function CreateTournamentPage() {
     } else {
       setStep(i)
     }
+  }
+
+  function onRemoveBanner() {
+    setBannerFile(null)
+    setBannerNote(null)
+    if (bannerInput.current) bannerInput.current.value = ''
   }
 
   function onPickBanner(e: ChangeEvent<HTMLInputElement>) {
@@ -226,15 +235,34 @@ export default function CreateTournamentPage() {
               />
             </label>
             <DetailsFields values={details} onChange={setDetails} section="basic" />
-            <label>
-              Banner image (optional)
-              <input type="file" accept="image/*" onChange={onPickBanner} aria-label="Choose a banner image" />
-            </label>
-            <p className="muted">
-              Cropped to 16:9 and shrunk when the tournament is created. Without one, the game art is used.
-            </p>
-            {bannerFile && <p role="status">Selected: {bannerFile.name}</p>}
-            {bannerNote && <p role="alert" className="form-error">{bannerNote}</p>}
+            <div className="banner-field">
+              <span className="banner-field-label">Banner image (optional)</span>
+              <div className="banner-card">
+                <input ref={bannerInput} type="file" accept="image/*" onChange={onPickBanner} aria-label="Choose a banner image" hidden />
+                {bannerFile && bannerPreview ? (
+                  <>
+                    <img className="banner-card-preview" src={bannerPreview} alt="Selected banner preview" />
+                    <p className="banner-card-name">{bannerFile.name}</p>
+                    <div className="banner-card-actions">
+                      <button type="button" onClick={() => bannerInput.current?.click()}>Change</button>
+                      <button type="button" onClick={onRemoveBanner}>Remove</button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <svg className="banner-card-icon" width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <rect x="3" y="3" width="18" height="18" rx="2" />
+                      <circle cx="9" cy="9" r="1.6" />
+                      <path d="m21 15-4.5-4.5L6 21" />
+                    </svg>
+                    <p>Upload a banner image (16:9 works best)</p>
+                    <button type="button" className="banner-card-choose" onClick={() => bannerInput.current?.click()}>Choose Image</button>
+                    <p className="banner-card-hint">Any image, up to 10 MB. Cropped to 16:9. Without one, the game art is used.</p>
+                  </>
+                )}
+              </div>
+              {bannerNote && <p role="alert" className="form-error">{bannerNote}</p>}
+            </div>
           </>
         )}
 
