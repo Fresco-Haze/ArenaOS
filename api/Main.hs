@@ -1561,6 +1561,15 @@ main = do
                 <*> newQSem 2 <*> pure dummyHash
                 <*> pure (fromIntegral ttlSecs) <*> newIORef Map.empty
                 <*> pure rateOn <*> pure trustProxy <*> newIORef Nothing
+  -- Fill the shared rankings and players facts once at startup, so the first
+  -- visitor does not wait for the scan. A failure here is not fatal.
+  warm <- try (runSQLiteM dbFile GRK.loadPublicFacts) :: IO (Either SomeException (Either PersistenceError [GRK.PublicFact]))
+  case warm of
+    Right (Right fs) -> do
+      warmedAt <- getCurrentTime
+      atomicModifyIORef' (envFacts lock) (\_ -> (Just (warmedAt, fs), ()))
+      hPutStrLn stderr "facts warmed"
+    _ -> hPutStrLn stderr "facts warm-up skipped"
   let opts = Options
         { verbose  = 1
         , settings = setHost (fromString host) (setPort port defaultSettings)
