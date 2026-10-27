@@ -583,6 +583,9 @@ tournamentJsonListed n has t = object (("registeredCount" .= n) : ("hasBanner" .
 
 withBannerFlags ts = mapM (\t -> (\b -> (t, b)) <$> Repo.hasBanner (tournamentId t)) ts
 
+tournamentJsonFlagged :: Bool -> Tournament -> Value
+tournamentJsonFlagged has t = object (("hasBanner" .= has) : tournamentPairs t)
+
 countFor :: [(TournamentId, Int)] -> Tournament -> Int
 countFor cs t = fromMaybe 0 (lookup (tournamentId t) cs)
 
@@ -717,13 +720,13 @@ playerSummaryJson s = object
   , "wins"        .= Pl.psWins s
   ]
 
-playerProfileJson :: GPL.PlayerProfile -> Value
-playerProfileJson p = object
+playerProfileJson :: GPL.PlayerProfile -> [Bool] -> Value
+playerProfileJson p flags = object
   [ "name"        .= Pl.psName s
   , "tournaments" .= Pl.psEntered s
   , "titles"      .= Pl.psTitles s
   , "wins"        .= Pl.psWins s
-  , "history"     .= [ object ["tournament" .= tournamentJson t, "champion" .= c] | (t, c) <- GPL.ppHistory p ]
+  , "history"     .= [ object ["tournament" .= tournamentJsonFlagged b t, "champion" .= c] | ((t, c), b) <- zip (GPL.ppHistory p) flags ]
   ]
   where s = GPL.ppSummary p
 
@@ -2168,7 +2171,11 @@ main = do
       case result of
         Left apiErr    -> sendError apiErr
         Right Nothing  -> sendError (ApiError status404 "NOT_FOUND" "Player not found" (object []))
-        Right (Just p) -> json (playerProfileJson p)
+        Right (Just p) -> do
+          flagged <- runUseCase lock (mapM (Repo.hasBanner . tournamentId . fst) (GPL.ppHistory p))
+          case flagged of
+            Left apiErr -> sendError apiErr
+            Right flags -> json (playerProfileJson p flags)
 
     -- public, no login: top players by titles, then match wins
     get "/rankings" $ do
