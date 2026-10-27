@@ -188,3 +188,21 @@
 
 .tp-rules-title { margin: var(--space-4) 0 var(--space-2); font-size: 1rem; }
 .tp-rules { margin: 0; padding-left: 1.25rem; display: grid; gap: var(--space-1); }
+
+/* header card: details left, join block right (wraps under the title when narrow) */
+.tp-info {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3) var(--space-4);
+}
+.tp-info-main { flex: 1 1 18rem; min-width: 0; }
+.tp-info-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  flex: 0 0 auto;
+  gap: var(--space-1);
+}

@@ -124,6 +124,7 @@ export default function TournamentPage({ id }: { id: string }) {
           <span className={'badge tp-status ' + statusClass[t.state]}>{stateLabel[t.state]}</span>
         </div>
         <div className="tp-info">
+        <div className="tp-info-main">
           <h1 id="tp-title" className="tp-title">{t.name}</h1>
           <ul className="tp-meta">
             {gameName && <li>{gameName}</li>}
@@ -143,8 +144,11 @@ export default function TournamentPage({ id }: { id: string }) {
           )}
           {t.registrationDeadline && <p className="muted">Registration closes {formatCardDate(t.registrationDeadline)}</p>}
 
+          </div>
+        <div className="tp-info-side">
           <JoinBar tournament={t} signedIn={!!user} registered={view.viewerIsRegistered} requestStatus={view.viewerRequestStatus} onDone={reload} />
           <p className="muted tp-count">{view.participants.length}/{t.maxParticipants} registered</p>
+        </div>
         </div>
       </section>
 
