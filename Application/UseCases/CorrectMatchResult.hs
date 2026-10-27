@@ -483,6 +483,7 @@ checkGF1Correction currentMatchId _ oldOutcome newOutcome resetMatch =
       Just m | matchStatus m == Match.Scheduled  -> Right (Just (matchId m))
              | matchStatus m == Match.InProgress -> Left (DownstreamMatchStarted (matchId m))
              | matchStatus m == Match.Completed  -> Left TournamentAlreadyCompleted
+             | otherwise                          -> Left (CorrectionIntegrityViolation (matchId m))
     (Decisive, ResetRequired) -> Left (GF1ResetNotRestorable currentMatchId)
       -- Thread A's explicit, documented exception: would require
       -- materializing a reset match that never existed.
