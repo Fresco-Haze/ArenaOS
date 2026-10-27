@@ -259,3 +259,6 @@
   max-width: 26rem;
   text-shadow: 0 1px 8px rgba(2, 13, 26, 0.8);
 }
+
+/* v0.12 row banners: the picture fills the thumbnail */
+.urow-art { position: relative; overflow: hidden; }

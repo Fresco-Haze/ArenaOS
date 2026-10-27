@@ -581,6 +581,8 @@ listWithBanners flt = do
 tournamentJsonListed :: Int -> Bool -> Tournament -> Value
 tournamentJsonListed n has t = object (("registeredCount" .= n) : ("hasBanner" .= has) : tournamentPairs t)
 
+withBannerFlags ts = mapM (\t -> (\b -> (t, b)) <$> Repo.hasBanner (tournamentId t)) ts
+
 countFor :: [(TournamentId, Int)] -> Tournament -> Int
 countFor cs t = fromMaybe 0 (lookup (tournamentId t) cs)
 
@@ -1756,12 +1758,12 @@ main = do
       case mUser of
         Nothing  -> sendError unauthenticated
         Just uid -> do
-          result <- runUseCase lock ((,) <$> Register.listMyRegistrations uid <*> Repo.countRegistrationsByTournament)
+          result <- runUseCase lock ((,) <$> (Register.listMyRegistrations uid >>= withBannerFlags) <*> Repo.countRegistrationsByTournament)
           case result of
             Left apiErr -> sendError apiErr
             Right (ts, counts) -> json (object
               [ "tournaments" .=
-                  map (\t -> tournamentJsonCounted (countFor counts t) t) (sortOn (negate . unTournamentId . tournamentId) ts) ])
+                  map (\(t, b) -> tournamentJsonListed (countFor counts t) b t) (sortOn (negate . unTournamentId . tournamentId . fst) ts) ])
 
     post "/tournaments/:id/join-team" $ do
       raw <- body
@@ -2091,12 +2093,12 @@ main = do
       case mUser of
         Nothing  -> sendError unauthenticated
         Just uid -> do
-          result <- runUseCase lock ((,) <$> ListMine.listMyTournaments uid <*> Repo.countRegistrationsByTournament)
+          result <- runUseCase lock ((,) <$> (ListMine.listMyTournaments uid >>= withBannerFlags) <*> Repo.countRegistrationsByTournament)
           case result of
             Left apiErr -> sendError apiErr
             Right ts    -> json (object
               [ "tournaments" .=
-                  map (\t -> tournamentJsonCounted (countFor (snd ts) t) t) (sortOn (negate . unTournamentId . tournamentId) (fst ts)) ])
+                  map (\(t, b) -> tournamentJsonListed (countFor (snd ts) t) b t) (sortOn (negate . unTournamentId . tournamentId . fst) (fst ts)) ])
     
     post "/tournaments/:id/start" $
       runTransition lock StartT.startTournament fromStartTournament

@@ -4,13 +4,16 @@ import { formatCardDate } from '../lib/cardDate'
 import { formatLabel, stateLabel } from '../model'
 import type { Tournament } from '../model'
 import { CalendarIcon, FormatIcon, PeopleIcon } from './MetaIcons'
+import BannerImg from './BannerImg'
 
 export default function TournamentRow({ tournament: t }: { tournament: Tournament }) {
   const mode = t.participantMode === 'SquadOnly' ? 'Squad' : '1v1'
   const when = t.startTime ? formatCardDate(t.startTime) : ''
   return (
     <li className="trow">
-      <div className="trow-art" data-game={t.game ?? 'none'} aria-hidden="true" />
+      <div className="trow-art" data-game={t.game ?? 'none'} aria-hidden="true">
+        {t.hasBanner && <BannerImg tournamentId={t.tournamentId} />}
+      </div>
       <div className="trow-main">
         <div className="trow-top">
           <h2 className="trow-name">

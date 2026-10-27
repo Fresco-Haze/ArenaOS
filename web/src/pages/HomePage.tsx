@@ -12,6 +12,7 @@ import EmptyState from '../components/EmptyState'
 import ErrorBanner from '../components/ErrorBanner'
 import LoadingBlock from '../components/LoadingBlock'
 import TournamentCard from '../components/TournamentCard'
+import BannerImg from '../components/BannerImg'
 
 // The backend has no "featured" concept: the four newest public
 // tournaments that are open for registration or running.
@@ -112,7 +113,9 @@ function UpcomingPanel() {
             const game = t.game && t.game !== 'Other' ? gameLabel[t.game] : null
             return (
               <li key={t.tournamentId} className="urow">
-                <div className="urow-art" data-game={t.game ?? 'none'} aria-hidden="true" />
+                <div className="urow-art" data-game={t.game ?? 'none'} aria-hidden="true">
+                  {t.hasBanner && <BannerImg tournamentId={t.tournamentId} />}
+                </div>
                 <div className="urow-main">
                   <Link to={`/tournaments/${t.tournamentId}`} className="urow-name">{t.name}</Link>
                   <p className="urow-sub">{game ? `${game} \u2022 ${mode}` : mode}</p>

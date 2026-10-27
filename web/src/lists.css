@@ -147,3 +147,6 @@
   .shell-tabbar .tab-link { font-size: 0.625rem; }
   .shell-tabbar .tab-link span { white-space: nowrap; }
 }
+
+/* v0.12 row banners: the picture fills the thumbnail */
+.trow-art { position: relative; overflow: hidden; }
