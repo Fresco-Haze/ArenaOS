@@ -1,21 +1,30 @@
 import { useState } from 'react'
-import type { FormEvent } from 'react'
+import type { ChangeEvent, FormEvent } from 'react'
 import { useNavigate } from 'react-router'
 import { ApiError } from '../api'
 import { useAuth } from '../auth/context'
-import { createTournament } from '../lib/tournamentActions'
+import { bumpBanner } from '../lib/banner'
+import { resizeBannerToJpeg } from '../lib/bannerImage'
+import { createTournament, uploadBanner } from '../lib/tournamentActions'
+import { formatKes } from '../lib/money'
 import DetailsFields from '../components/DetailsFields'
-import { deadlineError, emptyDetails, feeError, prizeError, toPayload } from '../lib/details'
+import { PLATFORMS, deadlineError, emptyDetails, feeError, prizeError, toPayload } from '../lib/details'
 import type { DetailsValues } from '../lib/details'
+import { formatLabel, gameLabel } from '../model'
 
-type Field = 'name' | 'organizer' | 'maxParticipants' | 'prize'
 type Format = 'SingleElimination' | 'DoubleElimination' | 'RoundRobin'
 
-function fieldOf(err: ApiError): Field | null {
+const STEPS = ['Basic info', 'Game & format', 'Settings', 'Review'] as const
+const LAST = STEPS.length - 1
+
+// Which step owns a field the server complains about (anything else is in Settings).
+const FIELD_STEP: Record<string, number> = {
+  name: 0, description: 0, game: 1, platform: 1, format: 1, maxParticipants: 1, participantMode: 1,
+}
+
+function fieldOf(err: ApiError): string | null {
   const d = err.details
-  if (d && typeof d === 'object' && 'field' in d && typeof d.field === 'string') {
-    return d.field as Field
-  }
+  if (d && typeof d === 'object' && 'field' in d && typeof d.field === 'string') return d.field
   return null
 }
 
@@ -43,16 +52,20 @@ export default function CreateTournamentPage() {
   const { user } = useAuth()
   const navigate = useNavigate()
 
+  const [step, setStep] = useState(0)
   const [name, setName] = useState('')
   const [visibility, setVisibility] = useState<'Public' | 'Private'>('Public')
   const [maxParticipants, setMaxParticipants] = useState('8')
-  const [fieldErrors, setFieldErrors] = useState<Partial<Record<Field, string>>>({})
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
+  const [stepProblem, setStepProblem] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [format, setFormat] = useState<Format>('SingleElimination')
   const [participantMode, setParticipantMode] = useState<'IndividualOnly' | 'SquadOnly'>('IndividualOnly')
   const [requireApproval, setRequireApproval] = useState(true)
   const [details, setDetails] = useState<DetailsValues>(emptyDetails)
+  const [bannerFile, setBannerFile] = useState<File | null>(null)
+  const [bannerNote, setBannerNote] = useState<string | null>(null)
 
   // ProtectedRoute guarantees this, but keep TypeScript honest.
   if (!user) return null
@@ -60,180 +73,316 @@ export default function CreateTournamentPage() {
   const unit = participantMode === 'SquadOnly' ? 'teams' : 'players'
   const matchLine = matchCountLine(format, Number(maxParticipants), unit)
 
-  async function onSubmit(e: FormEvent) {
-    e.preventDefault()
-    setError(null)
-    setFieldErrors({})
+  function stepError(i: number): string | null {
+    if (i === 0) return name.trim() === '' ? 'Enter a tournament name.' : null
+    if (i === 1) {
+      const n = Number(maxParticipants)
+      return Number.isInteger(n) && n >= 2 ? null : 'Maximum participants must be a whole number, at least 2.'
+    }
+    if (i === 2) return prizeError(details.prize) ?? feeError(details.entryFee) ?? deadlineError(details)
+    return null
+  }
 
-    if (prizeError(details.prize) || feeError(details.entryFee) || deadlineError(details)) return
+  function firstBadStep(upTo: number): number {
+    for (let i = 0; i < upTo; i++) if (stepError(i) !== null) return i
+    return -1
+  }
 
-    const parsedMax = Number(maxParticipants)
-    if (!Number.isFinite(parsedMax)) {
-      setFieldErrors({ maxParticipants: 'Enter a whole number' })
+  function goTo(i: number) {
+    setStepProblem(null)
+    if (i <= step) {
+      setStep(i)
       return
     }
+    const bad = firstBadStep(i)
+    if (bad >= 0) {
+      setStep(bad)
+      setStepProblem(stepError(bad))
+    } else {
+      setStep(i)
+    }
+  }
 
+  function onPickBanner(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    setBannerNote(null)
+    if (!file) {
+      setBannerFile(null)
+      return
+    }
+    if (!file.type.startsWith('image/')) {
+      setBannerNote('Choose an image file.')
+      e.target.value = ''
+      setBannerFile(null)
+      return
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setBannerNote('That image is too large (10 MB at most).')
+      e.target.value = ''
+      setBannerFile(null)
+      return
+    }
+    setBannerFile(file)
+  }
+
+  async function create() {
+    const bad = firstBadStep(3)
+    if (bad >= 0) {
+      setStep(bad)
+      setStepProblem(stepError(bad))
+      return
+    }
+    setError(null)
+    setFieldErrors({})
     setBusy(true)
     try {
       const res = await createTournament({
         name,
         organizer: username,
         visibility,
-        maxParticipants: parsedMax,
+        maxParticipants: Number(maxParticipants),
         thirdPlaceMatch: format === 'SingleElimination',
         format,
         participantMode,
         requireApproval: participantMode === 'IndividualOnly' && requireApproval,
         ...toPayload(details),
       })
+      if (bannerFile) {
+        try {
+          const blob = await resizeBannerToJpeg(bannerFile)
+          await uploadBanner(res.tournamentId, blob)
+          bumpBanner()
+        } catch {
+          // The tournament exists; the organizer can retry with "Edit banner" on its page.
+        }
+      }
       navigate(`/tournaments/${res.tournamentId}`)
     } catch (err) {
       setBusy(false)
       if (err instanceof ApiError) {
         const field = fieldOf(err)
-        if (field && field !== 'organizer') setFieldErrors({ [field]: err.message })
-        else setError(err.message)
+        if (field && field !== 'organizer') {
+          setFieldErrors({ [field]: err.message })
+          setStep(FIELD_STEP[field] ?? 2)
+        } else {
+          setError(err.message)
+        }
       } else {
         setError('Could not reach the server')
       }
     }
   }
 
+  function onSubmit(e: FormEvent) {
+    e.preventDefault()
+    if (step < LAST) {
+      goTo(step + 1)
+      return
+    }
+    void create()
+  }
+
+  const stepErrors = Object.entries(fieldErrors)
+    .filter(([f]) => (FIELD_STEP[f] ?? 2) === step)
+    .map(([, m]) => m)
+  const p = toPayload(details)
+  const platformLabel = PLATFORMS.find((x) => x.value === p.platform)?.label
+
   return (
     <>
       <h1>Create tournament</h1>
+      <ol className="create-steps" aria-label="Steps">
+        {STEPS.map((label, i) => (
+          <li key={label}>
+            <button
+              type="button"
+              className="create-step"
+              aria-current={i === step ? 'step' : undefined}
+              onClick={() => goTo(i)}
+            >
+              <span className="create-step-num">{i + 1}</span> {label}
+            </button>
+          </li>
+        ))}
+      </ol>
+
       <form onSubmit={onSubmit} className="form create-form">
-        <h2 className="form-section-title">Basic information</h2>
+        {stepProblem && <p role="alert" className="form-error">{stepProblem}</p>}
+        {stepErrors.map((m) => (
+          <p key={m} role="alert" className="form-error">{m}</p>
+        ))}
 
-        <label>
-          <span>Tournament name <span className="req" aria-hidden="true">*</span></span>
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="e.g. Rising Stars Cup"
-            autoFocus
-            required
-          />
-          {fieldErrors.name && (
-            <span role="alert" className="form-error">{fieldErrors.name}</span>
-          )}
-        </label>
-
-        <DetailsFields
-          values={details}
-          onChange={setDetails}
-          afterGame={
-            <>
-              <label>
-                Format
-                <select value={format} onChange={(e) => setFormat(e.target.value as Format)}>
-                  <option value="SingleElimination">Single elimination</option>
-                  <option value="DoubleElimination">Double elimination</option>
-                  <option value="RoundRobin">Round robin</option>
-                </select>
-              </label>
-              <p className="muted">{FORMAT_HINT[format]}</p>
-            </>
-          }
-        />
-        {fieldErrors.prize && (
-          <span role="alert" className="form-error">{fieldErrors.prize}</span>
-        )}
-
-        <h2 className="form-section-title">Participants and visibility</h2>
-
-        <fieldset>
-          <legend>Who is competing?</legend>
-          <label>
-            <input
-              type="radio"
-              name="participantMode"
-              checked={participantMode === 'IndividualOnly'}
-              onChange={() => setParticipantMode('IndividualOnly')}
-            />
-            Individual players
-          </label>
-          <label>
-            <input
-              type="radio"
-              name="participantMode"
-              checked={participantMode === 'SquadOnly'}
-              onChange={() => setParticipantMode('SquadOnly')}
-            />
-            Teams
-          </label>
-          <p className="muted">Can't be changed after the tournament is created.</p>
-        </fieldset>
-
-        <fieldset>
-          <legend>Visibility</legend>
-          <label>
-            <input
-              type="radio"
-              name="visibility"
-              checked={visibility === 'Public'}
-              onChange={() => setVisibility('Public')}
-            />
-            Public
-          </label>
-          <label>
-            <input
-              type="radio"
-              name="visibility"
-              checked={visibility === 'Private'}
-              onChange={() => setVisibility('Private')}
-            />
-            Private
-          </label>
-        </fieldset>
-
-        {participantMode === 'IndividualOnly' && (
-          <fieldset>
-            <legend>Joining</legend>
+        {step === 0 && (
+          <>
+            <h2 className="form-section-title">Basic information</h2>
             <label>
+              <span>Tournament name <span className="req" aria-hidden="true">*</span></span>
               <input
-                type="checkbox"
-                checked={requireApproval}
-                onChange={(e) => setRequireApproval(e.target.checked)}
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="e.g. Rising Stars Cup"
+                autoFocus
+                required
               />
-              Approve each join request
+            </label>
+            <DetailsFields values={details} onChange={setDetails} section="basic" />
+            <label>
+              Banner image (optional)
+              <input type="file" accept="image/*" onChange={onPickBanner} aria-label="Choose a banner image" />
             </label>
             <p className="muted">
-              {requireApproval
-                ? 'Players ask to join and you approve them, for example once they have paid.'
-                : 'Anyone who is signed in can join straight away.'}
+              Cropped to 16:9 and shrunk when the tournament is created. Without one, the game art is used.
             </p>
-          </fieldset>
+            {bannerFile && <p role="status">Selected: {bannerFile.name}</p>}
+            {bannerNote && <p role="alert" className="form-error">{bannerNote}</p>}
+          </>
         )}
 
-        <label>
-          Maximum participants
-          <input
-            type="number"
-            min={2}
-            value={maxParticipants}
-            onChange={(e) => setMaxParticipants(e.target.value)}
-            required
-          />
-          {fieldErrors.maxParticipants && (
-            <span role="alert" className="form-error">{fieldErrors.maxParticipants}</span>
-          )}
-        </label>
-        <p className="muted">
-          {format === 'SingleElimination'
-            ? `A third-place match is always played, so 1st to 4th are decided (needs 4 or more ${unit}).`
-            : format === 'DoubleElimination'
-            ? 'Double elimination decides the top four by itself.'
-            : 'Round robin ranks everyone by points, then goal difference, then goals scored.'}
-        </p>
-        {matchLine && <p className="muted">{matchLine}</p>}
+        {step === 1 && (
+          <>
+            <h2 className="form-section-title">Game and format</h2>
+            <DetailsFields
+              values={details}
+              onChange={setDetails}
+              section="game"
+              afterGame={
+                <>
+                  <label>
+                    Format
+                    <select value={format} onChange={(e) => setFormat(e.target.value as Format)}>
+                      <option value="SingleElimination">Single elimination</option>
+                      <option value="DoubleElimination">Double elimination</option>
+                      <option value="RoundRobin">Round robin</option>
+                    </select>
+                  </label>
+                  <p className="muted">{FORMAT_HINT[format]}</p>
+                </>
+              }
+            />
+            <fieldset>
+              <legend>Who is competing?</legend>
+              <label>
+                <input
+                  type="radio"
+                  name="participantMode"
+                  checked={participantMode === 'IndividualOnly'}
+                  onChange={() => setParticipantMode('IndividualOnly')}
+                />
+                Individual players
+              </label>
+              <label>
+                <input
+                  type="radio"
+                  name="participantMode"
+                  checked={participantMode === 'SquadOnly'}
+                  onChange={() => setParticipantMode('SquadOnly')}
+                />
+                Teams
+              </label>
+              <p className="muted">Can't be changed after the tournament is created.</p>
+            </fieldset>
+            <label>
+              Maximum participants
+              <input
+                type="number"
+                min={2}
+                value={maxParticipants}
+                onChange={(e) => setMaxParticipants(e.target.value)}
+                required
+              />
+            </label>
+            <p className="muted">
+              {format === 'SingleElimination'
+                ? `A third-place match is always played, so 1st to 4th are decided (needs 4 or more ${unit}).`
+                : format === 'DoubleElimination'
+                ? 'Double elimination decides the top four by itself.'
+                : 'Round robin ranks everyone by points, then goal difference, then goals scored.'}
+            </p>
+            {matchLine && <p className="muted">{matchLine}</p>}
+          </>
+        )}
+
+        {step === 2 && (
+          <>
+            <h2 className="form-section-title">Settings</h2>
+            <DetailsFields values={details} onChange={setDetails} section="settings" />
+            <fieldset>
+              <legend>Visibility</legend>
+              <label>
+                <input
+                  type="radio"
+                  name="visibility"
+                  checked={visibility === 'Public'}
+                  onChange={() => setVisibility('Public')}
+                />
+                Public
+              </label>
+              <label>
+                <input
+                  type="radio"
+                  name="visibility"
+                  checked={visibility === 'Private'}
+                  onChange={() => setVisibility('Private')}
+                />
+                Private
+              </label>
+            </fieldset>
+            {participantMode === 'IndividualOnly' && (
+              <fieldset>
+                <legend>Joining</legend>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={requireApproval}
+                    onChange={(e) => setRequireApproval(e.target.checked)}
+                  />
+                  Approve each join request
+                </label>
+                <p className="muted">
+                  {requireApproval
+                    ? 'Players ask to join and you approve them, for example once they have paid.'
+                    : 'Anyone who is signed in can join straight away.'}
+                </p>
+              </fieldset>
+            )}
+          </>
+        )}
+
+        {step === 3 && (
+          <>
+            <h2 className="form-section-title">Review</h2>
+            <dl className="create-review">
+              <dt>Name</dt><dd>{name.trim() || '-'}</dd>
+              <dt>Description</dt><dd>{p.description ?? '-'}</dd>
+              <dt>Banner</dt><dd>{bannerFile ? bannerFile.name : 'Game art'}</dd>
+              <dt>Game</dt><dd>{p.game ? gameLabel[p.game] : '-'}</dd>
+              <dt>Platform</dt><dd>{platformLabel ?? '-'}</dd>
+              <dt>Format</dt><dd>{formatLabel[format]}</dd>
+              <dt>Competing</dt><dd>{participantMode === 'SquadOnly' ? 'Teams' : 'Individual players'}, up to {maxParticipants}</dd>
+              <dt>Starts</dt><dd>{details.start ? details.start.replace('T', ' ') : '-'}</dd>
+              <dt>Registration deadline</dt><dd>{details.deadline ? details.deadline.replace('T', ' ') : '-'}</dd>
+              <dt>Prize pool</dt><dd>{p.prize != null ? formatKes(p.prize) : '-'}</dd>
+              <dt>Entry fee</dt><dd>{p.entryFee == null ? '-' : p.entryFee === 0 ? 'Free' : formatKes(p.entryFee)}</dd>
+              <dt>Rules</dt><dd className="create-review-rules">{p.rules ?? '-'}</dd>
+              <dt>Visibility</dt><dd>{visibility}</dd>
+              {participantMode === 'IndividualOnly' && (
+                <><dt>Joining</dt><dd>{requireApproval ? 'You approve each request' : 'Open to anyone signed in'}</dd></>
+              )}
+            </dl>
+          </>
+        )}
 
         {error && <p role="alert" className="form-error">{error}</p>}
         <div className="form-actions form-actions-full">
-          <button type="submit" className="btn-primary" disabled={busy}>
-            {busy ? 'Creating' : 'Create tournament'}
-          </button>
-          <button type="button" onClick={() => navigate('/me')}>Cancel</button>
+          {step < LAST ? (
+            <button type="submit" className="btn-primary">Next: {STEPS[step + 1]}</button>
+          ) : (
+            <button type="submit" className="btn-primary" disabled={busy}>
+              {busy ? 'Creating' : 'Create tournament'}
+            </button>
+          )}
+          {step > 0 && <button type="button" onClick={() => goTo(step - 1)} disabled={busy}>Back</button>}
+          <button type="button" onClick={() => navigate('/me')} disabled={busy}>Cancel</button>
         </div>
       </form>
     </>

@@ -117,3 +117,12 @@
   font-weight: 400;
   resize: vertical;
 }
+
+.create-steps { list-style: none; margin: 0 0 var(--space-4); padding: 0; display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.create-step { display: inline-flex; align-items: center; gap: var(--space-2); padding: 0.4rem 0.8rem; border-radius: 999px; cursor: pointer; }
+.create-step[aria-current='step'] { border-color: var(--accent); color: var(--accent); }
+.create-step-num { display: inline-grid; place-items: center; width: 1.4rem; height: 1.4rem; border-radius: 50%; border: 1px solid currentColor; font-size: 0.8rem; }
+.create-review { display: grid; grid-template-columns: minmax(8rem, 12rem) 1fr; gap: var(--space-2) var(--space-3); margin: 0; }
+.create-review dt { color: var(--muted, inherit); font-weight: 600; }
+.create-review dd { margin: 0; overflow-wrap: anywhere; }
+.create-review-rules { white-space: pre-wrap; }

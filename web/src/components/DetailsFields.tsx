@@ -9,15 +9,21 @@ function splitStart(v: string): { date: string; time: string } {
   return { date, time }
 }
 
+// 'all' shows everything (Edit details). The Create wizard shows one part per step.
+export type DetailsSection = 'all' | 'basic' | 'game' | 'settings'
+
 export default function DetailsFields({
   values,
   onChange,
   afterGame,
+  section = 'all',
 }: {
   values: DetailsValues
   onChange: (next: DetailsValues) => void
   afterGame?: ReactNode
+  section?: DetailsSection
 }) {
+  const show = (s: DetailsSection) => section === 'all' || section === s
   const { date, time } = splitStart(values.start)
   const dl = splitStart(values.deadline)
   const deadlineProblem = deadlineError(values)
@@ -43,96 +49,108 @@ export default function DetailsFields({
 
   return (
     <>
-      <label>
-        Game (optional)
-        <select value={values.game} onChange={(e) => onChange({ ...values, game: e.target.value })}>
-          <option value="">Not set</option>
-          {Game.options.map((g) => (
-            <option key={g} value={g}>{gameLabel[g]}</option>
-          ))}
-        </select>
-      </label>
-      {afterGame}
-      <div className="form-row-2">
+      {show('game') && (
         <label>
-          Start date (optional)
-          <input type="date" value={date} onChange={(e) => setStart(e.target.value, time)} />
+          Game (optional)
+          <select value={values.game} onChange={(e) => onChange({ ...values, game: e.target.value })}>
+            <option value="">Not set</option>
+            {Game.options.map((g) => (
+              <option key={g} value={g}>{gameLabel[g]}</option>
+            ))}
+          </select>
         </label>
+      )}
+      {show('game') && afterGame}
+      {show('settings') && (
+        <>
+          <div className="form-row-2">
+            <label>
+              Start date (optional)
+              <input type="date" value={date} onChange={(e) => setStart(e.target.value, time)} />
+            </label>
+            <label>
+              Start time
+              <input type="time" value={time} onChange={(e) => setStart(date, e.target.value)} />
+            </label>
+          </div>
+          <p className="muted">Uses this device&rsquo;s time zone. Everyone sees it in their own.</p>
+          <div className="form-row-2">
+            <label>
+              Registration deadline (optional)
+              <input type="date" value={dl.date} onChange={(e) => setDeadline(e.target.value, dl.time)} />
+            </label>
+            <label>
+              Deadline time
+              <input type="time" value={dl.time} onChange={(e) => setDeadline(dl.date, e.target.value)} />
+            </label>
+          </div>
+          {deadlineProblem && <span role="alert" className="form-error">{deadlineProblem}</span>}
+          <label>
+            Prize pool (optional)
+            <span className="kes-input">
+              <span className="kes-prefix" aria-hidden="true">KSh</span>
+              <input
+                inputMode="numeric"
+                value={values.prize}
+                placeholder="e.g. 50,000"
+                onChange={(e) => onChange({ ...values, prize: e.target.value })}
+              />
+            </span>
+            {prizeProblem && <span role="alert" className="form-error">{prizeProblem}</span>}
+          </label>
+          <label>
+            Entry fee (optional)
+            <span className="kes-input">
+              <span className="kes-prefix" aria-hidden="true">KSh</span>
+              <input
+                inputMode="numeric"
+                value={values.entryFee}
+                placeholder="0 for free"
+                onChange={(e) => onChange({ ...values, entryFee: e.target.value })}
+              />
+            </span>
+            {feeProblem && <span role="alert" className="form-error">{feeProblem}</span>}
+          </label>
+          <p className="muted">Shown to players only. ArenaOS does not collect payments, so you collect the fee yourself.</p>
+        </>
+      )}
+      {show('game') && (
         <label>
-          Start time
-          <input type="time" value={time} onChange={(e) => setStart(date, e.target.value)} />
+          Platform (optional)
+          <select value={values.platform} onChange={(e) => onChange({ ...values, platform: e.target.value })}>
+            <option value="">Not set</option>
+            {PLATFORMS.map((p) => (
+              <option key={p.value} value={p.value}>{p.label}</option>
+            ))}
+          </select>
         </label>
-      </div>
-      <p className="muted">Uses this device&rsquo;s time zone. Everyone sees it in their own.</p>
-      <div className="form-row-2">
+      )}
+      {show('basic') && (
         <label>
-          Registration deadline (optional)
-          <input type="date" value={dl.date} onChange={(e) => setDeadline(e.target.value, dl.time)} />
-        </label>
-        <label>
-          Deadline time
-          <input type="time" value={dl.time} onChange={(e) => setDeadline(dl.date, e.target.value)} />
-        </label>
-      </div>
-      {deadlineProblem && <span role="alert" className="form-error">{deadlineProblem}</span>}
-      <label>
-        Prize pool (optional)
-        <span className="kes-input">
-          <span className="kes-prefix" aria-hidden="true">KSh</span>
-          <input
-            inputMode="numeric"
-            value={values.prize}
-            placeholder="e.g. 50,000"
-            onChange={(e) => onChange({ ...values, prize: e.target.value })}
+          Description (optional)
+          <textarea
+            value={values.description}
+            maxLength={DESCRIPTION_MAX}
+            rows={4}
+            placeholder="Tell players about your tournament..."
+            onChange={(e) => onChange({ ...values, description: e.target.value })}
           />
-        </span>
-        {prizeProblem && <span role="alert" className="form-error">{prizeProblem}</span>}
-      </label>
-      <label>
-        Entry fee (optional)
-        <span className="kes-input">
-          <span className="kes-prefix" aria-hidden="true">KSh</span>
-          <input
-            inputMode="numeric"
-            value={values.entryFee}
-            placeholder="0 for free"
-            onChange={(e) => onChange({ ...values, entryFee: e.target.value })}
+          <span className="muted">{values.description.length}/{DESCRIPTION_MAX}</span>
+        </label>
+      )}
+      {show('settings') && (
+        <label>
+          Tournament rules (optional)
+          <textarea
+            value={values.rules}
+            maxLength={RULES_MAX}
+            rows={5}
+            placeholder="One rule per line"
+            onChange={(e) => onChange({ ...values, rules: e.target.value })}
           />
-        </span>
-        {feeProblem && <span role="alert" className="form-error">{feeProblem}</span>}
-      </label>
-      <p className="muted">Shown to players only. ArenaOS does not collect payments, so you collect the fee yourself.</p>
-      <label>
-        Platform (optional)
-        <select value={values.platform} onChange={(e) => onChange({ ...values, platform: e.target.value })}>
-          <option value="">Not set</option>
-          {PLATFORMS.map((p) => (
-            <option key={p.value} value={p.value}>{p.label}</option>
-          ))}
-        </select>
-      </label>
-      <label>
-        Description (optional)
-        <textarea
-          value={values.description}
-          maxLength={DESCRIPTION_MAX}
-          rows={4}
-          placeholder="Tell players about your tournament..."
-          onChange={(e) => onChange({ ...values, description: e.target.value })}
-        />
-        <span className="muted">{values.description.length}/{DESCRIPTION_MAX}</span>
-      </label>
-      <label>
-        Tournament rules (optional)
-        <textarea
-          value={values.rules}
-          maxLength={RULES_MAX}
-          rows={5}
-          placeholder="One rule per line"
-          onChange={(e) => onChange({ ...values, rules: e.target.value })}
-        />
-        <span className="muted">{values.rules.length}/{RULES_MAX}</span>
-      </label>
+          <span className="muted">{values.rules.length}/{RULES_MAX}</span>
+        </label>
+      )}
     </>
   )
 }
