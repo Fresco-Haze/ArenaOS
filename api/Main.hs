@@ -572,6 +572,7 @@ tournamentJsonCounted :: Int -> Tournament -> Value
 tournamentJsonCounted n t = object (("registeredCount" .= n) : tournamentPairs t)
 
 -- v0.12: the public list also says which tournaments have a banner picture.
+listWithBanners :: ListPublic.PublicFilter -> SQLiteM ([Tournament], [(TournamentId, Int)], [Bool])
 listWithBanners flt = do
   ts <- ListPublic.listPublicTournamentsFiltered flt
   counts <- Repo.countRegistrationsByTournament
@@ -581,6 +582,7 @@ listWithBanners flt = do
 tournamentJsonListed :: Int -> Bool -> Tournament -> Value
 tournamentJsonListed n has t = object (("registeredCount" .= n) : ("hasBanner" .= has) : tournamentPairs t)
 
+withBannerFlags :: [Tournament] -> SQLiteM [(Tournament, Bool)]
 withBannerFlags ts = mapM (\t -> (\b -> (t, b)) <$> Repo.hasBanner (tournamentId t)) ts
 
 tournamentJsonFlagged :: Bool -> Tournament -> Value
