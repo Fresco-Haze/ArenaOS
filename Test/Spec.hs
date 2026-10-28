@@ -9461,6 +9461,16 @@ publicFilterSpec = describe "Public list filtering (v0.12)" $ do
     plIds (LP.selectPublicFiltered (LP.defaultPublicFilter { LP.pfLimit = 3 }) plAll)
       `shouldBe` [60, 59, 58]
 
+  it "pages with an offset without repeating or skipping tournaments" $ do
+    let page n = plIds (LP.selectPublicFiltered (LP.defaultPublicFilter { LP.pfLimit = 20, LP.pfOffset = n }) plAll)
+    page 0  `shouldBe` [60, 59 .. 41]
+    page 20 `shouldBe` [40, 39 .. 21]
+    page 40 `shouldBe` [20, 19 .. 1]
+    page 60 `shouldBe` []
+
+  it "counts every match, not just the page" $
+    length (LP.selectPublicMatching (LP.defaultPublicFilter { LP.pfLimit = 5 }) plAll) `shouldBe` 60
+
   it "never shows Draft or Private tournaments, whatever the filters" $
     plIds (LP.selectPublicFiltered (LP.defaultPublicFilter { LP.pfQuery = Just "hidden" }) plHidden)
       `shouldBe` []

@@ -1,6 +1,8 @@
 module Application.UseCases.ListPublicTournaments
   ( listPublicTournaments
   , selectPublic
+  , selectPublicMatching
+  , listPublicTournamentsPage
   , PublicFilter(..)
   , defaultPublicFilter
   , selectPublicFiltered
@@ -26,14 +28,19 @@ data PublicFilter = PublicFilter
   , pfGame         :: Maybe Game
   , pfLimit        :: Int
   , pfUpcomingFrom :: Maybe UTCTime
+  , pfOffset       :: Int            -- skip this many matches (paging)
   } deriving (Eq, Show)
 
 defaultPublicFilter :: PublicFilter
-defaultPublicFilter = PublicFilter Nothing Nothing 50 Nothing
+defaultPublicFilter = PublicFilter Nothing Nothing 50 Nothing 0
 
 -- Pure selection: Public, past Draft, filtered, ordered, capped.
 selectPublicFiltered :: PublicFilter -> [Tournament] -> [Tournament]
-selectPublicFiltered f ts = take (pfLimit f) (ordered (filter keep ts))
+selectPublicFiltered f = take (pfLimit f) . drop (pfOffset f) . selectPublicMatching f
+
+-- Every public tournament that passes the filters, in order, with no paging.
+selectPublicMatching :: PublicFilter -> [Tournament] -> [Tournament]
+selectPublicMatching f ts = ordered (filter keep ts)
   where
     keep t = tournamentVisibility t == Public
           && tournamentState t /= Draft
@@ -63,3 +70,9 @@ listPublicTournaments = selectPublic 50 <$> Repo.listAllTournaments
 
 listPublicTournamentsFiltered :: TournamentRepository m => PublicFilter -> m [Tournament]
 listPublicTournamentsFiltered f = selectPublicFiltered f <$> Repo.listAllTournaments
+
+-- One page of results plus how many tournaments match in total.
+listPublicTournamentsPage :: TournamentRepository m => PublicFilter -> m ([Tournament], Int)
+listPublicTournamentsPage f = do
+  matching <- selectPublicMatching f <$> Repo.listAllTournaments
+  pure (take (pfLimit f) (drop (pfOffset f) matching), length matching)

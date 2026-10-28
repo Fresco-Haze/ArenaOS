@@ -572,12 +572,12 @@ tournamentJsonCounted :: Int -> Tournament -> Value
 tournamentJsonCounted n t = object (("registeredCount" .= n) : tournamentPairs t)
 
 -- v0.12: the public list also says which tournaments have a banner picture.
-listWithBanners :: ListPublic.PublicFilter -> SQLiteM ([Tournament], [(TournamentId, Int)], [Bool])
+listWithBanners :: ListPublic.PublicFilter -> SQLiteM ([Tournament], [(TournamentId, Int)], [Bool], Int)
 listWithBanners flt = do
-  ts <- ListPublic.listPublicTournamentsFiltered flt
+  (ts, total) <- ListPublic.listPublicTournamentsPage flt
   counts <- Repo.countRegistrationsByTournament
   flags <- mapM (Repo.hasBanner . tournamentId) ts
-  pure (ts, counts, flags)
+  pure (ts, counts, flags, total)
 
 tournamentJsonListed :: Int -> Bool -> Tournament -> Value
 tournamentJsonListed n has t = object (("registeredCount" .= n) : ("hasBanner" .= has) : tournamentPairs t)
@@ -625,8 +625,8 @@ instance FromJSON DetailsReq where
     pure (DetailsReq (TournamentDetails g st pz ds rd ef pf ru))
 
 -- ?q= (name contains), ?game= (eFootball | PubgMobile | CallOfDuty | Other), ?limit= (1..100)
-parseListFilter :: UTCTime -> Maybe Text -> Maybe Text -> Maybe Text -> Maybe Text -> Either ApiError ListPublic.PublicFilter
-parseListFilter now mq mg ml mu = do
+parseListFilter :: UTCTime -> Maybe Text -> Maybe Text -> Maybe Text -> Maybe Text -> Maybe Text -> Either ApiError ListPublic.PublicFilter
+parseListFilter now mq mg ml mu mo = do
   game <- case fmap T.strip mg of
     Nothing -> Right Nothing
     Just g
@@ -643,10 +643,17 @@ parseListFilter now mq mg ml mu = do
       | T.null u || u == "0" || u == "false" -> Right Nothing
       | u == "1" || u == "true"              -> Right (Just now)
       | otherwise                            -> Left (badParam "upcoming")
+  offset <- case fmap T.strip mo of
+    Nothing -> Right 0
+    Just o
+      | T.null o  -> Right 0
+      | otherwise -> case readMaybe (T.unpack o) of
+          Just n | n >= 0 -> Right (min 100000 n)
+          _               -> Left (badParam "offset")
   let q = case fmap T.strip mq of
         Just s | not (T.null s) -> Just (T.unpack s)
         _                       -> Nothing
-  Right (ListPublic.PublicFilter q game limit upcoming)
+  Right (ListPublic.PublicFilter q game limit upcoming offset)
   where
     badParam :: Text -> ApiError
     badParam f = ApiError status400 "VALIDATION_FAILED" "Invalid query parameter"
@@ -2207,13 +2214,14 @@ main = do
           gRaw <- (queryParamMaybe "game" :: ActionM (Maybe Text))
           lRaw <- (queryParamMaybe "limit" :: ActionM (Maybe Text))
           uRaw <- (queryParamMaybe "upcoming" :: ActionM (Maybe Text))
+          oRaw <- (queryParamMaybe "offset" :: ActionM (Maybe Text))
           nowT <- liftIO getCurrentTime
-          result <- case parseListFilter nowT qRaw gRaw lRaw uRaw of
+          result <- case parseListFilter nowT qRaw gRaw lRaw uRaw oRaw of
             Left apiErr -> pure (Left apiErr)
             Right flt   -> runUseCase lock (listWithBanners flt)
           case result of
             Left apiErr -> sendError apiErr
-            Right (ts, counts, flags) -> json (object ["tournaments" .= zipWith (\t b -> tournamentJsonListed (countFor counts t) b t) ts flags])
+            Right (ts, counts, flags, total) -> json (object ["tournaments" .= zipWith (\t b -> tournamentJsonListed (countFor counts t) b t) ts flags, "total" .= total])
 
     put "/tournaments/:id/name" $ do
       raw <- body
