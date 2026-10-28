@@ -43,17 +43,18 @@ playersFrom mq limitN facts =
   where
     matches s = maybe True (\q -> map toLower q `isInfixOf` map toLower (psName s)) mq
 
--- Exact (case-sensitive) name. Nothing when the player is in no public tournament.
+-- Name matched ignoring case ("A" and "a" are one player). Nothing when the
+-- player is in no public tournament.
 profileFrom :: String -> [PublicFact] -> Maybe PlayerProfile
 profileFrom name facts =
-  case filter ((== name) . psName) (summarize (map toPlayerFact facts)) of
+  case filter (same name . psName) (summarize (map toPlayerFact facts)) of
     []      -> Nothing
     (s : _) -> Just (PlayerProfile s history)
   where
+    same a b = map toLower a == map toLower b
     history = sortOn (\(t, _) -> negate (unTournamentId (T.tournamentId t)))
-                [ (pubTournament f, (pubChampion f >>= playerNameOf) == Just name)
-                | f <- facts, name `elem` mapMaybe playerNameOf (pubEntrants f) ]
-
+                [ (pubTournament f, maybe False (same name) (pubChampion f >>= playerNameOf))
+                | f <- facts, any (same name) (mapMaybe playerNameOf (pubEntrants f)) ]
 getPlayers
   :: (TournamentRepository m, BracketRepository m, MatchRepository m, RegistrationRepository m)
   => Maybe String -> Int -> m [PlayerSummary]
