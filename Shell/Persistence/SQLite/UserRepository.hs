@@ -45,7 +45,7 @@ instance UserRepository SQLiteM where
   findUserByUsername (Username uname) = do
     conn <- asks envConnection
     rows <- liftIO  (query conn
-      "SELECT id, username, email, password_hash, account_status FROM users WHERE username = ?"
+      "SELECT id, username, email, password_hash, account_status FROM users WHERE username = ? COLLATE NOCASE"
       (Only uname)
       :: IO [(Int, Text, Text, Text, String)])
     case rows of

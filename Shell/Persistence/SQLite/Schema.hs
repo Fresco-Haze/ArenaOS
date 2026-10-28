@@ -35,6 +35,7 @@ initializeSchema conn = do
   migratePasswordResets conn
   migrateTeamColumns conn
   migrateBanners conn
+  migrateUsernameIndex conn
 
 -- v0.12: CREATE TABLE IF NOT EXISTS never adds columns to an existing
 -- database, so add any missing tournament columns here. Safe on every start.
@@ -107,6 +108,11 @@ migrateBanners :: Connection -> IO ()
 migrateBanners conn =
   execute_ conn "CREATE TABLE IF NOT EXISTS tournament_banners (tournament_id INTEGER PRIMARY KEY REFERENCES tournaments(id), image BLOB NOT NULL, updated_at TEXT NOT NULL)"
 
+-- v0.12: usernames are unique ignoring case ("Jae" and "jae" are one name).
+-- Fails loudly if two existing users already differ only by case.
+migrateUsernameIndex :: Connection -> IO ()
+migrateUsernameIndex conn =
+  execute_ conn "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_nocase ON users(username COLLATE NOCASE)"
 statements :: [Query]
 statements =
   [ "CREATE TABLE IF NOT EXISTS players ( \
