@@ -15,6 +15,7 @@ module Application.UseCases.RegisterParticipant
   ) where
 
 import Data.Bifunctor (first)
+import Data.Char (toLower)
 import Data.Time (UTCTime)
 import qualified Data.Text as T
 import Domain.User (Username(..), User(username, userId))
@@ -96,7 +97,7 @@ registerParticipantChecked caller tid participant =
       Left err -> pure (Left err)
       Right () -> do
         regs <- Repo.listRegistrations tid
-        if participant `elem` map registrationParticipant regs
+        if any (sameParticipant participant . registrationParticipant) regs
           then pure (Left AlreadyRegistered)
           else if length regs >= tournamentMaxParticipants tournament
             then pure (Left CapacityReached)
@@ -154,7 +155,7 @@ joinTournament caller tid =
             case existing of
               Just _ -> pure (Left JoinAlreadyJoined)
               Nothing
-                | participant `elem` map registrationParticipant regs ->
+                | any (sameParticipant participant . registrationParticipant) regs ->
                     pure (Left JoinNameTaken)
                 | length regs >= tournamentMaxParticipants tournament ->
                     pure (Left JoinFull)
@@ -232,11 +233,11 @@ removeParticipant caller tid participant =
       Left e -> pure (Left e)
       Right () -> do
         regs <- Repo.listRegistrations tid
-        case filter ((== participant) . registrationParticipant) regs of
+        case filter (sameParticipant participant . registrationParticipant) regs of
           []      -> pure (Left RemoveNotRegistered)
           (r : _) -> do
             target <- if tournamentRequireApproval tournament
-                        then accountBehind tid participant (registrationId r)
+                        then accountBehind tid (registrationParticipant r) (registrationId r)
                         else pure Nothing
             Repo.deleteRegistration (registrationId r)
             forM_ target (\u -> Repo.saveJoinRequest tid u JoinDeclined)
@@ -301,7 +302,7 @@ joinTournamentAsTeam now caller tid teamNameStr =
                 case existing of
                   Just _ -> pure (Left JoinTeamAlreadyJoined)
                   Nothing
-                    | participant `elem` map registrationParticipant regs ->
+                    | any (sameParticipant participant . registrationParticipant) regs ->
                         pure (Left JoinTeamAlreadyRegistered)
                     | length regs >= tournamentMaxParticipants tournament ->
                         pure (Left JoinTeamFull)
@@ -320,3 +321,8 @@ joinTournamentAsTeam now caller tid teamNameStr =
       case tournamentRegistrationDeadline t of
         Just d | now > d -> Left JoinTeamDeadlinePassed
         _                -> Right ()
+
+-- Individual players are the same when their names differ only by case.
+sameParticipant (Individual (Player (PlayerName a))) (Individual (Player (PlayerName b))) =
+  map toLower a == map toLower b
+sameParticipant a b = a == b

@@ -19,10 +19,15 @@ instance ParticipantRepository SQLiteM where
     savePlayer :: Player -> SQLiteM ()
     savePlayer (Player (PlayerName pname)) = do
         conn <- asks envConnection
-        liftIO $ execute conn
-          "INSERT INTO players (name) VALUES (?) \
-          \ON CONFLICT(name) DO UPDATE SET name = excluded.name"
-          (Only pname)
+        existing <- liftIO (query conn
+          "SELECT 1 FROM players WHERE name = ? COLLATE NOCASE LIMIT 1"
+          (Only pname) :: IO [Only Int])
+        case existing of
+            (_ : _) -> pure ()
+            []      -> liftIO $ execute conn
+              "INSERT INTO players (name) VALUES (?) \
+              \ON CONFLICT(name) DO UPDATE SET name = excluded.name"
+              (Only pname)
 
     getTeam :: TeamName -> SQLiteM Team
     getTeam (TeamName tname) = do
@@ -50,19 +55,14 @@ instance ParticipantRepository SQLiteM where
     getPlayer :: PlayerName -> SQLiteM Player
     getPlayer (PlayerName pname) = do
         conn <- asks envConnection
-        let sql = "SELECT name FROM players WHERE name = ?"
-        rows <- liftIO (query conn sql (Only pname) :: IO [Only String])
+        let sql = "SELECT name FROM players WHERE name = ? COLLATE NOCASE ORDER BY (name = ?) DESC, id LIMIT 1"
+        rows <- liftIO (query conn sql (pname, pname) :: IO [Only String])
         case rows of
-            [Only n] ->
+            (Only n : _) ->
                 pure (Player (PlayerName n))
             [] ->
                 liftIO $
                     throwIO (NotFound ("Player not found: " ++ pname))
-            _ ->
-                liftIO $
-                    throwIO
-                      (StorageFailure
-                        "players.name is UNIQUE but multiple rows were returned")
 
     deletePlayer :: PlayerName -> SQLiteM ()
     deletePlayer (PlayerName pname) = do
@@ -201,7 +201,7 @@ getPlayerIdByName :: PlayerName -> SQLiteM Int
 getPlayerIdByName (PlayerName pname) = do
     conn <- asks envConnection
     rows <- liftIO $ query conn
-      "SELECT id FROM players WHERE name = ?" (Only pname)
+      "SELECT id FROM players WHERE name = ? COLLATE NOCASE ORDER BY (name = ?) DESC, id LIMIT 1" (pname, pname)
     case rows of
         (Only pid : _) -> pure pid
         []             -> liftIO $ throwIO (NotFound ("player: " <> pname))

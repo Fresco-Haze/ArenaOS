@@ -23,7 +23,7 @@ lookupParticipantId participant = do
     case participant of
         Individual player -> do
             let PlayerName pname = playerName player
-            pRows <- liftIO (query conn "SELECT id FROM players WHERE name = ?" (Only pname) :: IO [Only Int64])
+            pRows <- liftIO (query conn "SELECT id FROM players WHERE name = ? COLLATE NOCASE ORDER BY (name = ?) DESC, id LIMIT 1" (pname, pname) :: IO [Only Int64])
             case pRows of
                 [Only pid] -> findIndividual conn pid
                 []          -> liftIO $ throwIO $ NotFound ("Player not found in storage: " ++ pname)

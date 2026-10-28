@@ -16,6 +16,7 @@ module Application.UseCases.JoinRequests
 
 import Control.Monad (unless, forM_)
 import Data.Bifunctor (bimap, first)
+import Data.Char (toLower)
 import qualified Data.Text as T
 import Data.Time (UTCTime)
 
@@ -186,7 +187,7 @@ approveJoinRequest caller tid target =
             case existing of
               Just _ -> pure (Left ApproveAlreadyJoined)
               Nothing
-                | participant `elem` map registrationParticipant regs ->
+                | any (sameParticipant participant . registrationParticipant) regs ->
                     pure (Left ApproveNameTaken)
                 | length regs >= tournamentMaxParticipants tournament ->
                     pure (Left ApproveFull)
@@ -258,3 +259,8 @@ listJoinRequestsForOwner caller tid = do
     toEntry (u, st) = do
       mUser <- Repo.findUserById u
       pure (fmap (\usr -> JoinRequestEntry u (unUsername (username usr)) st) mUser)
+
+-- Individual players are the same when their names differ only by case.
+sameParticipant (Individual (Player (PlayerName a))) (Individual (Player (PlayerName b))) =
+  map toLower a == map toLower b
+sameParticipant a b = a == b
