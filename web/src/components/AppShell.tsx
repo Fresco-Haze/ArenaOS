@@ -16,8 +16,6 @@ const ICONS = {
   games: 'M7 8h10a4 4 0 0 1 4 4v1a3 3 0 0 1-5.2 2L14 13h-4l-1.8 2A3 3 0 0 1 3 13v-1a4 4 0 0 1 4-4zM8 10.5v3M6.5 12h3',
   players: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21c0-4 4-6 8-6s8 2 8 6',
   rankings: 'M5 20V10M12 20V4M19 20v-7',
-  news: 'M5 4h11v16H5zM16 8h3v10a2 2 0 0 1-2 2M8 8h5M8 12h5M8 16h3',
-  store: 'M4 8h16l-1 4H5zM6 12v8h12v-8M10 20v-5h4v5',
   plus: 'M12 5v14M5 12h14',
   search: 'M11 18a7 7 0 1 1 0-14 7 7 0 0 1 0 14zM20 20l-4-4',
   chevron: 'M6 9l6 6 6-6',
@@ -262,18 +260,6 @@ function SideLink({ to, icon, end, children }: { to: string; icon: IconName; end
   )
 }
 
-function SoonItem({ icon, children }: { icon: IconName; children: ReactNode }) {
-  return (
-    <li>
-      <span className="side-link side-soon" aria-disabled="true">
-        <Icon name={icon} />
-        <span>{children}</span>
-        <span className="soon-tag">Soon</span>
-      </span>
-    </li>
-  )
-}
-
 function SideNav() {
   const { user } = useAuth()
   return (
@@ -286,12 +272,10 @@ function SideNav() {
           <SideLink to="/teams/new" icon="teams">Teams</SideLink>
         </ul>
         <hr className="side-rule" />
-        <ul className="side-list" aria-label="Coming soon">
+        <ul className="side-list" aria-label="Explore">
           <SideLink to="/games" icon="games">Games</SideLink>
           <SideLink to="/players" icon="players">Players</SideLink>
           <SideLink to="/rankings" icon="rankings">Rankings</SideLink>
-          <SoonItem icon="news">News</SoonItem>
-          <SoonItem icon="store">Store</SoonItem>
         </ul>
       </nav>
       <section aria-labelledby="quick-actions-heading">
