@@ -4,6 +4,7 @@ module Application.UseCases.GetRankings
   , tournamentFacts
   , PublicFact(..)
   , loadPublicFacts
+  , loadMatchScores
   , rankingsFrom
   ) where
 
@@ -14,16 +15,18 @@ import qualified Domain.Tournament as T
 import Domain.Participant (Participant)
 import Domain.Registration (registrationParticipant)
 
-import Engine.Champion (matchOutcomeWinner, tournamentChampion)
+import Engine.Champion (matchOutcomeWinner, tournamentChampionWith)
+import Engine.Standings (MatchScores)
+import Domain.Scoreable (unEFootballScore)
 import Engine.Rankings (RankingEntry, computeRankings)
 
-import Shell.Persistence.Port (TournamentRepository, BracketRepository, MatchRepository, RegistrationRepository)
+import Shell.Persistence.Port (TournamentRepository, BracketRepository, MatchRepository, RegistrationRepository, EFootballScoreRepository)
 import qualified Shell.Persistence.Port as Repo
 
 -- Public tournaments past Draft, not cancelled, optionally of one game.
 -- Computed on read, never stored, so corrections and reopenings are always reflected.
 getRankings
-  :: (TournamentRepository m, BracketRepository m, MatchRepository m)
+  :: (TournamentRepository m, BracketRepository m, MatchRepository m, EFootballScoreRepository m)
   => Maybe T.Game
   -> Int
   -> m [RankingEntry]
@@ -40,17 +43,20 @@ counted mGame t =
     && maybe True (\g -> T.tournamentGame t == Just g) mGame
 
 tournamentFacts
-  :: (BracketRepository m, MatchRepository m)
+  :: (BracketRepository m, MatchRepository m, EFootballScoreRepository m)
   => T.Tournament -> m [(Maybe Participant, [Participant])]
 tournamentFacts t = case T.tournamentBracket t of
   Nothing  -> pure []
   Just bid -> do
     (bracket, nodes) <- Repo.getBracket bid
     matches <- Repo.listMatchesForBracket bid
+    scores <- if T.tournamentFormat t == T.RoundRobin && T.tournamentState t == T.Completed
+                then loadMatchScores matches
+                else pure []
     let winners = mapMaybe completedWinner matches
         champ
           | T.tournamentState t == T.Completed =
-              tournamentChampion (T.tournamentFormat t) bracket nodes matches
+              tournamentChampionWith scores (T.tournamentFormat t) bracket nodes matches
           | otherwise = Nothing
     pure [(champ, winners)]
 
@@ -59,6 +65,11 @@ completedWinner m
   | M.matchStatus m == M.Completed = matchOutcomeWinner m
   | otherwise                      = Nothing
 
+-- Goals per match, read the same way the round robin table reads them.
+loadMatchScores :: EFootballScoreRepository m => [M.Match] -> m MatchScores
+loadMatchScores ms = do
+  rows <- mapM (\m -> fmap ((,) (M.matchId m)) <$> Repo.getEFootballScore (M.matchId m)) ms
+  pure [ (mid, (unEFootballScore a, unEFootballScore b)) | Just (mid, (a, b)) <- rows ]
 -- Everything the rankings and the players pages need, per public tournament.
 -- Loading it is the expensive part, so the API keeps one copy for a minute.
 data PublicFact = PublicFact
@@ -69,7 +80,7 @@ data PublicFact = PublicFact
   }
 
 loadPublicFacts
-  :: (TournamentRepository m, BracketRepository m, MatchRepository m, RegistrationRepository m)
+  :: (TournamentRepository m, BracketRepository m, MatchRepository m, RegistrationRepository m, EFootballScoreRepository m)
   => m [PublicFact]
 loadPublicFacts = do
   ts <- Repo.listAllTournaments

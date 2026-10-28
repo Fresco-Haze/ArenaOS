@@ -11,9 +11,10 @@ import Data.Ord (comparing)
 import Domain.Ids (UserId)
 import qualified Domain.Match as M
 import Domain.Registration (registrationParticipant)
-import Domain.Tournament (Tournament(..), TournamentState(InProgress, Paused, Completed))
-import Engine.Champion (tournamentChampion)
-import Shell.Persistence.Port (TournamentRepository, RegistrationRepository, MatchRepository, BracketRepository)
+import Domain.Tournament (Tournament(..), TournamentFormat(RoundRobin), TournamentState(InProgress, Paused, Completed))
+import Engine.Champion (tournamentChampionWith)
+import Application.UseCases.GetRankings (loadMatchScores)
+import Shell.Persistence.Port (TournamentRepository, RegistrationRepository, MatchRepository, BracketRepository, EFootballScoreRepository)
 import qualified Shell.Persistence.Port as Repo
 
 listMyTournaments :: TournamentRepository m => UserId -> m [Tournament]
@@ -28,7 +29,7 @@ data MatchSummary = MatchSummary
   }
 
 myMatchSummary
-  :: (TournamentRepository m, RegistrationRepository m, MatchRepository m, BracketRepository m)
+  :: (TournamentRepository m, RegistrationRepository m, MatchRepository m, BracketRepository m, EFootballScoreRepository m)
   => UserId
   -> m MatchSummary
 myMatchSummary uid = do
@@ -57,7 +58,8 @@ myMatchSummary uid = do
           champ <- if tournamentState t == Completed
                      then do
                        (br, nodes) <- Repo.getBracket bid
-                       pure (tournamentChampion (tournamentFormat t) br nodes ms)
+                       scores <- if tournamentFormat t == RoundRobin then loadMatchScores ms else pure []
+                       pure (tournamentChampionWith scores (tournamentFormat t) br nodes ms)
                      else pure Nothing
           pure (nextOnes, if champ == Just me then 1 else 0)
         _ -> pure ([], 0)

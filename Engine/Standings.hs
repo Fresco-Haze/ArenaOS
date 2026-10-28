@@ -4,6 +4,7 @@ module Engine.Standings
   , computeStandings
   , computeStandingsWith
   , standingGoalDifference
+  , tableLeader
   ) where
 
 import Data.List (nub, sortBy, groupBy)
@@ -79,3 +80,24 @@ computeStandingsWith scores matches = concatMap resolveTiedGroup groupedByKey
 -- | Standings without goals (every goal field is 0).
 computeStandings :: [Match] -> [Standing]
 computeStandings = computeStandingsWith []
+
+-- | The participant alone at the top of the table, or Nothing when the top is
+-- still tied after every tiebreaker (including the head-to-head pass).
+tableLeader :: MatchScores -> [Match] -> Maybe Participant
+tableLeader scores matches =
+  case computeStandingsWith scores matches of
+    []       -> Nothing
+    (s : ss) ->
+      let sameKey x = standingPoints x == standingPoints s
+                   && standingGoalDifference x == standingGoalDifference s
+                   && standingGoalsFor x == standingGoalsFor s
+          top = s : takeWhile sameKey ss
+          members = map standingParticipant top
+          miniMatches = filter (\m -> matchCompetitorA m `elem` members && matchCompetitorB m `elem` members) matches
+          miniPoints p = sum (map (pointsForOutcome p) (participantMatches p miniMatches))
+          best = maximum (map miniPoints members)
+      in case top of
+           [_] -> Just (standingParticipant s)
+           _   -> case [ p | p <- members, miniPoints p == best ] of
+                    [p] -> Just p
+                    _   -> Nothing

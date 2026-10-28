@@ -8,6 +8,7 @@ module Engine.Champion
   , findChampionMatchDoubleElim
   , matchOutcomeWinner
   , tournamentChampion
+  , tournamentChampionWith
   ) where
 
 import Data.List (find, maximumBy)
@@ -17,6 +18,7 @@ import Domain.Bracket (Bracket(..), BracketNode(..), BracketNodeId, MatchSlot(..
 import Domain.Match (Match(..), MatchStatus(..), MatchOutcome(..))
 import Domain.Participant (Participant)
 import Domain.Tournament (TournamentFormat(..))
+import Engine.Standings (MatchScores, tableLeader)
 
 -- The champion of a finished bracket tournament. Round robin has no single
 -- champion here: a tie at the top of the table is not resolved by Standings.
@@ -29,6 +31,13 @@ tournamentChampion _ bracket nodes matches =
     _ ->
       findChampionMatch (bracketThirdPlaceNodeId bracket) nodes matches >>= matchOutcomeWinner
 
+-- Like tournamentChampion, but a round robin is decided by its table: the
+-- player alone at the top wins. A top that is still tied after every
+-- tiebreaker has no champion. The caller only asks once the tournament is
+-- Completed.
+tournamentChampionWith :: MatchScores -> TournamentFormat -> Bracket -> [BracketNode] -> [Match] -> Maybe Participant
+tournamentChampionWith scores RoundRobin _ _ matches = tableLeader scores matches
+tournamentChampionWith _ fmt bracket nodes matches   = tournamentChampion fmt bracket nodes matches
 findChampionMatchDoubleElim
   :: BracketNodeId -> Maybe BracketNodeId -> [BracketNode] -> [Match] -> Maybe Match
 findChampionMatchDoubleElim gf1Id mResetId nodes matches = do

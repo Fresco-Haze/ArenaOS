@@ -18,7 +18,7 @@ import Application.UseCases.GetRankings (PublicFact(..), loadPublicFacts)
 import Engine.Players (PlayerFact(..), PlayerSummary(..), summarize)
 
 import Shell.Persistence.Port
-  ( TournamentRepository, BracketRepository, MatchRepository, RegistrationRepository )
+  ( TournamentRepository, BracketRepository, MatchRepository, RegistrationRepository, EFootballScoreRepository )
 
 data PlayerProfile = PlayerProfile
   { ppSummary :: PlayerSummary
@@ -56,11 +56,11 @@ profileFrom name facts =
                 [ (pubTournament f, maybe False (same name) (pubChampion f >>= playerNameOf))
                 | f <- facts, any (same name) (mapMaybe playerNameOf (pubEntrants f)) ]
 getPlayers
-  :: (TournamentRepository m, BracketRepository m, MatchRepository m, RegistrationRepository m)
+  :: (TournamentRepository m, BracketRepository m, MatchRepository m, RegistrationRepository m, EFootballScoreRepository m)
   => Maybe String -> Int -> m [PlayerSummary]
 getPlayers mq limitN = playersFrom mq limitN <$> loadPublicFacts
 
 getPlayerProfile
-  :: (TournamentRepository m, BracketRepository m, MatchRepository m, RegistrationRepository m)
+  :: (TournamentRepository m, BracketRepository m, MatchRepository m, RegistrationRepository m, EFootballScoreRepository m)
   => String -> m (Maybe PlayerProfile)
 getPlayerProfile name = profileFrom name <$> loadPublicFacts
