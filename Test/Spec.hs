@@ -3505,6 +3505,40 @@ spec = before_ resetTestDb $ do
           outcome `shouldBe` Left (UnsupportedFormatForCorrection RoundRobin)
           matchOutcome matchAfter `shouldBe` matchOutcome matchBefore
 
+  describe "Engine.Standings.tableLeader (pure)" $ do
+    let pa = Individual (Player (PlayerName "A"))
+        pb = Individual (Player (PlayerName "B"))
+        pc = Individual (Player (PlayerName "C"))
+        pd = Individual (Player (PlayerName "D"))
+        mk i cA cB outcome = Match
+          { matchId = MatchId i, matchTournament = TournamentId 0
+          , matchBracket = BracketId 0, matchBracketNode = BracketNodeId (fromIntegral i)
+          , matchCompetitorA = cA, matchCompetitorB = cB
+          , matchStatus = Match.Completed, matchOutcome = Just outcome
+          , matchScheduledStart = Nothing
+          }
+
+    it "returns the player alone at the top" $
+      Standings.tableLeader [] [ mk 1 pa pb (Winner pa), mk 2 pa pc (Winner pa), mk 3 pb pc (Winner pb) ]
+        `shouldBe` Just pa
+
+    it "has no leader when the top is a perfect cycle" $
+      Standings.tableLeader [] [ mk 1 pa pb (Winner pa), mk 2 pb pc (Winner pb), mk 3 pc pa (Winner pc) ]
+        `shouldBe` Nothing
+
+    it "breaks a tie on points at the top by head-to-head" $
+      Standings.tableLeader []
+        [ mk 1 pa pb (Winner pa), mk 2 pa pc (Winner pa), mk 3 pa pd (Winner pd)
+        , mk 4 pb pc (Winner pb), mk 5 pb pd (Winner pb), mk 6 pc pd (Winner pc) ]
+        `shouldBe` Just pa
+
+    it "lets goal difference decide when points are level" $
+      Standings.tableLeader [ (MatchId 1, (3, 0)), (MatchId 2, (1, 0)), (MatchId 3, (1, 0)) ]
+        [ mk 1 pa pb (Winner pa), mk 2 pb pc (Winner pb), mk 3 pc pa (Winner pc) ]
+        `shouldBe` Just pa
+
+    it "has no leader without matches" $
+      Standings.tableLeader [] [] `shouldBe` Nothing
   describe "Engine.Standings.computeStandings (pure)" $ do
 
     it "breaks two separate 2-way ties via mini-league head-to-head (n=4)" $ do
