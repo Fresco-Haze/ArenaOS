@@ -135,7 +135,7 @@ export const JoinRequestRow = z.object({
 export type JoinRequestRow = z.infer<typeof JoinRequestRow>
 export const JoinRequestList = z.object({ requests: z.array(JoinRequestRow) })
 
-export const TournamentList = z.object({ tournaments: z.array(Tournament) })
+export const TournamentList = z.object({ tournaments: z.array(Tournament), total: z.number().optional() })
 
 export const ActivityItem = z.object({
   tournamentId: z.number(),

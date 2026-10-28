@@ -1,18 +1,20 @@
+import { useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
+import { api, ApiError } from '../api'
 import { useApi } from '../hooks/useApi'
 import { Game, TournamentList, gameLabel } from '../model'
+import type { Tournament } from '../model'
 import EmptyState from '../components/EmptyState'
 import ErrorBanner from '../components/ErrorBanner'
 import LoadingBlock from '../components/LoadingBlock'
 import PageHeader from '../components/PageHeader'
 import TournamentCard from '../components/TournamentCard'
 
-const SERVER_CAP = 50
-
-function query(q: string, game: string): string {
+function query(q: string, game: string, offset = 0): string {
   const p = new URLSearchParams()
   if (q) p.set('q', q)
   if (game) p.set('game', game)
+  if (offset > 0) p.set('offset', String(offset))
   return p.toString()
 }
 
@@ -22,9 +24,6 @@ export default function TournamentsPage() {
   const parsed = Game.safeParse(params.get('game'))
   const game = parsed.success ? parsed.data : ''
   const qs = query(q, game)
-  const list = useApi(qs ? `/tournaments?${qs}` : '/tournaments', TournamentList, true)
-  const items = list.data ? list.data.tournaments : null
-  const filtered = q !== '' || game !== ''
   const href = (g: string) => {
     const s = query(q, g)
     return s ? `/tournaments?${s}` : '/tournaments'
@@ -43,11 +42,48 @@ export default function TournamentsPage() {
           </Link>
         ))}
       </nav>
+      {/* key = the filters, so changing them starts again from page one */}
+      <Results key={qs} q={q} game={game} gameName={game ? gameLabel[game] : null} qs={qs} />
+    </>
+  )
+}
+
+function Results({ q, game, gameName, qs }: { q: string; game: string; gameName: string | null; qs: string }) {
+  const list = useApi(qs ? `/tournaments?${qs}` : '/tournaments', TournamentList, true)
+  const [more, setMore] = useState<Tournament[]>([])
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [moreError, setMoreError] = useState<string | null>(null)
+
+  const first = list.data ? list.data.tournaments : null
+  const items = first ? [...first, ...more] : null
+  const total = list.data?.total ?? null
+  const filtered = q !== '' || game !== ''
+  const count = items ? (total ?? items.length) : 0
+
+  async function loadMore() {
+    if (!items) return
+    setLoadingMore(true)
+    setMoreError(null)
+    try {
+      const next = await api(`/tournaments?${query(q, game, items.length)}`, TournamentList, { retryAnonymously: true })
+      setMore((prev) => {
+        const seen = new Set([...(first ?? []), ...prev].map((t) => t.tournamentId))
+        return [...prev, ...next.tournaments.filter((t) => !seen.has(t.tournamentId))]
+      })
+    } catch (e) {
+      setMoreError(e instanceof ApiError ? e.message : 'Could not reach the server')
+    } finally {
+      setLoadingMore(false)
+    }
+  }
+
+  return (
+    <>
       {filtered && items && (
         <p className="muted">
-          {items.length} {items.length === 1 ? 'result' : 'results'}
+          {count} {count === 1 ? 'result' : 'results'}
           {q && <> for &ldquo;{q}&rdquo;</>}
-          {game && <> in {gameLabel[game]}</>}
+          {gameName && <> in {gameName}</>}
         </p>
       )}
       {list.error ? (
@@ -74,8 +110,14 @@ export default function TournamentsPage() {
               <TournamentCard key={t.tournamentId} tournament={t} showOrganizer />
             ))}
           </ul>
-          {items.length >= SERVER_CAP && (
-            <p className="muted">Showing the newest {SERVER_CAP}. Search or pick a game to narrow it down.</p>
+          {total !== null && items.length < total && (
+            <div className="load-more">
+              <p className="muted">Showing {items.length} of {total}</p>
+              <button type="button" onClick={() => void loadMore()} disabled={loadingMore}>
+                {loadingMore ? 'Loading' : 'Load more'}
+              </button>
+              {moreError && <p role="alert" className="form-error">{moreError}</p>}
+            </div>
           )}
         </>
       )}
