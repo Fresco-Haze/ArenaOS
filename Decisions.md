@@ -1,16 +1,16 @@
-# ArenaOS — Decisions
+# SweatLobby — Decisions
 
-This document records the architectural and design decisions behind ArenaOS as it stands at v1.0 — what was chosen, and why. It is not a change log or a session transcript; entries here are locked decisions, verified against real code, not proposals or abandoned ideas.
+This document records the architectural and design decisions behind SweatLobby as it stands at v1.0 — what was chosen, and why. It is not a change log or a session transcript; entries here are locked decisions, verified against real code, not proposals or abandoned ideas.
 
 ---
 
 ## 1. Architecture
 
-ArenaOS is built as four pieces sharing one Haskell core, only two of which are independently deployable:
+SweatLobby is built as four pieces sharing one Haskell core, only two of which are independently deployable:
 
 - **Haskell core** (`Domain` → `Engine` → `Application` → `Shell`) — the tournament engine itself: lifecycle, bracket generation, match advancement, auth, persistence. Not deployed on its own; consumed by both the CLI and the API. Dependencies point inward only; nothing in `Domain` or `Engine` knows about SQLite, HTTP, or the CLI.
 - **CLI** (`app/Main.hs`) — a thin command dispatcher over the same use cases the API uses.
-- **HTTP API** (`api/Main.hs`, Scotty + Aeson) — a second, independent Shell-layer consumer of the same `Application` use cases as the CLI, deployable on its own. Chosen over a heavier framework because ArenaOS's API surface is a fixed, known set of routes with no need for the machinery a larger framework brings.
+- **HTTP API** (`api/Main.hs`, Scotty + Aeson) — a second, independent Shell-layer consumer of the same `Application` use cases as the CLI, deployable on its own. Chosen over a heavier framework because SweatLobby's API surface is a fixed, known set of routes with no need for the machinery a larger framework brings.
 - **Frontend** (`web/`, React + TypeScript + Vite) — a separate, independently deployable application, communicating with the API exclusively over JSON. It has no access to and does not duplicate any business logic; every rule the frontend appears to enforce (state gating, capacity, visibility) is enforced again, authoritatively, by the API.
 
 ## 2. Authentication
@@ -61,7 +61,7 @@ ArenaOS is built as four pieces sharing one Haskell core, only two of which are 
 
 - Player self-registration, player accounts, and any `User`-to-`Player` link
 - Server-push (SSE/WebSockets) — v1 uses polling only
-- Team/game-specific platform features (Call of Duty, PUBG, or any other game-specific registration flow) in the frontend. **ArenaOS v1 is tournament-engine complete, not game-platform complete** — the engine can run a tournament end to end, but the product layer for specific games, teams, and their registration/eligibility rules is deliberately later.
+- Team/game-specific platform features (Call of Duty, PUBG, or any other game-specific registration flow) in the frontend. **SweatLobby v1 is tournament-engine complete, not game-platform complete** — the engine can run a tournament end to end, but the product layer for specific games, teams, and their registration/eligibility rules is deliberately later.
 - Production-grade token persistence or expiry — see Known Limitations below
 - Production deployment infrastructure
 
@@ -69,7 +69,7 @@ ArenaOS is built as four pieces sharing one Haskell core, only two of which are 
 
 - **Tokens are held in an in-memory `Map` inside the API process.** A server restart invalidates every active session; there is no persistence, refresh mechanism, or expiry. Accepted as a v1 tradeoff, not a bug — the frontend detects a dead token via the normal `UNAUTHENTICATED` path and prompts a re-login, with no special-casing needed for the restart case.
 - **A single global lock (`MVar ()`) serializes every write through the API**, one connection to one SQLite file. This is correct and simple for a single-organizer, low-concurrency use case, but is a real scalability ceiling, not something that's been load-tested or is expected to hold under concurrent write-heavy use.
-- **No HTTPS, no CORS hardening beyond local dev, no rate limiting.** ArenaOS v1 is built and verified as a local/dev-served application; none of this has been addressed for a public deployment.
+- **No HTTPS, no CORS hardening beyond local dev, no rate limiting.** SweatLobby v1 is built and verified as a local/dev-served application; none of this has been addressed for a public deployment.
 - **Participant mode is enforced on the checked registration path only.** A tournament's `participantMode` (`IndividualOnly` or `SquadOnly`) is fixed at creation and checked in `registerParticipantChecked`. The unchecked `registerParticipant`, and the CoD/PUBG wrappers built on it, do not check it, so the guarantee is "enforced at the API," not "enforced in the domain." Bracket generation does not re-check it either: the DI-05 guard in `Engine.Validation` is deliberately unwired, because enabling it would make existing dev tournaments with mixed registrations impossible to bracket.
 - **Team names are case-insensitive.** Team lookups (`getTeam`, `teamExists`, and the id lookup behind `saveTeam` and `resolveParticipant`) use `COLLATE NOCASE`, `getTeam` returns the name as stored (not as typed), and a unique index on `teams(name COLLATE NOCASE)` backs it at the database level, so `Team A` and `team a` cannot coexist. Case-variant duplicates must be resolved before the index can be created: on an existing database that still has them, schema initialisation fails when creating the index, and the API only logs `schema init failed` and carries on without it.
 - **Player names are still case-sensitive.** `players.name` has a binary `UNIQUE`, so `Alice` and `alice` are different players and can register as two separate Individuals in the same tournament. Not fixed in v1, because it has not caused a problem yet; the fix would mirror the team change (NOCASE lookups plus a unique NOCASE index, after resolving any existing case-duplicates).
@@ -79,3 +79,11 @@ ArenaOS is built as four pieces sharing one Haskell core, only two of which are 
 - **A forfeit adds no goals.** The opponent gets the 3 points, but neither side's goals change. Leagues often record a 3-0 award; this is left until a real organizer shows what they expect.
 - **Round robin plays each pair once.** There is no home-and-away second leg.
 - **Goals exist only for eFootball scores.** Results recorded for other games carry no goals, so those tables rank by points and head-to-head.
+
+## Renamed to SweatLobby (2026-10-29)
+
+The project was called ArenaOS. Other products in the same space (VR arena and gaming-cafe software) already use that name, so it was renamed to avoid confusion in search and with customers.
+
+- Changed: user-visible text, the wordmark, the browser tab title, and the docs.
+- Deliberately unchanged: the `arenaos` cabal package and executables, environment variables, Docker image names, browser storage keys, the database filename and the repository folder. Renaming them touches CI, Docker, scripts and tests and has no visible benefit, so it is deferred.
+- The logo image files in `web/public` still show the old mark until the new logo assets are added.

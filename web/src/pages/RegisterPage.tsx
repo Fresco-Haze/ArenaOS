@@ -79,7 +79,7 @@ export default function RegisterPage() {
       </Link>
       <AuthBrand />
       <h1 className="auth-title">Create Your Account</h1>
-      <p className="muted auth-sub">Join the ArenaOS community</p>
+      <p className="muted auth-sub">Join the SweatLobby community</p>
       <form onSubmit={onSubmit} className="auth-form">
         <AuthField
           label="Full Name"

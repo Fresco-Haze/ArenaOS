@@ -111,7 +111,7 @@ export default function DetailsFields({
             </span>
             {feeProblem && <span role="alert" className="form-error">{feeProblem}</span>}
           </label>
-          <p className="muted">Shown to players only. ArenaOS does not collect payments, so you collect the fee yourself.</p>
+          <p className="muted">Shown to players only. SweatLobby does not collect payments, so you collect the fee yourself.</p>
         </>
       )}
       {show('game') && (

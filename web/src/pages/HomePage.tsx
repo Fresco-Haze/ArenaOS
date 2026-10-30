@@ -42,7 +42,7 @@ function Hero() {
   return (
     <section className="hero" aria-labelledby="hero-title">
       <div className="hero-copy">
-        <p className="hero-eyebrow">Welcome to ArenaOS</p>
+        <p className="hero-eyebrow">Welcome to SweatLobby</p>
         <h1 id="hero-title" className="hero-title">
           <span>Real players.</span>
           <span className="hero-accent">Real tournaments.</span>

@@ -1,10 +1,12 @@
-# ArenaOS
+# SweatLobby
+
+> **Renamed:** this project was called ArenaOS until October 2026 and is now SweatLobby, because other products already use the old name. Internal names (the `arenaos` cabal package, executables, environment variables and Docker image names) are unchanged for now.
 
 **Author:** Jeremiah
 
 A game-agnostic tournament management platform, built in pure Haskell, with a React/TypeScript frontend.
 
-ArenaOS handles the backend logic for running tournament brackets — creating a tournament, registering participants, generating the bracket, and automatically advancing winners through each round as match results come in — with full accounts, ownership, lifecycle management, and an audit trail of everything that happens to a tournament. As of v1.0, it's usable as a real web application: organizers manage tournaments through a browser, and spectators can follow a public tournament's bracket live, with no login required.
+SweatLobby handles the backend logic for running tournament brackets — creating a tournament, registering participants, generating the bracket, and automatically advancing winners through each round as match results come in — with full accounts, ownership, lifecycle management, and an audit trail of everything that happens to a tournament. As of v1.0, it's usable as a real web application: organizers manage tournaments through a browser, and spectators can follow a public tournament's bracket live, with no login required.
 
 **Status: v1.0**
 
@@ -39,7 +41,7 @@ ArenaOS handles the backend logic for running tournament brackets — creating a
 
 - **`registerTeamOnly`**, a single reusable application-layer combinator (reject an individual, delegate a team through the standard registration pipeline, wrap its error) extracted after CoD and PUBG's registration use cases were compared and found alpha-equivalent — two independent implementations converging on the identical shape, not a resemblance assumed from two similar-looking files. `registerCodParticipant` and `registerPubgParticipant` now delegate to it as thin, pure translation adapters, preserving their own outward error vocabulary while the actual invariant lives once.
 - **No other v0.4/v0.5 duplication was collapsed** on sight. CoD's `CodRequiresTeam` and PUBG's `PubgRequiresTeam` looked identical from the start; only once both implementations and both test suites were checked for actual behavioral or semantic divergence — and found to have none — was the shared combinator extracted.
-- **An architecture investigation into Match/bracket support**, comparing what ArenaOS's current `Match`, `MatchOutcome`, and bracket-generation engine actually assume against what real competitive PUBG requires. Neither was implemented; both a real single-elimination-only implementation gap (`DoubleElimination` and `RoundRobin` had no corresponding engine behavior at the time) and the PUBG-shaped tensions themselves were documented rather than acted on.
+- **An architecture investigation into Match/bracket support**, comparing what SweatLobby's current `Match`, `MatchOutcome`, and bracket-generation engine actually assume against what real competitive PUBG requires. Neither was implemented; both a real single-elimination-only implementation gap (`DoubleElimination` and `RoundRobin` had no corresponding engine behavior at the time) and the PUBG-shaped tensions themselves were documented rather than acted on.
 
 ## v0.6 — Administrator Roles, Authorization & Audit Trail
 

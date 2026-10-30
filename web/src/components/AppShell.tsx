@@ -329,9 +329,9 @@ export default function AppShell({ children }: { children: ReactNode }) {
     <div className="shell">
       <a className="skip-link" href="#main">Skip to content</a>
       <header className="shell-top">
-        <Link to="/" className="brand brand-wrap" aria-label="ArenaOS home">
+        <Link to="/" className="brand brand-wrap" aria-label="SweatLobby home">
           <Logo />
-          <span className="brand-tag">Play &middot; Compete &middot; Win</span>
+          <span className="brand-tag">Play &middot; Compete &middot; Connect</span>
         </Link>
         <SearchBar open={searchOpen} onDone={() => setSearchOpen(false)} />
         <div className="shell-top-right">
@@ -353,7 +353,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
         {children}
       </main>
       <footer className="shell-foot">
-        <Link to="/" className="brand" aria-label="ArenaOS home"><Logo /></Link>
+        <Link to="/" className="brand" aria-label="SweatLobby home"><Logo /></Link>
         <p>Tournament management for competitive gaming.</p>
       </footer>
       <TabBar />

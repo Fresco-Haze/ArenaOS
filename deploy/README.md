@@ -1,4 +1,4 @@
-# ArenaOS deployment runbook
+# SweatLobby deployment runbook
 
 Two images, built by GitHub Actions on every push to `main` and published to GHCR:
 
