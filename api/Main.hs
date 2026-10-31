@@ -1411,6 +1411,9 @@ forgotIpRule, resetIpRule :: RateRule
 forgotIpRule = RateRule "forgot-ip" 3600 5 Nothing
 resetIpRule  = RateRule "reset-ip"  3600 20 Nothing
 
+pwChangeRule :: RateRule
+pwChangeRule = RateRule "pwchange-user" 900 5 (Just 300)
+
 pruneHits :: UTCTime -> NominalDiffTime -> [UTCTime] -> [UTCTime]
 pruneHits now w = filter (\t -> diffUTCTime now t < w)
 
@@ -1991,15 +1994,27 @@ main = do
         (Nothing, _) -> sendError unauthenticated
         (_, Left reason) -> sendError (invalidBody reason)
         (Just uid, Right (PasswordChangeReq cur new)) -> do
-          result <- runUseCase lock (ChgPw.changePassword (ChgPw.ChangePasswordRequest uid cur new))
-          case result of
-            Left apiErr -> sendError apiErr
-            Right (Left e) -> sendError (fromChangePassword e)
-            Right (Right ()) -> do
-              mTok <- bearerToken
-              liftIO (atomicModifyIORef' (envTokens lock)
-                (\m -> (Map.filterWithKey (\t (u, _) -> u /= uid || Just t == mTok) m, ())))
-              status status204
+          let pwKey = T.pack (show (unUserId uid))
+          pwBlocked <- liftIO (blockedFor lock pwChangeRule pwKey)
+          case pwBlocked of
+            Just secs -> do
+              setHeader "Retry-After" (TL.pack (show secs))
+              sendError (tooMany secs)
+            Nothing -> do
+              result <- runUseCase lock (ChgPw.changePassword (ChgPw.ChangePasswordRequest uid cur new))
+              case result of
+                Left apiErr -> sendError apiErr
+                Right (Left e) -> do
+                  case e of
+                    ChgPw.InvalidCurrentPassword -> liftIO (recordHit lock pwChangeRule pwKey)
+                    _ -> pure ()
+                  sendError (fromChangePassword e)
+                Right (Right ()) -> do
+                  liftIO (clearHits lock pwChangeRule pwKey)
+                  mTok <- bearerToken
+                  liftIO (atomicModifyIORef' (envTokens lock)
+                    (\m -> (Map.filterWithKey (\t (u, _) -> u /= uid || Just t == mTok) m, ())))
+                  status status204
 
     get "/me" $ do
       mUser <- currentUser lock

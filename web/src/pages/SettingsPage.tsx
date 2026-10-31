@@ -4,6 +4,7 @@ import { ApiError } from '../api'
 import { useAuth } from '../auth/context'
 import type { SessionUser } from '../auth/context'
 import { changePassword, removeAvatar, saveBio, saveFullName, uploadAvatar } from '../lib/accountActions'
+import { retrySeconds, useCooldown } from '../lib/rateLimit'
 import { resizeToJpeg } from '../lib/avatarImage'
 import PageHeader from '../components/PageHeader'
 import { useApi } from '../hooks/useApi'
@@ -164,6 +165,8 @@ function PasswordForm() {
   const [error, setError] = useState<string | null>(null)
   const [done, setDone] = useState(false)
 
+  const cooldown = useCooldown()
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
     setError(null)
@@ -184,7 +187,9 @@ function PasswordForm() {
       setConfirm('')
       setDone(true)
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Could not reach the server')
+      const wait = retrySeconds(err)
+      if (wait !== null) cooldown.start(wait)
+      else setError(err instanceof ApiError ? err.message : 'Could not reach the server')
     } finally {
       setBusy(false)
     }
@@ -206,8 +211,9 @@ function PasswordForm() {
         <input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password" required />
       </label>
       {error && <p role="alert" className="form-error">{error}</p>}
+      {cooldown.message && <p role="alert" className="form-error">{cooldown.message}</p>}
       {done && <p role="status">Password changed. Your other devices were signed out.</p>}
-      <button type="submit" className="btn-primary" disabled={busy}>{busy ? 'Saving' : 'Change password'}</button>
+      <button type="submit" className="btn-primary" disabled={busy || cooldown.cooling}>{busy ? 'Saving' : 'Change password'}</button>
     </form>
   )
 }
