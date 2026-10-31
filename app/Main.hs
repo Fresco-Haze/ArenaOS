@@ -3,7 +3,7 @@ module Main where
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Reader (ask)
 import Data.Int (Int64)
-import System.Environment (getArgs)
+import System.Environment (getArgs, lookupEnv)
 import Text.Read (readMaybe)
 
 import Shell.Persistence.SQLite.Connection (SQLiteM, SQLiteEnv(envConnection), runSQLiteM)
@@ -95,7 +95,8 @@ setupSchema = do
 main :: IO ()
 main = do
     args   <- getArgs
-    result <- runSQLiteM dbPath (setupSchema >> dispatch args)
+    dbFile <- maybe dbPath id <$> lookupEnv "ARENAOS_DB"
+    result <- runSQLiteM dbFile (setupSchema >> dispatch args)
     case result of
         Left err -> putStrLn ("Database error: " ++ show err)
         Right () -> pure ()
@@ -618,8 +619,8 @@ usage = unlines
   , "  create-team <teamName> <captainName> [member1 member2 ...]"
   , "  register-cod <tournamentId> <teamName> <captainName> [member1 member2 ...]"
   , "  register-pubg <tournamentId> <teamName> <captainName> [member1 member2 ...]"
-  , "  grant-role <userId> <role>"
-  , "  revoke-role <userId> <role>"
+  , "  grant-role <actorId> <userId> <role>"
+  , "  revoke-role <actorId> <userId> <role>"
   , "  admin-dashboard <actorId>"
   , "  list-roles <userId>"
   , "  audit-log <userId>"

@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Run a SweatLobby admin command inside the api container, against the live database.
+# Example: ./sl-admin set-account-status 1 7 Suspended
+set -euo pipefail
+cd /opt/arenaos
+exec docker compose exec -T api arenaos "$@"
