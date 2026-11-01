@@ -53,7 +53,13 @@ This logs everyone out, not only that user.
 
 ## Audit log
 
-    ./sl-admin audit-log <adminId>
+    ./sl-admin audit-log <userId>
+
+This shows events ABOUT that user (for example who suspended them), not events they performed. To see every event, oldest first:
+
+    docker compose exec -T api sqlite3 -header /data/arenaos.db "SELECT * FROM audit_log ORDER BY id;"
+
+Only the commands above are recorded. The first administrator insert and any hand-run SQL are not.
 
 ## Cancel a tournament
 
