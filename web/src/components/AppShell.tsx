@@ -355,6 +355,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
       <footer className="shell-foot">
         <Link to="/" className="brand" aria-label="SweatLobby home"><Logo /></Link>
         <p>Tournament management for competitive gaming.</p>
+        <p className="muted"><Link to="/privacy">Privacy</Link> &middot; <Link to="/terms">Terms</Link></p>
       </footer>
       <TabBar />
     </div>

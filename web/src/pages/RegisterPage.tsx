@@ -131,6 +131,10 @@ export default function RegisterPage() {
         <button type="submit" className="btn-primary auth-submit" disabled={busy || cooldown.cooling}>
           {busy ? 'Creating account' : 'Create Account'}
         </button>
+      <p className="muted auth-sub">
+        By creating an account you confirm you are at least 16 and agree to the{' '}
+        <Link to="/terms">Terms</Link> and <Link to="/privacy">Privacy Policy</Link>.
+      </p>
       </form>
       <p className="auth-switch">
         Already have an account?{' '}

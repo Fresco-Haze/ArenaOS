@@ -8,6 +8,8 @@ import PlayersPage from './pages/PlayersPage'
 import PlayerPage from './pages/PlayerPage'
 import SettingsPage from './pages/SettingsPage'
 import HelpPage from './pages/HelpPage'
+import PrivacyPage from './pages/PrivacyPage'
+import TermsPage from './pages/TermsPage'
 import ProfilePage from './pages/ProfilePage'
 import LoginPage from './pages/LoginPage'
 import TournamentPage from './pages/TournamentPage'
@@ -63,6 +65,8 @@ export default function App() {
           <Route path="/players" element={<PlayersPage />} />
           <Route path="/players/:name" element={<PlayerPage />} />
           <Route path="/help" element={<HelpPage />} />
+          <Route path="/privacy" element={<PrivacyPage />} />
+          <Route path="/terms" element={<TermsPage />} />
           <Route
             path="/settings"
             element={
