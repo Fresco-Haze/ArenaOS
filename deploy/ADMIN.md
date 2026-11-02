@@ -51,6 +51,30 @@ A suspended user cannot log in. Someone who is already logged in stays logged in
 
 This logs everyone out, not only that user.
 
+## Reset a password (manual)
+
+There is no reset email yet. The forgot-password page only records a reset link in the api log. Users ask for a reset by emailing support@sweatlobby.com.
+
+1. Find their user id:
+
+    docker compose exec -T api sqlite3 /data/arenaos.db "SELECT id, username FROM users ORDER BY id;"
+
+2. Find their link in the api log. Each line reads `[password reset] user <id> /reset-password?token=...`. Use the last line for that id:
+
+    docker compose logs api --since 24h | grep "password reset"
+
+3. Look up the email stored on that account (one row, no password hash):
+
+    docker compose exec -T api sqlite3 /data/arenaos.db "SELECT email FROM users WHERE id = <id>;"
+
+4. Send https://sweatlobby.com followed by the path from the log line (starting at /reset-password) to that stored address and nowhere else. Never send it to a different address mentioned in the request.
+
+Rules:
+
+- The log lines contain live reset tokens. Never paste them, or the email, into chats or tickets.
+- A link works for 24 hours and then dies. Links are also lost whenever the api container is recreated (every deploy), so if you deployed since the request, ask the user to request again.
+- Replying from your own mailbox shows your own address to the user. Decide that on purpose.
+
 ## Audit log
 
     ./sl-admin audit-log <userId>

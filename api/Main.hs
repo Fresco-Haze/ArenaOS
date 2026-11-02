@@ -1241,7 +1241,7 @@ issueReset lock e = do
       r <- runUseCase lock (Repo.createPasswordReset (userId u) hashText (nowS + 86400))
       case r of
         Right rid -> liftIO (hPutStrLn stderr
-          ("[password reset] user " ++ show (userId u) ++ " /reset-password?token=" ++ show rid ++ "." ++ T.unpack tok))
+          ("[password reset] user " ++ show (unUserId (userId u)) ++ " /reset-password?token=" ++ show rid ++ "." ++ T.unpack tok))
         Left _ -> pure ()
     _ -> pure ()
 
