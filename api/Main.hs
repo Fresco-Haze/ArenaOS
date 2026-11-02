@@ -1238,10 +1238,10 @@ issueReset lock e = do
   case (hr, mu) of
     (Right h, Right (Just u)) | accountStatus u == Active -> do
       let PasswordHash hashText = h
-      r <- runUseCase lock (Repo.createPasswordReset (userId u) hashText (nowS + 1800))
+      r <- runUseCase lock (Repo.createPasswordReset (userId u) hashText (nowS + 86400))
       case r of
         Right rid -> liftIO (hPutStrLn stderr
-          ("[password reset] http://localhost:5173/reset-password?token=" ++ show rid ++ "." ++ T.unpack tok))
+          ("[password reset] user " ++ show (userId u) ++ " /reset-password?token=" ++ show rid ++ "." ++ T.unpack tok))
         Left _ -> pure ()
     _ -> pure ()
 

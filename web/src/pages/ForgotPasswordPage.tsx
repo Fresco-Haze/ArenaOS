@@ -38,13 +38,13 @@ export default function ForgotPasswordPage() {
       {sent ? (
         <>
           <p role="status" className="form-notice">
-            If that email has an account, we&rsquo;ve sent a reset link. It works for 30 minutes.
+            If an account matches, a reset request has been recorded. Password resets are handled manually for now. Contact support@sweatlobby.com from the email on your account.
           </p>
           <p className="auth-switch"><Link to="/login">Back to sign in</Link></p>
         </>
       ) : (
         <>
-          <p className="muted auth-sub">Enter your email and we&rsquo;ll send you a reset link.</p>
+          <p className="muted auth-sub">Enter your email to request a password reset.</p>
           <form onSubmit={onSubmit} className="auth-form">
             <AuthField
               label="Email"
@@ -60,7 +60,7 @@ export default function ForgotPasswordPage() {
             {cooldown.message && <p role="alert" className="form-error">{cooldown.message}</p>}
             {error && <p role="alert" className="form-error">{error}</p>}
             <button type="submit" className="btn-primary auth-submit" disabled={busy || cooldown.cooling}>
-              {busy ? 'Sending' : 'Send reset link'}
+              {busy ? 'Requesting' : 'Request reset'}
             </button>
           </form>
         </>
