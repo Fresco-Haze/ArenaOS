@@ -75,6 +75,49 @@ Rules:
 - A link works for 24 hours and then dies. Links are also lost whenever the api container is recreated (every deploy), so if you deployed since the request, ask the user to request again.
 - Replying from your own mailbox shows your own address to the user. Decide that on purpose.
 
+## Delete an account
+
+People ask for deletion by emailing privacy@sweatlobby.com. Do it within 30 days. First confirm the request came from the email stored on the account, the same rule as a password reset. Results and the audit log stay by design: they hold ids and a placeholder name only.
+
+You need two values from step 1: the account id and its exact username. Below they appear as <id> and <username>.
+
+1. Find the account:
+
+    docker compose exec -T api sqlite3 /data/arenaos.db "SELECT id, username, account_status FROM users ORDER BY id;"
+
+2. Look first (read-only). The player row is found through the registration, not by name:
+
+    docker compose exec -T api sqlite3 -header /data/arenaos.db "SELECT pa.player_id, pl.name FROM registrations r JOIN participants pa ON pa.id = r.participant_id JOIN players pl ON pl.id = pa.player_id WHERE r.user_id = <id>; SELECT id, name FROM players WHERE lower(name) = lower('<username>'); SELECT id, name, organizer_name FROM tournaments WHERE owner_id = <id>; SELECT id, name FROM teams WHERE owner_user_id = <id>;"
+
+Stop and look by hand if the second query shows a player row that the first query did not. Teams they own, and the text of tournaments they ran (name, description, rules), are not changed by the steps below: read them and edit by hand if they hold personal details.
+
+3. Back up:
+
+    ./backup.sh
+
+4. The change, as one transaction. The first two statements stop everything if the id and username do not match one account:
+
+    docker compose exec -T api sqlite3 -bail /data/arenaos.db "CREATE TEMP TABLE guard (ok INTEGER NOT NULL); INSERT INTO guard SELECT (SELECT 1 FROM users WHERE id = <id> AND username = '<username>'); BEGIN; UPDATE players SET name = 'Deleted player <id>' WHERE id IN (SELECT pa.player_id FROM registrations r JOIN participants pa ON pa.id = r.participant_id WHERE r.user_id = <id> AND pa.player_id IS NOT NULL); UPDATE tournaments SET organizer_name = 'Deleted player <id>' WHERE owner_id = <id>; UPDATE notifications SET detail = 'Deleted player <id>' WHERE kind = 'JoinRequested' AND lower(detail) = lower('<username>'); DELETE FROM notifications WHERE user_id = <id>; DELETE FROM user_avatars WHERE user_id = <id>; DELETE FROM password_resets WHERE user_id = <id>; DELETE FROM user_roles WHERE user_id = <id>; UPDATE users SET username = 'deleted-<id>', email = 'deleted-<id>@deleted.invalid', password_hash = 'deleted', full_name = NULL, bio = NULL, account_status = 'Deactivated' WHERE id = <id>; COMMIT;"
+
+If it prints an error mentioning guard.ok, the id and username do not match one account and nothing was changed. Silence means it worked.
+
+5. Restart the api so it drops cached data and ends any session (this logs everyone out), and wait for healthy:
+
+    docker compose restart api
+    docker compose ps
+
+6. Check:
+
+    docker compose exec -T api sqlite3 -header /data/arenaos.db "SELECT id, username, account_status FROM users WHERE id = <id>; SELECT id, name FROM players; SELECT user_id, kind, detail FROM notifications;"
+
+The account should read deleted-<id> and Deactivated, the player row should read Deleted player <id>, and no notification should still show the old username. In the browser, /players should show no trace of the old name, and logging in as the old username should say wrong email, username or password.
+
+Limits:
+
+- The old data stays in backups until they rotate: 14 days on the server, and the offsite Backblaze copy until its own retention removes it.
+- If the person was renamed after sending a join request, the old name may remain in that notification. Step 6 shows it.
+- Tell the person it is done from your own mailbox, and never paste their email into chats or tickets.
+
 ## Audit log
 
     ./sl-admin audit-log <userId>
