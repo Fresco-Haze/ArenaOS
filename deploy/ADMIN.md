@@ -132,7 +132,7 @@ Only the commands above are recorded. The first administrator insert and any han
 
     ./sl-admin cancel-tournament <ownerId> <tournamentId> "reason"
 
-The command acts as the user id you give, so use the tournament owner's id. UNVERIFIED: whether `admin-dashboard` shows owner ids, and whether an administrator may cancel someone else's tournament directly. Check on a test tournament before relying on this.
+The command acts as the user id you give, so use the tournament owner's id. An administrator cannot cancel someone else's tournament directly: with your own admin id the command fails with `Unauthorized NotTournamentOwner`. Use the owner's id instead. Find both ids with `./sl-admin admin-dashboard <adminId>`: each tournament line prints its `tournamentId` and `tournamentOwner = UserId {unUserId = N}`. Both behaviours were tested on a throwaway tournament on 3 November 2026: the admin id was refused, the owner id printed `Tournament cancelled.` and the state became Cancelled. Run `./backup.sh` first.
 
 ## Remove a profile picture
 
