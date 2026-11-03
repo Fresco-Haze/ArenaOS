@@ -23,7 +23,7 @@ module Shell.Persistence.SQLite.Schema
   ) where
 
 import Control.Monad (when)
-import Database.SQLite.Simple (Connection, Query, execute_, query_)
+import Database.SQLite.Simple (Connection, Only(..), Query, execute, execute_, query_)
 
 initializeSchema :: Connection -> IO ()
 initializeSchema conn = do
@@ -36,6 +36,7 @@ initializeSchema conn = do
   migrateTeamColumns conn
   migrateBanners conn
   migrateUsernameIndex conn
+  migrateGames conn
 
 -- v0.12: CREATE TABLE IF NOT EXISTS never adds columns to an existing
 -- database, so add any missing tournament columns here. Safe on every start.
@@ -328,3 +329,37 @@ statements =
     \  updated_at TEXT NOT NULL \
     \)"
   ]
+
+-- v0.13: games are data, not a fixed list. Names are unique ignoring case.
+-- The old tournaments.game column is left in place and no longer written to
+-- by new code; game_id points at this table. Old "Other" stays NULL (no game).
+seedGames :: [String]
+seedGames =
+  [ "eFootball"
+  , "Call of Duty", "Fortnite", "Apex Legends", "Valorant", "Counter-Strike 2"
+  , "Halo", "Overwatch 2", "Rainbow Six Siege", "PUBG Mobile", "BGMI"
+  , "Super Smash Bros.", "Tekken 8", "Street Fighter 6", "Mortal Kombat 1"
+  , "Guilty Gear -Strive-", "Dragon Ball FighterZ"
+  , "EA Sports FC", "FIFA", "Madden NFL", "NBA 2K", "Rocket League"
+  , "F1", "Gran Turismo", "Mario Kart"
+  , "League of Legends", "DOTA 2", "Mobile Legends: Bang Bang"
+  , "Clash of Clans", "Clash Royale", "Teamfight Tactics"
+  , "Magic: The Gathering", "Yu-Gi-Oh!", "Pok\233mon TCG"
+  , "Pickleball", "Padel", "Badminton", "Tennis"
+  , "Beer Pong", "Cornhole", "Chess", "Checkers"
+  ]
+
+migrateGames :: Connection -> IO ()
+migrateGames conn = do
+  execute_ conn "CREATE TABLE IF NOT EXISTS games (id INTEGER PRIMARY KEY, name TEXT NOT NULL COLLATE NOCASE UNIQUE)"
+  mapM_ (\n -> execute conn "INSERT OR IGNORE INTO games (name) VALUES (?)" (Only n)) seedGames
+  cols <- query_ conn "PRAGMA table_info(tournaments)" :: IO [(Int, String, String, Int, Maybe String, Int)]
+  let present = [ c | (_, c, _, _, _, _) <- cols ]
+  when ("game_id" `notElem` present) $
+    execute_ conn "ALTER TABLE tournaments ADD COLUMN game_id INTEGER REFERENCES games(id)"
+  execute_ conn "CREATE INDEX IF NOT EXISTS idx_tournaments_game_id ON tournaments(game_id)"
+  mapM_ backfill [("eFootball", "eFootball"), ("PubgMobile", "PUBG Mobile"), ("CallOfDuty", "Call of Duty")]
+  where
+    backfill :: (String, String) -> IO ()
+    backfill (old, new) =
+      execute conn "UPDATE tournaments SET game_id = (SELECT id FROM games WHERE name = ?) WHERE game_id IS NULL AND game = ?" (new, old)
