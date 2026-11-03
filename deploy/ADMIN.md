@@ -159,6 +159,13 @@ To reset:
 
 The old database is kept aside in the data volume as `arenaos.db.before-restore-<stamp>`. Warning: there are no schema migrations. If a later release adds columns to existing tables, an old empty database will not have them, so take a fresh empty backup after such a release.
 
+After a restore, the old database stays in the data volume as `arenaos.db.before-restore-<stamp>`, with `-wal` and `-shm` copies when they existed. It still holds the old accounts' personal data. Once you have checked that the site works after the restore, look at what is there and then delete it:
+
+    docker compose exec -T api sh -c 'ls -l /data/arenaos.db*.before-restore-*'
+    docker compose exec -T api sh -c 'rm /data/arenaos.db*.before-restore-*'
+
+Only do this after the restore is confirmed good, because these files are your way back. The backup that `./backup.sh` took before the restore stays in `/var/backups/arenaos` until it rotates, and the Privacy page already says backups expire.
+
 ## Roll back to the previous version
 
 Set `ARENAOS_TAG` in `/opt/arenaos/.env` to the previous commit id, then:
