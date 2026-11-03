@@ -4,7 +4,7 @@ export default function PrivacyPage() {
   return (
     <>
       <PageHeader title="Privacy Policy" />
-      <p className="muted">Last updated: 1 November 2026</p>
+      <p className="muted">Last updated: 3 November 2026</p>
 
       <section className="help-section">
         <h2>Who we are</h2>
@@ -83,7 +83,7 @@ export default function PrivacyPage() {
       <section className="help-section">
         <h2>How long we keep it</h2>
         <p>
-          We keep your data while your account exists. Backups are kept for 14 days on the server and 30
+          We keep your data while your account exists. Backups are kept for 14 days on the server and about 30
           days in encrypted offsite storage. After an account is deleted, copies of it disappear from
           backups when those backups expire.
         </p>
