@@ -115,6 +115,8 @@ import Shell.Persistence.SQLite.JoinRequestRepository ()
 import Shell.Persistence.SQLite.NotificationRepository ()
 import Shell.Persistence.SQLite.AvatarRepository ()
 import Shell.Persistence.SQLite.LobbyRepository ()
+import qualified Application.UseCases.Lobby as LobbyUC
+import qualified Domain.Tournament as LbDom
 import qualified Domain.Lobby as DL
 import qualified Data.ByteString as BSX
 import qualified Domain.Notification as Notif
@@ -7317,6 +7319,109 @@ spec = before_ resetTestDb $ do
         pa <- mkP "lr4-ann"
         Repo.saveLobbyRoundResults tid 99 [DL.GameEntry pa 1 0]
       either (const True) (const False) result `shouldBe` True
+  describe "Lobby use cases (v0.14)" $ do
+    let mkP n = do
+          let p = Player (PlayerName n)
+          Repo.savePlayer p
+          Repo.resolveParticipant (Individual p)
+        reg tid p = Repo.createRegistration (Repo.NewRegistration tid p)
+        isBad :: Either e a -> Bool
+        isBad = either (const True) (const False)
+        rn :: Either LobbyUC.LobbyActionError Int -> Int
+        rn = either (const 0) id
+        tag :: Either LobbyUC.LobbyActionError a -> String
+        tag (Right _) = "ok"
+        tag (Left (LobbyUC.LobbyUnauthorized _)) = "unauthorized"
+        tag (Left (LobbyUC.LobbyInvalidLifecycle _)) = "lifecycle"
+        tag (Left LobbyUC.NotALobby) = "not-a-lobby"
+        tag (Left LobbyUC.LobbyNeedsTwoParticipants) = "few-participants"
+        tag (Left (LobbyUC.LobbyInvalidResults e)) = "results:" ++ show e
+        tag (Left (LobbyUC.LobbyRoundNotFound n)) = "no-round:" ++ show n
+        tag (Left (LobbyUC.LobbyCompleteInvalid e)) = "complete:" ++ show e
+
+    it "creates a lobby with its settings and rejects bad input" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "lb-owner-1"
+        tid <- unwrap =<< LobbyUC.createLobbyTournament (dtNew owner "Lobby Create A") noDetails (DL.LobbySettings 2 [15, 10, 5])
+        t <- Repo.getTournament tid
+        s <- Repo.getLobbySettings tid
+        bad1 <- LobbyUC.createLobbyTournament (dtNew owner "Lobby Create B") noDetails (DL.LobbySettings 1 [])
+        bad2 <- LobbyUC.createLobbyTournament (dtNew owner "") noDetails DL.defaultLobbySettings
+        bad3 <- LobbyUC.createLobbyTournament (dtNew owner "Lobby Create C") noDetails (DL.LobbySettings (-1) [5])
+        pure (tournamentKind t, LbDom.tournamentFormat t, LbDom.tournamentThirdPlaceMatch t, s, isBad bad1, isBad bad2, isBad bad3)
+      result `shouldBe` Right (LobbyKind, LbDom.SingleElimination, False, DL.LobbySettings 2 [15, 10, 5], True, True, True)
+
+    it "starts a lobby only for its owner, from Registration closed, with two players or more" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "lb-owner-2"
+        other <- createTestUser "lb-other-2"
+        tid <- unwrap =<< LobbyUC.createLobbyTournament (dtNew owner "Lobby Start") noDetails DL.defaultLobbySettings
+        bracketTid <- dtCreate owner "Bracket Start" noDetails
+        pa <- mkP "lb2-ann"
+        pb <- mkP "lb2-bob"
+        s0 <- LobbyUC.startLobby owner tid
+        Repo.updateTournamentState tid LbDom.RegistrationClosed
+        s1 <- LobbyUC.startLobby owner tid
+        _ <- reg tid pa
+        s2 <- LobbyUC.startLobby owner tid
+        _ <- reg tid pb
+        s3 <- LobbyUC.startLobby other tid
+        Repo.updateTournamentState bracketTid LbDom.RegistrationClosed
+        s4 <- LobbyUC.startLobby owner bracketTid
+        s5 <- LobbyUC.startLobby owner tid
+        t <- Repo.getTournament tid
+        pure (map tag [s0, s1, s2, s3, s4, s5], LbDom.tournamentState t)
+      result `shouldBe` Right (["lifecycle", "few-participants", "few-participants", "unauthorized", "not-a-lobby", "ok"], LbDom.InProgress)
+
+    it "records, adds and corrects rounds with full validation" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "lb-owner-3"
+        other <- createTestUser "lb-other-3"
+        tid <- unwrap =<< LobbyUC.createLobbyTournament (dtNew owner "Lobby Rounds") noDetails DL.defaultLobbySettings
+        pa <- mkP "lb3-ann"
+        pb <- mkP "lb3-bob"
+        pc <- mkP "lb3-cat"
+        let g1 = [DL.GameEntry pa 1 3, DL.GameEntry pb 2 0, DL.GameEntry pc 3 1]
+        r0 <- LobbyUC.recordLobbyRound owner tid Nothing g1
+        Repo.updateTournamentState tid LbDom.RegistrationClosed
+        mapM_ (reg tid) [pa, pb, pc]
+        r1 <- LobbyUC.recordLobbyRound owner tid Nothing g1
+        r2 <- LobbyUC.recordLobbyRound owner tid Nothing [DL.GameEntry pc 1 2, DL.GameEntry pa 2 2, DL.GameEntry pb 3 0]
+        r3 <- LobbyUC.recordLobbyRound owner tid (Just 1) [DL.GameEntry pb 1 4, DL.GameEntry pa 2 0, DL.GameEntry pc 3 0]
+        rDup <- LobbyUC.recordLobbyRound owner tid Nothing [DL.GameEntry pa 1 0, DL.GameEntry pb 1 0, DL.GameEntry pc 3 0]
+        rMissing <- LobbyUC.recordLobbyRound owner tid Nothing [DL.GameEntry pa 1 0, DL.GameEntry pb 2 0]
+        rNoRound <- LobbyUC.recordLobbyRound owner tid (Just 9) g1
+        rOther <- LobbyUC.recordLobbyRound other tid Nothing g1
+        rounds <- Repo.listLobbyRounds tid
+        let expected =
+              [ (1, [DL.GameEntry pb 1 4, DL.GameEntry pa 2 0, DL.GameEntry pc 3 0])
+              , (2, [DL.GameEntry pc 1 2, DL.GameEntry pa 2 2, DL.GameEntry pb 3 0])
+              ]
+        pure (tag r0, map rn [r1, r2, r3], map tag [rDup, rMissing, rNoRound, rOther], rounds == expected)
+      result `shouldBe` Right ("lifecycle", [1, 2, 1], ["results:BadPlacements", "results:MissingParticipant", "no-round:9", "unauthorized"], True)
+
+    it "completes only after a round, and the table names a champion" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "lb-owner-4"
+        other <- createTestUser "lb-other-4"
+        tid <- unwrap =<< LobbyUC.createLobbyTournament (dtNew owner "Lobby Finish") noDetails DL.defaultLobbySettings
+        pa <- mkP "lb4-ann"
+        pb <- mkP "lb4-bob"
+        Repo.updateTournamentState tid LbDom.RegistrationClosed
+        mapM_ (reg tid) [pa, pb]
+        c0 <- LobbyUC.completeLobby owner tid
+        _ <- LobbyUC.recordLobbyRound owner tid Nothing [DL.GameEntry pa 1 3, DL.GameEntry pb 2 0]
+        c1 <- LobbyUC.completeLobby other tid
+        table <- LobbyUC.loadLobbyStandings tid
+        c2 <- LobbyUC.completeLobby owner tid
+        c3 <- LobbyUC.completeLobby owner tid
+        t <- Repo.getTournament tid
+        pure (tag c0, tag c1, tag c2, tag c3, LbDom.tournamentState t, Lobby.lobbyChampion table == Just pa, map Lobby.lsPoints table)
+      result `shouldBe` Right ("complete:TournamentNotComplete", "unauthorized", "ok", "complete:TournamentAlreadyCompleted", LbDom.Completed, True, [13, 6])
   describe "Engine.User.validateRawPassword (pure)" $ do
 
     it "rejects a password shorter than 8 characters" $
