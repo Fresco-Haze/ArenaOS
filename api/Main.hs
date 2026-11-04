@@ -2202,13 +2202,6 @@ main = do
             Left apiErr -> sendError apiErr
             Right flags -> json (playerProfileJson p flags)
 
-    -- public, no login: every game, for the game dropdown
-    get "/games" $ do
-      result <- runUseCase lock Repo.listGames
-      case result of
-        Left apiErr -> sendError apiErr
-        Right gs    -> json (object ["games" .= map gameText gs])
-
     -- public, no login: top players by titles, then match wins
     get "/rankings" $ do
       gRaw <- (queryParamMaybe "game" :: ActionM (Maybe Text))
