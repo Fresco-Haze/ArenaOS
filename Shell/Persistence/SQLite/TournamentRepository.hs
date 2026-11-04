@@ -6,6 +6,8 @@
 
 module Shell.Persistence.SQLite.TournamentRepository () where
 
+import Domain.Tournament (mkGame, gameName)
+import qualified Database.SQLite.Simple as SQ
 import Control.Exception (throwIO)
 import Control.Monad (when)
 import Control.Monad.IO.Class (liftIO)
@@ -93,20 +95,22 @@ textToParticipantMode "SquadOnly"      = pure SquadOnly
 textToParticipantMode other            =
     throwIO (StorageFailure ("Unknown participant mode in storage: " ++ other))
 
--- v0.12. Values must match the CHECK on tournaments.game in Schema.hs.
-gameToText :: Game -> String
-gameToText GameEFootball   = "eFootball"
-gameToText GamePubgMobile  = "PubgMobile"
-gameToText GameCallOfDuty  = "CallOfDuty"
-gameToText GameOther       = "Other"
-
+-- v0.13: games live in the games table and tournaments.game_id points at it.
+-- The old tournaments.game column is no longer read or written.
 textToGame :: String -> IO Game
-textToGame "eFootball"  = pure GameEFootball
-textToGame "PubgMobile" = pure GamePubgMobile
-textToGame "CallOfDuty" = pure GameCallOfDuty
-textToGame "Other"      = pure GameOther
-textToGame other        =
-    throwIO (StorageFailure ("Unknown game in storage: " ++ other))
+textToGame s = case mkGame s of
+    Right g  -> pure g
+    Left err -> throwIO (StorageFailure ("Bad game in storage: " ++ err))
+
+-- Find the game by name (ignoring case) or create it. Nothing means no game.
+resolveGameId :: SQ.Connection -> Maybe Game -> IO (Maybe Int)
+resolveGameId _ Nothing = pure Nothing
+resolveGameId conn (Just g) = do
+    SQ.execute conn "INSERT OR IGNORE INTO games (name) VALUES (?)" (SQ.Only (gameName g))
+    rows <- SQ.query conn "SELECT id FROM games WHERE name = ?" (SQ.Only (gameName g)) :: IO [SQ.Only Int]
+    case rows of
+        (SQ.Only i : _) -> pure (Just i)
+        []              -> throwIO (StorageFailure "Could not resolve game")
 
 -- Canonical UTC ISO 8601, whole seconds (same shape as matches.scheduled_start).
 timeFormat :: String
@@ -197,7 +201,7 @@ tournamentSelect :: Query
 tournamentSelect =
     "SELECT id, name, organizer_name, owner_id, format, state, visibility, \
     \max_participants, third_place_match, bracket_id, \
-    \participant_mode, game, start_time, prize_kes, description, require_approval, registration_deadline, entry_fee_kes, platform, rules \
+    \participant_mode, (SELECT name FROM games WHERE id = tournaments.game_id), start_time, prize_kes, description, require_approval, registration_deadline, entry_fee_kes, platform, rules \
     \FROM tournaments"
 
 type TournamentRow =
@@ -272,8 +276,8 @@ statsPlayersSql =
     \JOIN teams tt ON tt.id = p.team_id \
     \WHERE p.kind = 'Squad' AND " <> publicWhere <> ")"
 statsByGameSql =
-    "SELECT t.game, COUNT(*) FROM tournaments t WHERE " <> publicWhere
-    <> " AND t.game IS NOT NULL GROUP BY t.game"
+    "SELECT g.name, COUNT(*) FROM tournaments t JOIN games g ON g.id = t.game_id WHERE " <> publicWhere
+    <> " GROUP BY g.id, g.name ORDER BY COUNT(*) DESC, g.name"
 
 statsPrizePoolSql :: Query
 statsPrizePoolSql =
@@ -323,8 +327,9 @@ instance TournamentRepository SQLiteM where
             OrganizerName organizer = tournamentOrganizer t
             UserId owner_id         = tournamentOwner t
             bracketIdMaybe          = (\(BracketId bid) -> bid) <$> tournamentBracket t
+        gid <- liftIO (resolveGameId conn (tournamentGame t))
         liftIO $ execute conn
-            "INSERT INTO tournaments (id, name, organizer_name, owner_id, format, state, visibility, max_participants, third_place_match, bracket_id, participant_mode, game, start_time, prize_kes, description, require_approval, registration_deadline, entry_fee_kes, platform, rules) \
+            "INSERT INTO tournaments (id, name, organizer_name, owner_id, format, state, visibility, max_participants, third_place_match, bracket_id, participant_mode, game_id, start_time, prize_kes, description, require_approval, registration_deadline, entry_fee_kes, platform, rules) \
             \VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
             \ON CONFLICT(id) DO UPDATE SET \
             \  name = excluded.name, \
@@ -336,7 +341,7 @@ instance TournamentRepository SQLiteM where
             \  max_participants = excluded.max_participants, \
             \  third_place_match = excluded.third_place_match, \
             \  bracket_id = excluded.bracket_id, \
-            \  game = excluded.game, \
+            \  game_id = excluded.game_id, \
             \  start_time = excluded.start_time, \
             \  prize_kes = excluded.prize_kes, \
             \  description = excluded.description, \
@@ -357,7 +362,7 @@ instance TournamentRepository SQLiteM where
               , bracketIdMaybe
               )
               :. ( participantModeToText (tournamentParticipantMode t)
-                 , gameToText <$> tournamentGame t
+                 , gid
                  , timeToText <$> tournamentStartTime t
                  , tournamentPrize t
                  , tournamentDescription t
@@ -466,9 +471,10 @@ instance TournamentRepository SQLiteM where
     updateTournamentDetails :: TournamentId -> TournamentDetails -> SQLiteM ()
     updateTournamentDetails (TournamentId tidInt) d = do
         conn <- asks envConnection
+        gid <- liftIO (resolveGameId conn (detailsGame d))
         liftIO $ execute conn
-            "UPDATE tournaments SET game = ?, start_time = ?, prize_kes = ?, description = ?, registration_deadline = ?, entry_fee_kes = ?, platform = ?, rules = ? WHERE id = ?"
-            ( gameToText <$> detailsGame d
+            "UPDATE tournaments SET game_id = ?, start_time = ?, prize_kes = ?, description = ?, registration_deadline = ?, entry_fee_kes = ?, platform = ?, rules = ? WHERE id = ?"
+            ( gid
             , timeToText <$> detailsStartTime d
             , detailsPrize d
             , detailsDescription d

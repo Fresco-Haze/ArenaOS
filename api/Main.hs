@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Main where
 
+import Domain.Tournament (mkGame, gameName)
 import Web.Scotty
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -592,17 +593,10 @@ countFor :: [(TournamentId, Int)] -> Tournament -> Int
 countFor cs t = fromMaybe 0 (lookup (tournamentId t) cs)
 
 gameText :: Game -> Text
-gameText GameEFootball  = "eFootball"
-gameText GamePubgMobile = "PubgMobile"
-gameText GameCallOfDuty = "CallOfDuty"
-gameText GameOther      = "Other"
+gameText = T.pack . gameName
 
 gameFromText :: Text -> Maybe Game
-gameFromText "eFootball"  = Just GameEFootball
-gameFromText "PubgMobile" = Just GamePubgMobile
-gameFromText "CallOfDuty" = Just GameCallOfDuty
-gameFromText "Other"      = Just GameOther
-gameFromText _            = Nothing
+gameFromText = either (const Nothing) Just . mkGame . T.unpack
 
 -- Absent or null fields mean "none". Shared by create and PUT /details.
 newtype DetailsReq = DetailsReq TournamentDetails
@@ -614,7 +608,7 @@ instance FromJSON DetailsReq where
       Nothing -> pure Nothing
       Just txt -> case gameFromText txt of
         Just x  -> pure (Just x)
-        Nothing -> fail "game must be eFootball, PubgMobile, CallOfDuty or Other"
+        Nothing -> fail "game must be 1 to 40 characters"
     st <- o .:? "startTime"
     pz <- o .:? "prize"
     ds <- o .:? "description"
