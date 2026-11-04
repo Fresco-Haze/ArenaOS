@@ -7,7 +7,7 @@ import LoadingBlock from '../components/LoadingBlock'
 import PageHeader from '../components/PageHeader'
 
 // "Other" is a catch-all tag, not a game, so it is not listed here.
-const GAMES: readonly Game[] = ['eFootball', 'PubgMobile', 'CallOfDuty']
+const GAMES: readonly Game[] = ['eFootball', 'PUBG Mobile', 'Call of Duty']
 
 export default function GamesPage() {
   const stats = useApi('/stats', PublicStatsView, true)

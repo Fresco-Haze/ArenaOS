@@ -35,8 +35,8 @@
   background-position: center;
 }
 .tcard-art[data-game='eFootball'] { background-image: url('/art/efootball.jpg'); }
-.tcard-art[data-game='PubgMobile'] { background-image: url('/art/pubg-mobile.jpg'); }
-.tcard-art[data-game='CallOfDuty'] { background-image: url('/art/call-of-duty.jpg'); }
+.tcard-art[data-game='PUBG Mobile'] { background-image: url('/art/pubg-mobile.jpg'); }
+.tcard-art[data-game='Call of Duty'] { background-image: url('/art/call-of-duty.jpg'); }
 
 .tcard-chip {
   position: absolute;

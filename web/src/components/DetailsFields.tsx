@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { Game, gameLabel } from '../model'
+import GameField from './GameField'
 import { DESCRIPTION_MAX, PLATFORMS, RULES_MAX, deadlineError, feeError, prizeError } from '../lib/details'
 import type { DetailsValues } from '../lib/details'
 
@@ -50,15 +50,7 @@ export default function DetailsFields({
   return (
     <>
       {show('game') && (
-        <label>
-          Game (optional)
-          <select value={values.game} onChange={(e) => onChange({ ...values, game: e.target.value })}>
-            <option value="">Not set</option>
-            {Game.options.map((g) => (
-              <option key={g} value={g}>{gameLabel[g]}</option>
-            ))}
-          </select>
-        </label>
+        <GameField value={values.game} onChange={(game) => onChange({ ...values, game })} />
       )}
       {show('game') && afterGame}
       {show('settings') && (
