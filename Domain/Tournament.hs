@@ -12,7 +12,7 @@ module Domain.Tournament
     , BracketId(..)
     , Tournament(..)
     , ParticipantMode(..)
-    , Game(GameEFootball, GamePubgMobile, GameCallOfDuty), mkGame, gameName
+    , Game(GameEFootball, GamePubgMobile, GameCallOfDuty), mkGame, gameName, legacyGameName
     , TournamentDetails(..)
     , noDetails
     , PublicStats(..)
@@ -62,6 +62,16 @@ mkGame raw
 
 gameName :: Game -> String
 gameName (Game s) = s
+
+-- v0.13: old API values (PubgMobile, CallOfDuty, eFootball) still resolve to
+-- the new names, so old links and old clients keep working. Any other text is
+-- returned unchanged for mkGame to validate.
+legacyGameName :: String -> String
+legacyGameName raw = case map toLower (unwords (words raw)) of
+    "pubgmobile" -> "PUBG Mobile"
+    "callofduty" -> "Call of Duty"
+    "efootball"  -> "eFootball"
+    _            -> raw
 
 -- Shortcuts for the three original games (keeps older code and tests readable).
 pattern GameEFootball :: Game

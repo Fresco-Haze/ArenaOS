@@ -58,7 +58,7 @@ import Domain.BracketLinks (BracketLinks, NodeDestination(..), NodeLinks(..), Sl
 import Domain.Tournament
   ( Tournament(..), TournamentName(..), OrganizerName(..)
   , TournamentFormat(..), Visibility(..), ParticipantMode(..)
-  , Game(..), TournamentDetails(..), PublicStats(..) )
+  , Game(..), legacyGameName, TournamentDetails(..), PublicStats(..) )
 import Shell.Persistence.Port (NewTournament(..))
 import qualified Application.UseCases.CreateTournament as Create
 import Engine.TournamentValidation
@@ -596,7 +596,7 @@ gameText :: Game -> Text
 gameText = T.pack . gameName
 
 gameFromText :: Text -> Maybe Game
-gameFromText = either (const Nothing) Just . mkGame . T.unpack
+gameFromText = either (const Nothing) Just . mkGame . legacyGameName . T.unpack
 
 -- Absent or null fields mean "none". Shared by create and PUT /details.
 newtype DetailsReq = DetailsReq TournamentDetails
@@ -618,7 +618,7 @@ instance FromJSON DetailsReq where
     ru <- o .:? "rules"
     pure (DetailsReq (TournamentDetails g st pz ds rd ef pf ru))
 
--- ?q= (name contains), ?game= (eFootball | PubgMobile | CallOfDuty | Other), ?limit= (1..100)
+-- ?q= (name contains), ?game= (a game name, any case; old PubgMobile and CallOfDuty still work), ?limit= (1..100)
 parseListFilter :: UTCTime -> Maybe Text -> Maybe Text -> Maybe Text -> Maybe Text -> Maybe Text -> Either ApiError ListPublic.PublicFilter
 parseListFilter now mq mg ml mu mo = do
   game <- case fmap T.strip mg of
@@ -2143,6 +2143,13 @@ main = do
     get "/tournaments/:id" $
       runViewAction lock GetT.getTournament fromGetTournament $ \v ->
         json (tournamentViewJson v)
+
+    -- public, no login: all games, for the dropdown
+    get "/games" $ do
+      result <- runUseCase lock Repo.listGames
+      case result of
+        Left apiErr -> sendError apiErr
+        Right gs    -> json [ object ["name" .= gameText g] | g <- gs ]
 
     -- public, no login: counts over public tournaments past Draft
     get "/stats" $ do
