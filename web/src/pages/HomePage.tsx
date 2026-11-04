@@ -17,7 +17,7 @@ import BannerImg from '../components/BannerImg'
 // The backend has no "featured" concept: the four newest public
 // tournaments that are open for registration or running.
 const FEATURED_STATES: readonly string[] = ['RegistrationOpen', 'InProgress']
-const POPULAR: readonly Game[] = ['eFootball', 'PubgMobile', 'CallOfDuty']
+const POPULAR: readonly Game[] = ['eFootball', 'PUBG Mobile', 'Call of Duty']
 
 const PATHS = {
   trophy: 'M8 4h8v5a4 4 0 0 1-8 0V4zM8 6H4v2a3 3 0 0 0 3 3M16 6h4v2a3 3 0 0 1-3 3M12 13v4M8 20h8M10 17h4',

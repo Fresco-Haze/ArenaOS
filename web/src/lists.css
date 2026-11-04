@@ -40,8 +40,8 @@
   background-position: center;
 }
 .trow-art[data-game='eFootball'] { background-image: url('/art/efootball.jpg'); background-position: center 20%; }
-.trow-art[data-game='PubgMobile'] { background-image: url('/art/pubg-mobile.jpg'); background-position: 30% center; }
-.trow-art[data-game='CallOfDuty'] { background-image: url('/art/call-of-duty.jpg'); background-position: 20% 12%; }
+.trow-art[data-game='PUBG Mobile'] { background-image: url('/art/pubg-mobile.jpg'); background-position: 30% center; }
+.trow-art[data-game='Call of Duty'] { background-image: url('/art/call-of-duty.jpg'); background-position: 20% 12%; }
 .trow-main { flex: 1; min-width: 0; }
 .trow-top {
   display: flex;

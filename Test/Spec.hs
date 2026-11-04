@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Main (main) where
 
+import Domain.Tournament (mkGame, gameName, legacyGameName)
 import Test.Hspec
 import Control.Monad (forM_)
 import Control.Monad.IO.Class (liftIO)
@@ -302,6 +303,7 @@ spec = before_ resetTestDb $ do
   bracketLinksViewSpec
   detailsSpec
   statsSpec
+  gamesSpec
   publicFilterSpec
   upcomingFilterSpec
   prizePoolSpec
@@ -7117,6 +7119,55 @@ spec = before_ resetTestDb $ do
         c <- UTD.updateTournamentDetails owner tid (noDetails { detailsRules = Just (replicate 1001 'a') })
         pure (efBad a, efBad b, efBad c)
       result `shouldBe` Right (True, True, True)
+  describe "Games as data (v0.13)" $ do
+
+    it "reuses a game ignoring case and spacing, and stores the canonical name" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "gd-owner-1"
+        g1 <- unwrap (mkGame "tekken 8")
+        g2 <- unwrap (mkGame "  TEKKEN   8 ")
+        t1 <- dtCreate owner "Case Cup A" (noDetails { detailsGame = Just g1 })
+        t2 <- dtCreate owner "Case Cup B" (noDetails { detailsGame = Just g2 })
+        a <- Repo.getTournament t1
+        b <- Repo.getTournament t2
+        gs <- Repo.listGames
+        pure (fmap gameName (tournamentGame a), fmap gameName (tournamentGame b), length [ () | g <- gs, g == g1 ])
+      result `shouldBe` Right (Just "Tekken 8", Just "Tekken 8", 1)
+
+    it "creates a custom game once and lists it" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "gd-owner-2"
+        g <- unwrap (mkGame "Zork Open 2026")
+        _ <- dtCreate owner "Zork A" (noDetails { detailsGame = Just g })
+        _ <- dtCreate owner "Zork B" (noDetails { detailsGame = Just g })
+        gs <- Repo.listGames
+        pure (length gs >= 43, length [ () | x <- gs, x == g ])
+      result `shouldBe` Right (True, 1)
+
+    it "clears the game when the details are removed" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "gd-owner-3"
+        g <- unwrap (mkGame "Chess")
+        tid <- dtCreate owner "Clear Cup" (noDetails { detailsGame = Just g })
+        t1 <- Repo.getTournament tid
+        _ <- UTD.updateTournamentDetails owner tid noDetails
+        t2 <- Repo.getTournament tid
+        pure (fmap gameName (tournamentGame t1), tournamentGame t2)
+      result `shouldBe` Right (Just "Chess", Nothing)
+
+    it "validates names: trimmed, 1 to 40 characters, no control characters" $ do
+      let bad r = either (const True) (const False) r
+      fmap gameName (mkGame "  Tekken   8 ") `shouldBe` Right "Tekken 8"
+      mkGame "TEKKEN 8" `shouldBe` mkGame "tekken 8"
+      map (bad . mkGame) ["", "   ", replicate 41 'a', "a\ab"] `shouldBe` [True, True, True, True]
+      bad (mkGame (replicate 40 'a')) `shouldBe` False
+
+    it "keeps the old API values working as aliases" $ do
+      map legacyGameName ["PubgMobile", " callofduty ", "eFootball", "Other", "PUBG Mobile", "Tekken 8"]
+        `shouldBe` ["PUBG Mobile", "Call of Duty", "eFootball", "Other", "PUBG Mobile", "Tekken 8"]
   describe "Engine.User.validateRawPassword (pure)" $ do
 
     it "rejects a password shorter than 8 characters" $
@@ -9827,3 +9878,54 @@ msTwo owner a b name = do
 efBad :: Either UTD.UpdateTournamentDetailsError () -> Bool
 efBad (Left (UTD.InvalidDetails _)) = True
 efBad _ = False
+
+-- ---------------------------------------------------------------------
+-- v0.13: games are data (names, unique ignoring case).
+-- ---------------------------------------------------------------------
+
+gameOf :: String -> Game
+gameOf = either error id . mkGame
+
+gamesSpec :: Spec
+gamesSpec = describe "Games (v0.13)" $ do
+
+  it "seeds the starting list of 42 games" $ do
+    result <- runSQLiteM testDbPath $ do
+      setupSchema
+      Repo.listGames
+    case result of
+      Left err -> expectationFailure (show err)
+      Right gs -> length gs `shouldBe` 42
+
+  it "reuses an existing game whatever the case, and trims spaces" $ do
+    result <- runSQLiteM testDbPath $ do
+      setupSchema
+      owner <- createTestUser "gm-owner-1"
+      _ <- stPublish owner "Fortnite Cup" (Just (gameOf "  fortnite "))
+      names <- map gameName <$> Repo.listGames
+      st <- Repo.publicStats
+      pure (length names, map (gameName . fst) (statsByGame st))
+    case result of
+      Left err -> expectationFailure (show err)
+      Right r  -> r `shouldBe` (42, ["Fortnite"])
+
+  it "creates a custom game once and reuses it" $ do
+    result <- runSQLiteM testDbPath $ do
+      setupSchema
+      owner <- createTestUser "gm-owner-2"
+      _ <- stPublish owner "Custom One" (Just (gameOf "Rocket Raccoon Cup"))
+      _ <- stPublish owner "Custom Two" (Just (gameOf "rocket raccoon cup"))
+      names <- map gameName <$> Repo.listGames
+      st <- Repo.publicStats
+      pure (length names, filter (== "Rocket Raccoon Cup") names, statsByGame st)
+    case result of
+      Left err -> expectationFailure (show err)
+      Right (total, same, byGame) -> do
+        total `shouldBe` 43
+        same `shouldBe` ["Rocket Raccoon Cup"]
+        byGame `shouldBe` [(gameOf "Rocket Raccoon Cup", 2)]
+
+  it "rejects blank and too-long names and tidies spaces" $ do
+    fmap gameName (mkGame "   ") `shouldBe` Left "game name is required"
+    fmap gameName (mkGame (replicate 41 'a')) `shouldBe` Left "game name must be 40 characters or fewer"
+    fmap gameName (mkGame "  Tom   Clancy's  ") `shouldBe` Right "Tom Clancy's"

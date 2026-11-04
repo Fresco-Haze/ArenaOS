@@ -1,3 +1,4 @@
+import GameFilter from '../components/GameFilter'
 import { Link, useSearchParams } from 'react-router'
 import { useApi } from '../hooks/useApi'
 import { Game, RankingList, gameLabel } from '../model'
@@ -17,16 +18,7 @@ export default function RankingsPage() {
   return (
     <>
       <PageHeader title="Rankings" />
-      <nav className="chips" aria-label="Filter by game">
-        <Link to={href('')} className="chip" aria-current={game === '' ? 'true' : undefined}>
-          All games
-        </Link>
-        {Game.options.map((g) => (
-          <Link key={g} to={href(g)} className="chip" aria-current={game === g ? 'true' : undefined}>
-            {gameLabel[g]}
-          </Link>
-        ))}
-      </nav>
+      <GameFilter current={game} href={href} />
       <p className="muted">
         Ranked by titles won, then match wins. Only public tournaments count. Players with the same record share a rank.
       </p>

@@ -15,7 +15,9 @@ export type TournamentFormat = z.infer<typeof TournamentFormat>
 export const ParticipantMode = z.enum(['IndividualOnly', 'SquadOnly'])
 export type ParticipantMode = z.infer<typeof ParticipantMode>
 
-export const Game = z.enum(['eFootball', 'PubgMobile', 'CallOfDuty', 'Other'])
+// v0.13: games are data, so a game is just its name.
+export const Game = z.string()
+export const GameList = z.array(z.object({ name: z.string() }))
 export type Game = z.infer<typeof Game>
 
 export const Tournament = z.object({
@@ -225,12 +227,10 @@ export type Team = z.infer<typeof Team>
 export const CreateTeamResponse = Team
 export const TeamList = z.object({ teams: z.array(Team) })
 
-export const gameLabel: Record<Game, string> = {
-  eFootball: 'eFootball',
-  PubgMobile: 'PUBG Mobile',
-  CallOfDuty: 'Call of Duty',
-  Other: 'Other',
-}
+// Shim: the label of a game is its own name. Remove with a later cleanup.
+export const gameLabel: Record<string, string> = new Proxy({} as Record<string, string>, {
+  get: (_target, key) => (typeof key === 'string' ? key : ''),
+})
 
 export const PublicStatsView = z.object({
   tournaments: z.number(),

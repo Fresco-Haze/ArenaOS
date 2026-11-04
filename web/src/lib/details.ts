@@ -1,4 +1,4 @@
-import { Game } from '../model'
+import type { Game } from '../model'
 import type { Tournament } from '../model'
 
 export const PRIZE_MAX = 1000000000
@@ -106,7 +106,7 @@ export function detailsFromTournament(t: Tournament): DetailsValues {
 // If a date field still shows what the server has, send the server's exact value back
 // (the picker has minute precision, the server may hold seconds).
 export function toPayload(v: DetailsValues, original?: Tournament): DetailsPayload {
-  const game = Game.safeParse(v.game)
+  const game = v.game.trim()
   let startTime = localInputToIso(v.start)
   if (original?.startTime && v.start === isoToLocalInput(original.startTime)) startTime = original.startTime
   let registrationDeadline = localInputToIso(v.deadline)
@@ -116,7 +116,7 @@ export function toPayload(v: DetailsValues, original?: Tournament): DetailsPaylo
   const description = v.description.trim()
   const rules = v.rules.trim()
   return {
-    game: game.success ? game.data : null,
+    game: game === '' ? null : game,
     startTime,
     registrationDeadline,
     prize: parsePrize(v.prize) ?? null,

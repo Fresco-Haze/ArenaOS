@@ -111,8 +111,8 @@
   background-position: center;
 }
 .gtile-art[data-game='eFootball'] { background-image: url('/art/efootball.jpg'); }
-.gtile-art[data-game='PubgMobile'] { background-image: url('/art/pubg-mobile.jpg'); }
-.gtile-art[data-game='CallOfDuty'] { background-image: url('/art/call-of-duty.jpg'); }
+.gtile-art[data-game='PUBG Mobile'] { background-image: url('/art/pubg-mobile.jpg'); }
+.gtile-art[data-game='Call of Duty'] { background-image: url('/art/call-of-duty.jpg'); }
 .gtile-body { padding: var(--space-3) var(--space-4) var(--space-4); }
 .gtile-name { margin: 0; font-size: 1.0625rem; }
 .gtile-count { margin: 2px 0 var(--space-3); color: var(--muted); font-size: var(--font-sm); }
@@ -225,8 +225,8 @@
   background-position: center;
 }
 .urow-art[data-game='eFootball'] { background-image: url('/art/efootball.jpg'); }
-.urow-art[data-game='PubgMobile'] { background-image: url('/art/pubg-mobile.jpg'); }
-.urow-art[data-game='CallOfDuty'] { background-image: url('/art/call-of-duty.jpg'); }
+.urow-art[data-game='PUBG Mobile'] { background-image: url('/art/pubg-mobile.jpg'); }
+.urow-art[data-game='Call of Duty'] { background-image: url('/art/call-of-duty.jpg'); }
 .urow-main { flex: 1; min-width: 0; }
 .urow-name {
   display: block;

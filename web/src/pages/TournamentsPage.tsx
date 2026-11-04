@@ -1,3 +1,4 @@
+import GameFilter from '../components/GameFilter'
 import { useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
 import { api, ApiError } from '../api'
@@ -32,16 +33,7 @@ export default function TournamentsPage() {
   return (
     <>
       <PageHeader title="Tournaments" />
-      <nav className="chips" aria-label="Filter by game">
-        <Link to={href('')} className="chip" aria-current={game === '' ? 'true' : undefined}>
-          All games
-        </Link>
-        {Game.options.map((g) => (
-          <Link key={g} to={href(g)} className="chip" aria-current={game === g ? 'true' : undefined}>
-            {gameLabel[g]}
-          </Link>
-        ))}
-      </nav>
+      <GameFilter current={game} href={href} />
       {/* key = the filters, so changing them starts again from page one */}
       <Results key={qs} q={q} game={game} gameName={game ? gameLabel[game] : null} qs={qs} />
     </>

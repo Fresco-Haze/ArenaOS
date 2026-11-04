@@ -1,3 +1,4 @@
+{-# LANGUAGE PatternSynonyms #-}
 -- Domain.Tournament
 -- Pure data types only, zero logic (Architecture.md: Domain layer).
 -- Transcribed from Document 3 (Domain Model, Core Types).
@@ -11,12 +12,13 @@ module Domain.Tournament
     , BracketId(..)
     , Tournament(..)
     , ParticipantMode(..)
-    , Game(..)
+    , Game(GameEFootball, GamePubgMobile, GameCallOfDuty), mkGame, gameName, legacyGameName
     , TournamentDetails(..)
     , noDetails
     , PublicStats(..)
     ) where
 
+import Data.Char (isControl, toLower)
 import Data.Time (UTCTime)
 import Domain.Ids (TournamentId(..), BracketId(..),UserId(..))
 
@@ -42,8 +44,44 @@ data TournamentFormat = SingleElimination | DoubleElimination | RoundRobin
 data Visibility = Public | Private deriving (Show, Eq)
 
 -- v0.12: optional tournament tag. Stored as text; see Schema CHECK.
-data Game = GameEFootball | GamePubgMobile | GameCallOfDuty | GameOther
-    deriving (Show, Eq)
+-- v0.13: a game is a validated name (trimmed, 1 to 40 characters). Games are
+-- data in the games table. Names compare ignoring case, like its NOCASE key.
+newtype Game = Game String
+    deriving (Show)
+
+instance Eq Game where
+    Game a == Game b = map toLower a == map toLower b
+
+mkGame :: String -> Either String Game
+mkGame raw
+    | null s          = Left "game name is required"
+    | length s > 40   = Left "game name must be 40 characters or fewer"
+    | any isControl s = Left "game name has invalid characters"
+    | otherwise       = Right (Game s)
+  where s = unwords (words raw)
+
+gameName :: Game -> String
+gameName (Game s) = s
+
+-- v0.13: old API values (PubgMobile, CallOfDuty, eFootball) still resolve to
+-- the new names, so old links and old clients keep working. Any other text is
+-- returned unchanged for mkGame to validate.
+legacyGameName :: String -> String
+legacyGameName raw = case map toLower (unwords (words raw)) of
+    "pubgmobile" -> "PUBG Mobile"
+    "callofduty" -> "Call of Duty"
+    "efootball"  -> "eFootball"
+    _            -> raw
+
+-- Shortcuts for the three original games (keeps older code and tests readable).
+pattern GameEFootball :: Game
+pattern GameEFootball = Game "eFootball"
+
+pattern GamePubgMobile :: Game
+pattern GamePubgMobile = Game "PUBG Mobile"
+
+pattern GameCallOfDuty :: Game
+pattern GameCallOfDuty = Game "Call of Duty"
 
 -- v0.12: optional, organizer-editable descriptive fields.
 -- startTime is the scheduled start (UTC); it never starts the tournament.
