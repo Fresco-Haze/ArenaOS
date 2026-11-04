@@ -43,6 +43,7 @@ module Shell.Persistence.Port
   
   ) where
 
+import Domain.Tournament (Game)
 import Domain.Participant (Player, PlayerName, Team, TeamName, Participant, ParticipantId)
 import Domain.Tournament (Tournament, TournamentId, TournamentName, OrganizerName, TournamentFormat, Visibility, TournamentState
  , ParticipantMode, TournamentDetails, PublicStats)
@@ -128,6 +129,7 @@ class Monad m => TournamentRepository m where
     updateTournamentRequireApproval :: TournamentId -> Bool -> m ()
     listAllTournaments :: m [Tournament]
     updateTournamentDetails :: TournamentId -> TournamentDetails -> m ()
+    listGames :: m [Game]
     publicStats :: m PublicStats
 
 -- Creation-shaped input for RegistrationRepository.createRegistration.

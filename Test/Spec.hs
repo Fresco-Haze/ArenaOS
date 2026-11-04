@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Main (main) where
 
+import Domain.Tournament (mkGame, gameName)
 import Test.Hspec
 import Control.Monad (forM_)
 import Control.Monad.IO.Class (liftIO)
@@ -302,6 +303,7 @@ spec = before_ resetTestDb $ do
   bracketLinksViewSpec
   detailsSpec
   statsSpec
+  gamesSpec
   publicFilterSpec
   upcomingFilterSpec
   prizePoolSpec
@@ -9827,3 +9829,54 @@ msTwo owner a b name = do
 efBad :: Either UTD.UpdateTournamentDetailsError () -> Bool
 efBad (Left (UTD.InvalidDetails _)) = True
 efBad _ = False
+
+-- ---------------------------------------------------------------------
+-- v0.13: games are data (names, unique ignoring case).
+-- ---------------------------------------------------------------------
+
+gameOf :: String -> Game
+gameOf = either error id . mkGame
+
+gamesSpec :: Spec
+gamesSpec = describe "Games (v0.13)" $ do
+
+  it "seeds the starting list of 42 games" $ do
+    result <- runSQLiteM testDbPath $ do
+      setupSchema
+      Repo.listGames
+    case result of
+      Left err -> expectationFailure (show err)
+      Right gs -> length gs `shouldBe` 42
+
+  it "reuses an existing game whatever the case, and trims spaces" $ do
+    result <- runSQLiteM testDbPath $ do
+      setupSchema
+      owner <- createTestUser "gm-owner-1"
+      _ <- stPublish owner "Fortnite Cup" (Just (gameOf "  fortnite "))
+      names <- map gameName <$> Repo.listGames
+      st <- Repo.publicStats
+      pure (length names, map (gameName . fst) (statsByGame st))
+    case result of
+      Left err -> expectationFailure (show err)
+      Right r  -> r `shouldBe` (42, ["Fortnite"])
+
+  it "creates a custom game once and reuses it" $ do
+    result <- runSQLiteM testDbPath $ do
+      setupSchema
+      owner <- createTestUser "gm-owner-2"
+      _ <- stPublish owner "Custom One" (Just (gameOf "Rocket Raccoon Cup"))
+      _ <- stPublish owner "Custom Two" (Just (gameOf "rocket raccoon cup"))
+      names <- map gameName <$> Repo.listGames
+      st <- Repo.publicStats
+      pure (length names, filter (== "Rocket Raccoon Cup") names, statsByGame st)
+    case result of
+      Left err -> expectationFailure (show err)
+      Right (total, same, byGame) -> do
+        total `shouldBe` 43
+        same `shouldBe` ["Rocket Raccoon Cup"]
+        byGame `shouldBe` [(gameOf "Rocket Raccoon Cup", 2)]
+
+  it "rejects blank and too-long names and tidies spaces" $ do
+    fmap gameName (mkGame "   ") `shouldBe` Left "game name is required"
+    fmap gameName (mkGame (replicate 41 'a')) `shouldBe` Left "game name must be 40 characters or fewer"
+    fmap gameName (mkGame "  Tom   Clancy's  ") `shouldBe` Right "Tom Clancy's"

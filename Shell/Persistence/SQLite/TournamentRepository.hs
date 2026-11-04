@@ -488,6 +488,12 @@ instance TournamentRepository SQLiteM where
         when (n == 0) $
             liftIO $ throwIO (NotFound ("Tournament not found: " ++ show tidInt))
 
+    listGames :: SQLiteM [Game]
+    listGames = do
+        conn <- asks envConnection
+        rows <- liftIO (query_ conn "SELECT name FROM games ORDER BY name COLLATE NOCASE" :: IO [Only String])
+        liftIO (mapM (\(Only n) -> textToGame n) rows)
+
     publicStats :: SQLiteM PublicStats
     publicStats = do
         conn <- asks envConnection
