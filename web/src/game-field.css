@@ -1,0 +1,19 @@
+.game-field { position: relative; }
+.game-hint { display: block; margin-top: 6px; }
+.game-list {
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 30;
+  margin: 4px 0 0;
+  padding: 4px;
+  list-style: none;
+  max-height: 240px;
+  overflow-y: auto;
+  background: #0b1628;
+  border: 1px solid #1f3a66;
+  border-radius: 10px;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.5);
+}
+.game-opt { padding: 9px 12px; border-radius: 8px; cursor: pointer; }
+.game-opt:hover, .game-opt.active { background: #16305a; }

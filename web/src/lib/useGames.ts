@@ -8,8 +8,8 @@ export function useGames(): string[] {
   useEffect(() => {
     let alive = true
     api('/games', GameList, { retryAnonymously: true })
-      .then((r) => { if (alive) setGames(r.games) })
-      .catch(() => {})
+      .then((r) => { if (alive) setGames(r.map((x) => x.name)) })
+      .catch((err) => { console.error('useGames: could not load /games', err) })
     return () => { alive = false }
   }, [])
   return games

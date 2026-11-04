@@ -17,7 +17,7 @@ export type ParticipantMode = z.infer<typeof ParticipantMode>
 
 // v0.13: games are data, so a game is just its name.
 export const Game = z.string()
-export const GameList = z.object({ games: z.array(z.string()) })
+export const GameList = z.array(z.object({ name: z.string() }))
 export type Game = z.infer<typeof Game>
 
 export const Tournament = z.object({
