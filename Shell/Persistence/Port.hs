@@ -40,10 +40,13 @@ module Shell.Persistence.Port
   ,NotificationRepository(..)
   ,AvatarRepository(..)
   ,BannerRepository(..)
+  ,LobbyRepository(..)
   
   ) where
 
 import Domain.Tournament (Game)
+import Domain.Tournament (TournamentKind)
+import Domain.Lobby (LobbySettings, GameEntry)
 import Domain.Participant (Player, PlayerName, Team, TeamName, Participant, ParticipantId)
 import Domain.Tournament (Tournament, TournamentId, TournamentName, OrganizerName, TournamentFormat, Visibility, TournamentState
  , ParticipantMode, TournamentDetails, PublicStats)
@@ -193,6 +196,18 @@ class Monad m => MatchRepository m where
     getMatch              :: MatchId -> m Match
     listMatchesForBracket :: BracketId -> m [Match]
     deleteMatch           :: MatchId -> m ()
+
+-- v0.14: lobby tournaments (battle royale style). Rounds are numbered 1, 2, ...
+-- inside one tournament and results are keyed by participant.
+-- saveLobbyRoundResults replaces a round's earlier results (delete, then
+-- insert), so callers run it inside withTxN.
+class Monad m => LobbyRepository m where
+    setTournamentKind :: TournamentId -> TournamentKind -> m ()
+    getLobbySettings :: TournamentId -> m LobbySettings
+    saveLobbySettings :: TournamentId -> LobbySettings -> m ()
+    addLobbyRound :: TournamentId -> m Int
+    saveLobbyRoundResults :: TournamentId -> Int -> [GameEntry ParticipantId] -> m ()
+    listLobbyRounds :: TournamentId -> m [(Int, [GameEntry ParticipantId])]
 
 class Monad m => Transactional m where
     withTxN :: m a -> m a

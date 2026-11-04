@@ -114,6 +114,8 @@ import Shell.Persistence.SQLite.EFootballScoreRepository ()
 import Shell.Persistence.SQLite.JoinRequestRepository ()
 import Shell.Persistence.SQLite.NotificationRepository ()
 import Shell.Persistence.SQLite.AvatarRepository ()
+import Shell.Persistence.SQLite.LobbyRepository ()
+import qualified Domain.Lobby as DL
 import qualified Data.ByteString as BSX
 import qualified Domain.Notification as Notif
 import qualified Engine.Rankings as Rk
@@ -7249,6 +7251,72 @@ spec = before_ resetTestDb $ do
         t <- Repo.getTournament tid
         pure (tournamentKind t)
       result `shouldBe` Right LobbyKind
+  describe "Lobby storage (v0.14)" $ do
+    let mkP n = do
+          let p = Player (PlayerName n)
+          Repo.savePlayer p
+          Repo.resolveParticipant (Individual p)
+
+    it "defaults, saves and updates the scoring settings" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "lr-owner-1"
+        tid <- dtCreate owner "Lobby Cup A" noDetails
+        s0 <- Repo.getLobbySettings tid
+        Repo.saveLobbySettings tid (DL.LobbySettings 2 [15, 12, 10])
+        s1 <- Repo.getLobbySettings tid
+        Repo.saveLobbySettings tid (DL.LobbySettings 0 [5])
+        s2 <- Repo.getLobbySettings tid
+        pure (s0, s1, s2)
+      result `shouldBe` Right (DL.defaultLobbySettings, DL.LobbySettings 2 [15, 12, 10], DL.LobbySettings 0 [5])
+
+    it "sets and reads back the kind of a tournament" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "lr-owner-2"
+        tid <- dtCreate owner "Lobby Cup B" noDetails
+        t0 <- Repo.getTournament tid
+        Repo.setTournamentKind tid LobbyKind
+        t1 <- Repo.getTournament tid
+        Repo.setTournamentKind tid BracketKind
+        t2 <- Repo.getTournament tid
+        pure (tournamentKind t0, tournamentKind t1, tournamentKind t2)
+      result `shouldBe` Right (BracketKind, LobbyKind, BracketKind)
+      missing <- runSQLiteM testDbPath $ do
+        setupSchema
+        Repo.setTournamentKind (TournamentId 999999) LobbyKind
+      either (const True) (const False) missing `shouldBe` True
+
+    it "numbers rounds, saves, replaces and lists results in order" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "lr-owner-3"
+        tid <- dtCreate owner "Lobby Cup C" noDetails
+        pa <- mkP "lr3-ann"
+        pb <- mkP "lr3-bob"
+        n1 <- Repo.addLobbyRound tid
+        n2 <- Repo.addLobbyRound tid
+        Repo.saveLobbyRoundResults tid n1 [DL.GameEntry pa 1 3, DL.GameEntry pb 2 0]
+        Repo.saveLobbyRoundResults tid n2 [DL.GameEntry pb 1 5, DL.GameEntry pa 2 1]
+        Repo.saveLobbyRoundResults tid n1 [DL.GameEntry pb 1 0, DL.GameEntry pa 2 4]
+        n3 <- Repo.addLobbyRound tid
+        rs <- Repo.listLobbyRounds tid
+        let expected =
+              [ (1, [DL.GameEntry pb 1 0, DL.GameEntry pa 2 4])
+              , (2, [DL.GameEntry pb 1 5, DL.GameEntry pa 2 1])
+              , (3, [])
+              ]
+        pure (n1, n2, n3, rs == expected)
+      result `shouldBe` Right (1, 2, 3, True)
+
+    it "rejects results for a round that does not exist" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "lr-owner-4"
+        tid <- dtCreate owner "Lobby Cup D" noDetails
+        pa <- mkP "lr4-ann"
+        Repo.saveLobbyRoundResults tid 99 [DL.GameEntry pa 1 0]
+      either (const True) (const False) result `shouldBe` True
   describe "Engine.User.validateRawPassword (pure)" $ do
 
     it "rejects a password shorter than 8 characters" $

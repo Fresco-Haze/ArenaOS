@@ -2,6 +2,8 @@
 -- Pure: scoring, standings and champion for lobby (battle royale style)
 -- tournaments. No database and no Tournament type. A participant can be any
 -- type with Eq, so the rules can be tested on their own.
+-- LobbySettings, defaultLobbySettings and GameEntry live in Domain.Lobby and
+-- are re-exported here.
 module Engine.Lobby
   ( LobbySettings(..)
   , defaultLobbySettings
@@ -20,15 +22,7 @@ import Data.Char (isDigit, isSpace)
 import Data.List (dropWhileEnd, sort, sortBy)
 import Data.Ord (comparing, Down(..))
 
--- Points per kill, and points for 1st, 2nd, ... place. Places past the end of
--- the list score 0. The defaults match the lobby_settings table.
-data LobbySettings = LobbySettings
-  { lobbyKillPoints      :: Int
-  , lobbyPlacementPoints :: [Int]
-  } deriving (Eq, Show)
-
-defaultLobbySettings :: LobbySettings
-defaultLobbySettings = LobbySettings 1 [10, 6, 5, 4, 3, 2, 1, 1]
+import Domain.Lobby (LobbySettings(..), defaultLobbySettings, GameEntry(..))
 
 -- "10, 6,5" -> [10,6,5]. 1 to 100 entries, each a whole number from 0 to 1000.
 parsePlacementPoints :: String -> Either String [Int]
@@ -45,13 +39,6 @@ splitCommas :: String -> [String]
 splitCommas s = case break (== ',') s of
   (a, [])       -> [a]
   (a, _ : rest) -> a : splitCommas rest
-
--- One participant's result in one game.
-data GameEntry a = GameEntry
-  { entryParticipant :: a
-  , entryPlacement   :: Int
-  , entryKills       :: Int
-  } deriving (Eq, Show)
 
 data LobbyError
   = NoEntries

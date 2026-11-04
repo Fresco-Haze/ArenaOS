@@ -101,9 +101,11 @@ library
                       Shell.Persistence.SQLite.JoinRequestRepository
                       Shell.Persistence.SQLite.NotificationRepository
                       Shell.Persistence.SQLite.AvatarRepository
+                      Shell.Persistence.SQLite.LobbyRepository
                       Engine.Champion
                       Engine.Rankings
                       Engine.Lobby
+                      Domain.Lobby
                       Application.UseCases.GetRankings
                       Engine.Players
                       Application.UseCases.GetPlayers
