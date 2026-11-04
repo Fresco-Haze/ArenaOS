@@ -118,6 +118,8 @@ import qualified Data.ByteString as BSX
 import qualified Domain.Notification as Notif
 import qualified Engine.Rankings as Rk
 import qualified Engine.Lobby as Lobby
+import Domain.Tournament (TournamentKind(..), Tournament(tournamentKind))
+import qualified Database.SQLite.Simple as KSQ
 import qualified Application.UseCases.GetRankings as GRK
 import qualified Application.UseCases.GetPlayers as GPL
 import qualified Engine.Players as Pl
@@ -1439,7 +1441,7 @@ spec = before_ resetTestDb $ do
             , tournamentVisibility = Public
             , tournamentMaxParticipants = 2
             , tournamentBracket = Nothing
-            , tournamentOwner = UserId 1, tournamentThirdPlaceMatch = False, tournamentParticipantMode = IndividualOnly, tournamentGame = Nothing, tournamentStartTime = Nothing, tournamentPrize = Nothing, tournamentDescription = Nothing, tournamentRequireApproval = False, tournamentRegistrationDeadline = Nothing, tournamentEntryFee = Nothing, tournamentPlatform = Nothing, tournamentRules = Nothing
+            , tournamentOwner = UserId 1, tournamentThirdPlaceMatch = False, tournamentParticipantMode = IndividualOnly, tournamentKind = BracketKind, tournamentGame = Nothing, tournamentStartTime = Nothing, tournamentPrize = Nothing, tournamentDescription = Nothing, tournamentRequireApproval = False, tournamentRegistrationDeadline = Nothing, tournamentEntryFee = Nothing, tournamentPlatform = Nothing, tournamentRules = Nothing
             }
           tournaments = map mkT [Draft, Draft, Published, InProgress, Completed, Completed, Completed, Cancelled]
           overview = buildTournamentOverview tournaments
@@ -7227,6 +7229,26 @@ spec = before_ resetTestDb $ do
       map Lobby.lsEntrant table `shouldBe` regd
       map Lobby.lsGamesPlayed table `shouldBe` [0, 0, 0, 0]
       Lobby.lobbyChampion table `shouldBe` Nothing
+  describe "Tournament kind (v0.14)" $ do
+
+    it "reads a normal tournament as a Bracket" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "kd-owner-1"
+        tid <- dtCreate owner "Kind Cup A" noDetails
+        t <- Repo.getTournament tid
+        pure (tournamentKind t)
+      result `shouldBe` Right BracketKind
+    it "reads a stored Lobby kind as a Lobby" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "kd-owner-2"
+        tid <- dtCreate owner "Kind Cup B" noDetails
+        env <- ask
+        liftIO (KSQ.execute (envConnection env) "UPDATE tournaments SET kind = 'Lobby' WHERE name = ?" (KSQ.Only ("Kind Cup B" :: String)))
+        t <- Repo.getTournament tid
+        pure (tournamentKind t)
+      result `shouldBe` Right LobbyKind
   describe "Engine.User.validateRawPassword (pure)" $ do
 
     it "rejects a password shorter than 8 characters" $
@@ -7326,7 +7348,7 @@ spec = before_ resetTestDb $ do
           , tournamentOrganizer = OrganizerName "x", tournamentFormat = SingleElimination
           , tournamentState = st, tournamentVisibility = vis
           , tournamentMaxParticipants = 2, tournamentBracket = Nothing
-          , tournamentOwner = UserId 1, tournamentThirdPlaceMatch = False, tournamentParticipantMode = IndividualOnly, tournamentGame = Nothing, tournamentStartTime = Nothing, tournamentPrize = Nothing, tournamentDescription = Nothing, tournamentRequireApproval = False, tournamentRegistrationDeadline = Nothing, tournamentEntryFee = Nothing, tournamentPlatform = Nothing, tournamentRules = Nothing }
+          , tournamentOwner = UserId 1, tournamentThirdPlaceMatch = False, tournamentParticipantMode = IndividualOnly, tournamentKind = BracketKind, tournamentGame = Nothing, tournamentStartTime = Nothing, tournamentPrize = Nothing, tournamentDescription = Nothing, tournamentRequireApproval = False, tournamentRegistrationDeadline = Nothing, tournamentEntryFee = Nothing, tournamentPlatform = Nothing, tournamentRules = Nothing }
         owner    = Just (UserId 1)
         stranger = Just (UserId 2)
 
@@ -7382,7 +7404,7 @@ spec = before_ resetTestDb $ do
           , tournamentOrganizer = OrganizerName "x", tournamentFormat = SingleElimination
           , tournamentState = st, tournamentVisibility = vis
           , tournamentMaxParticipants = 2, tournamentBracket = Nothing
-          , tournamentOwner = UserId 1, tournamentThirdPlaceMatch = False, tournamentParticipantMode = IndividualOnly, tournamentGame = Nothing, tournamentStartTime = Nothing, tournamentPrize = Nothing, tournamentDescription = Nothing, tournamentRequireApproval = False, tournamentRegistrationDeadline = Nothing, tournamentEntryFee = Nothing, tournamentPlatform = Nothing, tournamentRules = Nothing }
+          , tournamentOwner = UserId 1, tournamentThirdPlaceMatch = False, tournamentParticipantMode = IndividualOnly, tournamentKind = BracketKind, tournamentGame = Nothing, tournamentStartTime = Nothing, tournamentPrize = Nothing, tournamentDescription = Nothing, tournamentRequireApproval = False, tournamentRegistrationDeadline = Nothing, tournamentEntryFee = Nothing, tournamentPlatform = Nothing, tournamentRules = Nothing }
         ids = map (unTournamentId . tournamentId)
 
     it "keeps only Public tournaments past Draft, newest first" $
@@ -9562,7 +9584,7 @@ plT i name g = Tournament
   , tournamentMaxParticipants = 2, tournamentBracket = Nothing
   , tournamentOwner = UserId 1, tournamentThirdPlaceMatch = False
   , tournamentParticipantMode = IndividualOnly
-  , tournamentGame = g, tournamentStartTime = Nothing, tournamentPrize = Nothing, tournamentDescription = Nothing, tournamentRequireApproval = False, tournamentRegistrationDeadline = Nothing, tournamentEntryFee = Nothing, tournamentPlatform = Nothing, tournamentRules = Nothing }
+  , tournamentKind = BracketKind, tournamentGame = g, tournamentStartTime = Nothing, tournamentPrize = Nothing, tournamentDescription = Nothing, tournamentRequireApproval = False, tournamentRegistrationDeadline = Nothing, tournamentEntryFee = Nothing, tournamentPlatform = Nothing, tournamentRules = Nothing }
 
 -- ids 1..60; id 3 is "Zebra Open" (Call of Duty); other even ids are eFootball
 plAll :: [Tournament]

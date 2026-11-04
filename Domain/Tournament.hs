@@ -12,6 +12,7 @@ module Domain.Tournament
     , BracketId(..)
     , Tournament(..)
     , ParticipantMode(..)
+    , TournamentKind(..)
     , Game(GameEFootball, GamePubgMobile, GameCallOfDuty), mkGame, gameName, legacyGameName
     , TournamentDetails(..)
     , noDetails
@@ -115,6 +116,11 @@ data ParticipantMode = IndividualOnly | SquadOnly
 
 
 
+-- v0.14: a tournament is either a bracket (every tournament so far) or a
+-- lobby (battle royale style: placements and kills over several games).
+data TournamentKind = BracketKind | LobbyKind
+    deriving (Show, Eq)
+
 data Tournament = Tournament
     { tournamentId :: TournamentId
     , tournamentName :: TournamentName
@@ -136,5 +142,6 @@ data Tournament = Tournament
     , tournamentEntryFee :: Maybe Int
     , tournamentPlatform :: Maybe String
     , tournamentRules :: Maybe String
+    , tournamentKind :: TournamentKind
     } deriving (Show, Eq)
 

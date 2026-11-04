@@ -28,6 +28,7 @@ import Domain.Tournament
     , ParticipantMode(..)
     , Game(..)
     , TournamentDetails(..)
+    , TournamentKind(..)
     , PublicStats(..)
     )
 import Domain.TournamentHistory (TournamentHistoryEvent(..), TournamentHistoryEntry(..), ChangedField(..))
@@ -101,6 +102,13 @@ textToGame :: String -> IO Game
 textToGame s = case mkGame s of
     Right g  -> pure g
     Left err -> throwIO (StorageFailure ("Bad game in storage: " ++ err))
+
+-- v0.14: stored as text, like the other enums.
+textToKind :: String -> IO TournamentKind
+textToKind "Bracket" = pure BracketKind
+textToKind "Lobby"   = pure LobbyKind
+textToKind other     =
+    throwIO (StorageFailure ("Unknown tournament kind in storage: " ++ other))
 
 -- Find the game by name (ignoring case) or create it. Nothing means no game.
 resolveGameId :: SQ.Connection -> Maybe Game -> IO (Maybe Int)
@@ -201,22 +209,25 @@ tournamentSelect :: Query
 tournamentSelect =
     "SELECT id, name, organizer_name, owner_id, format, state, visibility, \
     \max_participants, third_place_match, bracket_id, \
-    \participant_mode, (SELECT name FROM games WHERE id = tournaments.game_id), start_time, prize_kes, description, require_approval, registration_deadline, entry_fee_kes, platform, rules \
+    \participant_mode, (SELECT name FROM games WHERE id = tournaments.game_id), start_time, prize_kes, description, require_approval, registration_deadline, entry_fee_kes, platform, rules, tournaments.kind \
     \FROM tournaments"
 
 type TournamentRow =
     (Int, String, String, Int, String, String, String, Int, Int, Maybe Int)
     :. (String, Maybe String, Maybe String, Maybe Int, Maybe String, Int, Maybe String, Maybe Int, Maybe String, Maybe String)
+    :. Only String
 
 decodeTournamentRow :: TournamentRow -> IO Tournament
 decodeTournamentRow
     ( (tidInt, name, organizer, ownerId, formatText, stateText, visText, maxP, thirdPlaceInt, bracketIdMaybe)
-      :. (modeText, gameMaybe, startMaybe, prizeMaybe, descMaybe, approvalInt, deadlineMaybe, feeMaybe, platformMaybe, rulesMaybe) ) = do
+      :. (modeText, gameMaybe, startMaybe, prizeMaybe, descMaybe, approvalInt, deadlineMaybe, feeMaybe, platformMaybe, rulesMaybe)
+      :. Only kindText ) = do
     format <- textToFormat formatText
     state  <- textToState stateText
     vis    <- textToVisibility visText
     mode   <- textToParticipantMode modeText
     game   <- traverse textToGame gameMaybe
+    kind   <- textToKind kindText
     start  <- traverse textToTime startMaybe
     deadline <- traverse textToTime deadlineMaybe
     pure Tournament
@@ -240,6 +251,7 @@ decodeTournamentRow
         , tournamentEntryFee = feeMaybe
         , tournamentPlatform = platformMaybe
         , tournamentRules = rulesMaybe
+        , tournamentKind = kind
         }
 
 -- v0.12: public stats. "Public" = Public and past Draft (same set as the list).
