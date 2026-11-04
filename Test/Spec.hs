@@ -117,6 +117,7 @@ import Shell.Persistence.SQLite.AvatarRepository ()
 import qualified Data.ByteString as BSX
 import qualified Domain.Notification as Notif
 import qualified Engine.Rankings as Rk
+import qualified Engine.Lobby as Lobby
 import qualified Application.UseCases.GetRankings as GRK
 import qualified Application.UseCases.GetPlayers as GPL
 import qualified Engine.Players as Pl
@@ -7168,6 +7169,64 @@ spec = before_ resetTestDb $ do
     it "keeps the old API values working as aliases" $ do
       map legacyGameName ["PubgMobile", " callofduty ", "eFootball", "Other", "PUBG Mobile", "Tekken 8"]
         `shouldBe` ["PUBG Mobile", "Call of Duty", "eFootball", "Other", "PUBG Mobile", "Tekken 8"]
+  describe "Engine.Lobby (pure)" $ do
+    let ent :: String -> Int -> Int -> Lobby.GameEntry String
+        ent = Lobby.GameEntry
+        regd = ["ann", "bob", "cat", "dan"] :: [String]
+        stg = Lobby.defaultLobbySettings
+
+    it "parses placement points and rejects bad lists" $ do
+      let bad r = either (const True) (const False) r
+      Lobby.parsePlacementPoints "10, 6,5" `shouldBe` Right [10, 6, 5]
+      Lobby.parsePlacementPoints "10,6,5,4,3,2,1,1" `shouldBe` Right (Lobby.lobbyPlacementPoints Lobby.defaultLobbySettings)
+      map (bad . Lobby.parsePlacementPoints) ["", "10,,5", "a", "-1", "1001", tail (concatMap (',' :) (replicate 101 "1"))]
+        `shouldBe` [True, True, True, True, True, True]
+
+    it "scores placement points plus kills, and 0 past the list" $ do
+      map (Lobby.entryPoints stg) [ent "ann" 1 3, ent "bob" 2 0, ent "cat" 8 2, ent "dan" 9 5]
+        `shouldBe` [13, 6, 3, 5]
+
+    it "accepts a complete game" $ do
+      Lobby.validateGame regd [ent "ann" 1 0, ent "bob" 2 1, ent "cat" 3 0, ent "dan" 4 2] `shouldBe` Right ()
+
+    it "rejects bad games" $ do
+      let vd = Lobby.validateGame regd
+      vd [] `shouldBe` Left Lobby.NoEntries
+      vd [ent "ann" 1 (-1), ent "bob" 2 0, ent "cat" 3 0, ent "dan" 4 0] `shouldBe` Left Lobby.NegativeKills
+      vd [ent "ann" 1 0, ent "ann" 2 0, ent "cat" 3 0, ent "dan" 4 0] `shouldBe` Left Lobby.DuplicateParticipant
+      vd [ent "ann" 1 0, ent "bob" 2 0, ent "cat" 3 0, ent "zed" 4 0] `shouldBe` Left Lobby.UnknownParticipant
+      vd [ent "ann" 1 0, ent "bob" 2 0, ent "cat" 3 0] `shouldBe` Left Lobby.MissingParticipant
+      vd [ent "ann" 1 0, ent "bob" 1 0, ent "cat" 3 0, ent "dan" 4 0] `shouldBe` Left Lobby.BadPlacements
+      vd [ent "ann" 1 0, ent "bob" 2 0, ent "cat" 3 0, ent "dan" 5 0] `shouldBe` Left Lobby.BadPlacements
+      vd [ent "ann" 0 0, ent "bob" 2 0, ent "cat" 3 0, ent "dan" 4 0] `shouldBe` Left Lobby.BadPlacements
+
+    it "totals points across games and orders the table" $ do
+      let g1 = [ent "ann" 1 3, ent "bob" 2 5, ent "cat" 3 0, ent "dan" 4 1]
+          g2 = [ent "bob" 1 2, ent "ann" 2 0, ent "dan" 3 4, ent "cat" 4 0]
+          table = Lobby.lobbyStandings stg regd [g1, g2]
+      map (\s -> (Lobby.lsEntrant s, Lobby.lsPoints s, Lobby.lsKills s, Lobby.lsGamesPlayed s)) table
+        `shouldBe` [("bob", 23, 7, 2), ("ann", 19, 3, 2), ("dan", 14, 5, 2), ("cat", 9, 0, 2)]
+      map fst (Lobby.lobbyRanks table) `shouldBe` [1, 2, 3, 4]
+      Lobby.lobbyChampion table `shouldBe` Just "bob"
+
+    it "breaks ties by kills, then best placement; a full tie has no champion" $ do
+      let reg2 = ["ann", "bob"] :: [String]
+          byKills = Lobby.lobbyStandings (Lobby.LobbySettings 1 [5, 3]) reg2 [[ent "ann" 1 0, ent "bob" 2 2]]
+          byBest = Lobby.lobbyStandings (Lobby.LobbySettings 0 [5, 3, 1]) reg2 [[ent "ann" 1 0, ent "bob" 2 0], [ent "ann" 3 0, ent "bob" 2 0]]
+          fullTie = Lobby.lobbyStandings (Lobby.LobbySettings 1 [5, 3]) reg2 [[ent "ann" 1 0, ent "bob" 2 2], [ent "ann" 2 2, ent "bob" 1 0]]
+      map Lobby.lsEntrant byKills `shouldBe` ["bob", "ann"]
+      Lobby.lobbyChampion byKills `shouldBe` Just "bob"
+      map Lobby.lsEntrant byBest `shouldBe` ["ann", "bob"]
+      map Lobby.lsPoints byBest `shouldBe` [6, 6]
+      Lobby.lobbyChampion byBest `shouldBe` Just "ann"
+      map fst (Lobby.lobbyRanks fullTie) `shouldBe` [1, 1]
+      Lobby.lobbyChampion fullTie `shouldBe` Nothing
+
+    it "lists everyone, including players with no games, and has no champion before any game" $ do
+      let table = Lobby.lobbyStandings stg regd []
+      map Lobby.lsEntrant table `shouldBe` regd
+      map Lobby.lsGamesPlayed table `shouldBe` [0, 0, 0, 0]
+      Lobby.lobbyChampion table `shouldBe` Nothing
   describe "Engine.User.validateRawPassword (pure)" $ do
 
     it "rejects a password shorter than 8 characters" $

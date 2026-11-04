@@ -103,6 +103,7 @@ library
                       Shell.Persistence.SQLite.AvatarRepository
                       Engine.Champion
                       Engine.Rankings
+                      Engine.Lobby
                       Application.UseCases.GetRankings
                       Engine.Players
                       Application.UseCases.GetPlayers
