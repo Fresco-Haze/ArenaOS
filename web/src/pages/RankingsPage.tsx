@@ -11,9 +11,9 @@ export default function RankingsPage() {
   const [params] = useSearchParams()
   const parsed = Game.safeParse(params.get('game'))
   const game = parsed.success ? parsed.data : ''
-  const list = useApi(game ? `/rankings?limit=50&game=${game}` : '/rankings?limit=50', RankingList, true)
+  const list = useApi(game ? `/rankings?limit=50&game=${encodeURIComponent(game)}` : '/rankings?limit=50', RankingList, true)
   const rows = list.data ? list.data.rankings : null
-  const href = (g: string) => (g ? `/rankings?game=${g}` : '/rankings')
+  const href = (g: string) => (g ? `/rankings?game=${encodeURIComponent(g)}` : '/rankings')
 
   return (
     <>
