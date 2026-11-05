@@ -5,3 +5,7 @@
 .lobby-table .num { text-align: right; font-variant-numeric: tabular-nums; }
 .lobby-champ td { background: rgba(255, 200, 60, 0.1); }
 .lobby-badge { margin-left: 8px; padding: 2px 8px; border-radius: 999px; font-size: 0.75em; background: rgba(255, 200, 60, 0.22); }
+
+.lobby-controls { margin: var(--space-4) 0; }
+.lobby-controls h3 { margin: var(--space-4) 0 var(--space-2); }
+.lobby-form input { width: 5rem; text-align: right; }

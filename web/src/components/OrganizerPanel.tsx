@@ -1,4 +1,7 @@
 import { Link } from 'react-router'
+import { useApi } from '../hooks/useApi'
+import { LobbyRoundsView, LobbyStandingsView } from '../lib/lobby'
+import { participantName } from '../lib/participants'
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { ApiError } from '../api'
@@ -15,6 +18,7 @@ import {
   setThirdPlaceMatch, listTeams, updateName, updateVisibility, updateMaxParticipants,
   pauseTournament, resumeTournament, reopenTournament, updateDetails, updateFormat,
   setRequireApproval, listJoinRequests, approveJoinRequest, declineJoinRequest,
+  startLobby, completeLobby, recordLobbyRound, correctLobbyRound,
 } from '../lib/tournamentActions'
 import { formatLabel, stateLabel } from '../model'
 import type { BracketView, JoinRequestRow, Team, Tournament, TournamentFormat } from '../model'
@@ -581,6 +585,178 @@ type Props = {
   reload: () => Promise<void>
 }
 
+// One row of the round form: a participant with a place and a kills count.
+type LobbyRow = { participantId: number; name: string; place: string; kills: string }
+
+// Organizer controls for a lobby tournament: start, record or correct rounds, complete.
+function LobbyControls({ tournament, onDone }: { tournament: Tournament; onDone: () => Promise<void> }) {
+  const id = tournament.tournamentId
+  const inProgress = tournament.state === 'InProgress'
+  const standings = useApi(`/tournaments/${id}/lobby/standings`, LobbyStandingsView, true)
+  const rounds = useApi(`/tournaments/${id}/lobby/rounds`, LobbyRoundsView, true)
+  const [editing, setEditing] = useState<number | null>(null)
+  const [rows, setRows] = useState<LobbyRow[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [confirmOpen, setConfirmOpen] = useState(false)
+
+  const people = standings.data ? standings.data.standings : null
+  const roundList = rounds.data ? rounds.data.rounds : null
+
+  // The form rows: what the organizer typed, or a blank round built from the standings.
+  const shown: LobbyRow[] =
+    rows ?? (people ?? []).map((s, i) => ({
+      participantId: s.participantId,
+      name: participantName(s.participant),
+      place: String(i + 1),
+      kills: '0',
+    }))
+
+  function setRow(i: number, patch: Partial<LobbyRow>) {
+    setRows(shown.map((r, j) => (j === i ? { ...r, ...patch } : r)))
+  }
+
+  function startEdit(round: number) {
+    const found = roundList?.find((r) => r.round === round)
+    if (!found || !people) return
+    const byId = new Map(people.map((s) => [s.participantId, participantName(s.participant)]))
+    const sorted = [...found.results].sort((a, b) => a.placement - b.placement)
+    setRows(sorted.map((e) => ({
+      participantId: e.participantId,
+      name: byId.get(e.participantId) ?? 'Participant ' + e.participantId,
+      place: String(e.placement),
+      kills: String(e.kills),
+    })))
+    setEditing(round)
+    setError(null)
+  }
+
+  function cancelEdit() {
+    setEditing(null)
+    setRows(null)
+    setError(null)
+  }
+
+  async function save() {
+    const results = shown.map((r) => ({
+      participantId: r.participantId,
+      placement: Number(r.place),
+      kills: Number(r.kills),
+    }))
+    if (results.some((r) => !Number.isInteger(r.placement) || !Number.isInteger(r.kills))) {
+      setError('Enter a whole number for every place and kills box.')
+      return
+    }
+    setBusy(true)
+    setError(null)
+    try {
+      if (editing === null) await recordLobbyRound(id, results)
+      else await correctLobbyRound(id, editing, results)
+      setEditing(null)
+      setRows(null)
+      standings.retry()
+      rounds.retry()
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Could not reach the server')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (!inProgress) {
+    return (
+      <div className="action-row">
+        <ActionButton primary label="Start lobby" onRun={async () => { await startLobby(id); await onDone() }} />
+      </div>
+    )
+  }
+
+  return (
+    <div className="lobby-controls">
+      <h3>{editing === null ? 'Record the next round' : 'Correct round ' + editing}</h3>
+      {standings.error && <p role="alert" className="form-error">{standings.error}</p>}
+      {people === null ? (
+        <p className="muted">Loading participants</p>
+      ) : (
+        <>
+          <table className="lobby-table lobby-form">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th className="num">Place</th>
+                <th className="num">Kills</th>
+              </tr>
+            </thead>
+            <tbody>
+              {shown.map((r, i) => (
+                <tr key={r.participantId}>
+                  <td>{r.name}</td>
+                  <td className="num">
+                    <input
+                      type="number"
+                      min={1}
+                      aria-label={'Place for ' + r.name}
+                      value={r.place}
+                      onChange={(e) => setRow(i, { place: e.target.value })}
+                    />
+                  </td>
+                  <td className="num">
+                    <input
+                      type="number"
+                      min={0}
+                      aria-label={'Kills for ' + r.name}
+                      value={r.kills}
+                      onChange={(e) => setRow(i, { kills: e.target.value })}
+                    />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="muted">Every participant needs a different place, starting from 1.</p>
+          {error && <p role="alert" className="form-error">{error}</p>}
+          <div className="action-row">
+            <button className="btn-primary" onClick={() => void save()} disabled={busy}>
+              {busy ? 'Working' : editing === null ? 'Save round' : 'Save correction'}
+            </button>
+            {editing !== null && <button onClick={cancelEdit} disabled={busy}>Cancel correction</button>}
+          </div>
+        </>
+      )}
+
+      {roundList !== null && roundList.length > 0 && (
+        <>
+          <h3>Rounds played</h3>
+          <ul className="req-list">
+            {roundList.map((r) => (
+              <li key={r.round} className="req-row">
+                <span className="req-name">Round {r.round}</span>
+                <button onClick={() => startEdit(r.round)} disabled={busy}>Edit</button>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+
+      <div className="action-row">
+        <button className="btn-primary" onClick={() => setConfirmOpen(true)} disabled={roundList === null || roundList.length === 0}>
+          Complete lobby
+        </button>
+        {(roundList === null || roundList.length === 0) && <p className="muted">Record at least one round to complete.</p>}
+      </div>
+      <ConfirmDialog
+        open={confirmOpen}
+        title="Complete lobby"
+        confirmLabel="Complete lobby"
+        onConfirm={async () => { await completeLobby(id); await onDone() }}
+        onClose={() => setConfirmOpen(false)}
+      >
+        <p>Finish the lobby after {roundList ? roundList.length : 0} {roundList && roundList.length === 1 ? 'round' : 'rounds'}? The final standings are kept, and rounds can't be changed after this.</p>
+      </ConfirmDialog>
+    </div>
+  )
+}
+
 export default function OrganizerPanel({ tournament, bracket, participantCount, registered, refreshKey, reload }: Props) {
   const id = tournament.tournamentId
 
@@ -642,6 +818,10 @@ export default function OrganizerPanel({ tournament, bracket, participantCount, 
           )}
           <ActionButton primary={!!tournament.bracketId} label="Start tournament" onRun={async () => { await startTournament(id); await reload() }} />
         </div>
+      )}
+
+      {['RegistrationClosed', 'InProgress'].includes(tournament.state) && tournament.kind === 'Lobby' && (
+        <LobbyControls tournament={tournament} onDone={reload} />
       )}
 
       {tournament.state === 'InProgress' && bracket && (
