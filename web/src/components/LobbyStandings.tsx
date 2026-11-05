@@ -1,5 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
-import { api } from '../api'
+import { useApi } from '../hooks/useApi'
 import { LobbyStandingsView } from '../lib/lobby'
 import { participantName } from '../lib/participants'
 import type { Tournament } from '../model'
@@ -10,25 +9,10 @@ import '../lobby.css'
 
 // The table of a lobby (battle royale style) tournament, best first.
 export default function LobbyStandings({ tournament }: { tournament: Tournament }) {
-  const [data, setData] = useState<LobbyStandingsView | null>(null)
-  const [error, setError] = useState<string | null>(null)
   const id = tournament.tournamentId
+  const { data, error, retry } = useApi(`/tournaments/${id}/lobby/standings`, LobbyStandingsView, true)
 
-  const load = useCallback(async () => {
-    try {
-      const d = await api(`/tournaments/${id}/lobby/standings`, LobbyStandingsView, { retryAnonymously: true })
-      setData(d)
-      setError(null)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not load the standings')
-    }
-  }, [id])
-
-  useEffect(() => {
-    void load()
-  }, [load])
-
-  if (error) return <ErrorBanner message={error} onRetry={() => void load()} />
+  if (error) return <ErrorBanner message={error} onRetry={retry} />
   if (!data) return <LoadingBlock label="Loading standings" rows={4} />
 
   const finished = tournament.state === 'Completed'
