@@ -169,6 +169,8 @@ executable arenaos-api
                     , aeson
                     , text
                     , http-types
+                    , http-client
+                    , http-client-tls
                     , containers
                     , bytestring
                     , entropy
