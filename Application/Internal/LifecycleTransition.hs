@@ -9,9 +9,10 @@ module Application.Internal.LifecycleTransition
     , requireTournamentStateNotIn
     , requireOperationallyActive
     , requireSchedulable
+    , requireBracketTournament
     ) where
 
-import Domain.Tournament (Tournament(..), TournamentState(..))
+import Domain.Tournament (Tournament(..), TournamentKind(..), TournamentState(..))
 
 -- Two constructors, not one: InvalidTransition has a single well-defined
 -- "expected" state to report (used by the five equality-check call
@@ -27,6 +28,7 @@ data LifecycleError
     | ForbiddenState
         { lifecycleCurrentState :: TournamentState
         }
+    | WrongKind
     deriving (Eq, Show)
 
 -- Exact-match check. Used by PublishTournament, OpenRegistration,
@@ -60,3 +62,10 @@ requireOperationallyActive = requireTournamentStateNotIn
 -- reschedule future matches precisely while play is paused (v0.10).
 requireSchedulable :: Tournament -> Either LifecycleError ()
 requireSchedulable = requireTournamentStateNotIn [Completed, Cancelled]
+
+-- | Bracket-only actions (generate bracket, start, complete, change the
+-- format, change the third-place setting) are not allowed on a lobby.
+requireBracketTournament :: Tournament -> Either LifecycleError ()
+requireBracketTournament tournament
+  | tournamentKind tournament == BracketKind = Right ()
+  | otherwise                                = Left WrongKind

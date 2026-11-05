@@ -70,10 +70,18 @@ export function createTournament(input: {
   entryFee?: number | null
   platform?: string | null
   rules?: string | null
+  lobby?: { killPoints: number; placementPoints: string } | null
 }) {
+  const { lobby, ...rest } = input
+  if (lobby) {
+    return api('/lobbies', CreateTournamentResponse, {
+      method: 'POST',
+      body: JSON.stringify({ ...rest, settings: lobby }),
+    })
+  }
   return api('/tournaments', CreateTournamentResponse, {
     method: 'POST',
-    body: JSON.stringify({ ...input, format: input.format ?? 'SingleElimination' }),
+    body: JSON.stringify({ ...rest, format: rest.format ?? 'SingleElimination' }),
   })
 }
 
@@ -261,4 +269,23 @@ export function uploadBanner(id: number, image: Blob) {
 
 export function removeBanner(id: number) {
   return apiVoid(`/tournaments/${id}/banner`, { method: 'DELETE' })
+}
+
+// ---- Lobby (battle royale style) tournaments
+export type LobbyRoundEntry = { participantId: number; placement: number; kills: number }
+
+export function startLobby(id: number) {
+  return apiVoid(`/tournaments/${id}/lobby/start`, { method: 'POST' })
+}
+
+export function completeLobby(id: number) {
+  return apiVoid(`/tournaments/${id}/lobby/complete`, { method: 'POST' })
+}
+
+export function recordLobbyRound(id: number, results: LobbyRoundEntry[]) {
+  return apiVoid(`/tournaments/${id}/lobby/rounds`, { method: 'POST', body: JSON.stringify({ results }) })
+}
+
+export function correctLobbyRound(id: number, round: number, results: LobbyRoundEntry[]) {
+  return apiVoid(`/tournaments/${id}/lobby/rounds/${round}`, { method: 'PUT', body: JSON.stringify({ results }) })
 }

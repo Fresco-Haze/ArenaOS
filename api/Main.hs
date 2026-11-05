@@ -2,6 +2,15 @@
 module Main where
 
 import Domain.Tournament (mkGame, gameName)
+import Domain.Tournament (TournamentKind(LobbyKind))
+import Domain.Lobby (LobbySettings(..), defaultLobbySettings)
+import qualified Engine.Lobby as EL
+import qualified Application.UseCases.Lobby as LobbyUC
+import Shell.Persistence.SQLite.LobbyRepository ()
+import Domain.Lobby (GameEntry(..))
+import Domain.Participant (ParticipantId(..))
+import Data.Aeson.Types (Parser)
+import Application.Internal.Authorization (requireVisibleToViewer)
 import Web.Scotty
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -176,6 +185,8 @@ fromLifecycle :: LifecycleError -> ApiError
 fromLifecycle (InvalidTransition cur expected) =
   ApiError status409 "INVALID_TRANSITION" "Tournament is not in the required state"
     (object ["current" .= show cur, "expected" .= show expected])
+fromLifecycle WrongKind =
+  ApiError status409 "NOT_A_BRACKET_TOURNAMENT" "This action is for bracket tournaments, not lobbies" (object [])
 fromLifecycle (ForbiddenState cur) =
   ApiError status409 "FORBIDDEN_STATE" "Not allowed in the current state"
     (object ["current" .= show cur])
@@ -566,6 +577,140 @@ toNewTournament uid r = NewTournament
   , newTournamentParticipantMode = reqParticipantMode r
   }
 
+-- Body of POST/PUT .../lobby/rounds: one result for every registered participant.
+newtype LobbyRoundReq = LobbyRoundReq [GameEntry ParticipantId]
+
+parseLobbyEntry :: Value -> Parser (GameEntry ParticipantId)
+parseLobbyEntry = withObject "result" $ \e ->
+  GameEntry <$> (ParticipantId <$> e .: "participantId") <*> e .: "placement" <*> e .: "kills"
+
+instance FromJSON LobbyRoundReq where
+  parseJSON = withObject "round" $ \o ->
+    LobbyRoundReq <$> (o .: "results" >>= mapM parseLobbyEntry)
+
+-- Read access to a lobby: anyone who can see the tournament, anonymous included.
+data LobbyViewError
+  = LobbyViewDenied AuthorizationError
+  | LobbyViewNotALobby
+
+fromLobbyView :: LobbyViewError -> ApiError
+fromLobbyView (LobbyViewDenied a) = fromAuthorization a
+fromLobbyView LobbyViewNotALobby =
+  ApiError status409 "NOT_A_LOBBY" "This is not a lobby tournament" (object [])
+
+loadLobbyView :: Maybe UserId -> TournamentId -> SQLiteM (Either LobbyViewError Tournament)
+loadLobbyView mu tid = do
+  t <- Repo.getTournament tid
+  pure $ case requireVisibleToViewer mu t of
+    Left e -> Left (LobbyViewDenied e)
+    Right ()
+      | tournamentKind t /= LobbyKind -> Left LobbyViewNotALobby
+      | otherwise                     -> Right t
+
+lobbyEntryJson :: GameEntry ParticipantId -> Value
+lobbyEntryJson e = object
+  [ "participantId" .= unParticipantId (entryParticipant e)
+  , "placement"     .= entryPlacement e
+  , "kills"         .= entryKills e ]
+
+lobbyStandingJson :: Int -> EL.LobbyStanding ParticipantId -> Participant -> Value
+lobbyStandingJson rank s p = object
+  [ "rank"          .= rank
+  , "participantId" .= unParticipantId (EL.lsEntrant s)
+  , "participant"   .= participantJson p
+  , "points"        .= EL.lsPoints s
+  , "kills"         .= EL.lsKills s
+  , "bestPlacement" .= EL.lsBestPlacement s
+  , "roundsPlayed"  .= EL.lsGamesPlayed s ]
+
+lobbyRoundsView :: Maybe UserId -> TournamentId -> SQLiteM (Either LobbyViewError Value)
+lobbyRoundsView mu tid = do
+  r <- loadLobbyView mu tid
+  case r of
+    Left e  -> pure (Left e)
+    Right _ -> do
+      rounds <- Repo.listLobbyRounds tid
+      pure (Right (object
+        [ "rounds" .= [ object ["round" .= n, "results" .= map lobbyEntryJson es] | (n, es) <- rounds ] ]))
+
+lobbyStandingsView :: Maybe UserId -> TournamentId -> SQLiteM (Either LobbyViewError Value)
+lobbyStandingsView mu tid = do
+  r <- loadLobbyView mu tid
+  case r of
+    Left e  -> pure (Left e)
+    Right _ -> do
+      standings <- LobbyUC.loadLobbyStandings tid
+      people    <- mapM (Repo.getParticipant . EL.lsEntrant) standings
+      let ranked   = EL.lobbyRanks standings
+          champion = EL.lobbyChampion standings
+      pure (Right (object
+        [ "standings" .= [ lobbyStandingJson rank s p | ((rank, s), p) <- zip ranked people ]
+        , "championParticipantId" .= fmap unParticipantId champion ]))
+
+kindText :: TournamentKind -> Text
+kindText LobbyKind = "Lobby"
+kindText _         = "Bracket"
+
+-- POST /lobbies: like a tournament, without a format; "settings" is optional.
+data LobbyCreateReq = LobbyCreateReq CreateReq LobbySettings
+
+instance FromJSON LobbyCreateReq where
+  parseJSON = withObject "lobby" $ \o -> do
+    n   <- o .: "name"
+    org <- o .: "organizer"
+    v   <- o .: "visibility"
+    m   <- o .: "maxParticipants"
+    pm  <- o .:? "participantMode" .!= ("IndividualOnly" :: Text)
+    vis <- case (v :: Text) of
+      "Public"  -> pure Public
+      "Private" -> pure Private
+      _ -> fail "visibility must be Public or Private"
+    mode <- case pm of
+      "IndividualOnly" -> pure IndividualOnly
+      "SquadOnly"      -> pure SquadOnly
+      _ -> fail "participantMode must be IndividualOnly or SquadOnly"
+    DetailsReq det <- parseJSON (Object o)
+    ms <- o .:? "settings"
+    settings <- case ms of
+      Nothing -> pure defaultLobbySettings
+      Just so -> flip (withObject "settings") so $ \s -> do
+        kp <- s .:? "killPoints" .!= lobbyKillPoints defaultLobbySettings
+        pp <- s .:? "placementPoints"
+        ps <- case pp of
+          Nothing  -> pure (lobbyPlacementPoints defaultLobbySettings)
+          Just txt -> either fail pure (EL.parsePlacementPoints txt)
+        pure (LobbySettings kp ps)
+    pure (LobbyCreateReq (CreateReq n org SingleElimination vis m False mode False det) settings)
+
+fromLobbyCreate :: LobbyUC.CreateLobbyError -> ApiError
+fromLobbyCreate (LobbyUC.LobbyCreateInvalid v)        = fromValidation v
+fromLobbyCreate (LobbyUC.LobbyCreateInvalidDetails e) = fromDetailsValidation e
+fromLobbyCreate LobbyUC.LobbyCreateBadSettings =
+  ApiError status400 "VALIDATION_FAILED" "Lobby settings are out of range"
+    (object ["field" .= ("settings" :: Text)])
+
+lobbyResultsMessage :: EL.LobbyError -> Text
+lobbyResultsMessage EL.NoEntries            = "Enter a result for every registered participant"
+lobbyResultsMessage EL.NegativeKills        = "Kills cannot be negative"
+lobbyResultsMessage EL.DuplicateParticipant = "A participant appears more than once"
+lobbyResultsMessage EL.UnknownParticipant   = "A participant in the results is not registered"
+lobbyResultsMessage EL.MissingParticipant   = "Every registered participant needs a result"
+lobbyResultsMessage EL.BadPlacements        = "Placements must be 1, 2, 3 and so on, with no repeats or gaps"
+
+fromLobbyAction :: LobbyUC.LobbyActionError -> ApiError
+fromLobbyAction (LobbyUC.LobbyUnauthorized a)      = fromAuthorization a
+fromLobbyAction (LobbyUC.LobbyInvalidLifecycle l)  = fromLifecycle l
+fromLobbyAction LobbyUC.NotALobby =
+  ApiError status409 "NOT_A_LOBBY" "This is not a lobby tournament" (object [])
+fromLobbyAction LobbyUC.LobbyNeedsTwoParticipants =
+  ApiError status409 "LOBBY_NEEDS_PARTICIPANTS"
+    "A lobby needs at least two registered participants to start" (object [])
+fromLobbyAction (LobbyUC.LobbyInvalidResults e) =
+  ApiError status400 "INVALID_RESULTS" (lobbyResultsMessage e) (object [])
+fromLobbyAction (LobbyUC.LobbyRoundNotFound n) =
+  ApiError status404 "ROUND_NOT_FOUND" "That round does not exist" (object ["round" .= n])
+fromLobbyAction (LobbyUC.LobbyCompleteInvalid e)   = fromTournamentError e
+
 tournamentJson :: Tournament -> Value
 tournamentJson t = object (tournamentPairs t)
 
@@ -779,7 +924,8 @@ activityJson a = object
 
 tournamentPairs :: Tournament -> [Pair]
 tournamentPairs t =
-  [ "game"      .= fmap gameText (tournamentGame t)
+  [ "kind"      .= kindText (tournamentKind t)
+  , "game"      .= fmap gameText (tournamentGame t)
   , "startTime" .= tournamentStartTime t
   , "prize"     .= tournamentPrize t
   , "description" .= tournamentDescription t
@@ -949,6 +1095,7 @@ fromTournamentError TournamentPaused =
 fromComplete :: Complete.CompleteTournamentError -> ApiError
 fromComplete (Complete.Unauthorized a)      = fromAuthorization a
 fromComplete (Complete.InvalidCompletion e) = fromTournamentError e
+fromComplete (Complete.WrongTournamentKind l) = fromLifecycle l
 fromComplete Complete.TournamentPausedCannotComplete =
   fromTournamentError TournamentPaused
 
@@ -2121,6 +2268,58 @@ main = do
               [ "tournaments" .=
                   map (\(t, b) -> tournamentJsonListed (countFor (snd ts) t) b t) (sortOn (negate . unTournamentId . tournamentId . fst) (fst ts)) ])
     
+    post "/lobbies" $ do
+      mUser <- currentUser lock
+      raw   <- body
+      case (mUser, eitherDecode raw) of
+        (Nothing, _)         -> sendError unauthenticated
+        (_, Left reason)     -> sendError (invalidBody reason)
+        (Just uid, Right (LobbyCreateReq req settings)) -> do
+          result <- runUseCase lock
+                      (LobbyUC.createLobbyTournament (toNewTournament uid req) (reqDetails req) settings)
+          case result of
+            Left apiErr       -> sendError apiErr
+            Right (Left e)    -> sendError (fromLobbyCreate e)
+            Right (Right tid) -> do
+              status status201
+              json (object ["tournamentId" .= unTournamentId tid])
+
+    post "/tournaments/:id/lobby/rounds" $ do
+      raw <- body
+      case eitherDecode raw of
+        Left reason -> sendError (invalidBody reason)
+        Right (LobbyRoundReq entries) ->
+          runAction lock
+            (\uid tid -> LobbyUC.recordLobbyRound uid tid Nothing entries)
+            fromLobbyAction $ \n -> do
+              status status201
+              json (object ["round" .= n])
+
+    put "/tournaments/:id/lobby/rounds/:n" $ do
+      raw  <- body
+      rawN <- pathParam "n"
+      case (eitherDecode raw, readMaybe (T.unpack rawN)) of
+        (Left reason, _) -> sendError (invalidBody reason)
+        (_, Nothing)     -> sendError (ApiError status400 "BAD_REQUEST" "Invalid round number" (object []))
+        (Right (LobbyRoundReq entries), Just n) ->
+          runAction lock
+            (\uid tid -> LobbyUC.recordLobbyRound uid tid (Just n) entries)
+            fromLobbyAction $ \m ->
+              json (object ["round" .= m])
+
+    get "/tournaments/:id/lobby/rounds" $
+      runViewAction lock lobbyRoundsView fromLobbyView json
+
+    get "/tournaments/:id/lobby/standings" $
+      runViewAction lock lobbyStandingsView fromLobbyView json
+
+    post "/tournaments/:id/lobby/start" $
+      runTransition lock LobbyUC.startLobby fromLobbyAction
+
+    post "/tournaments/:id/lobby/complete" $
+      runAction lock LobbyUC.completeLobby fromLobbyAction $ \t ->
+        json (tournamentJson t)
+
     post "/tournaments/:id/start" $
       runTransition lock StartT.startTournament fromStartTournament
 

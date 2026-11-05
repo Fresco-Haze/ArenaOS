@@ -1,3 +1,4 @@
+import { setRequireApproval as setApprovalOnServer } from '../lib/tournamentActions'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, FormEvent } from 'react'
 import { useNavigate } from 'react-router'
@@ -19,7 +20,7 @@ const LAST = STEPS.length - 1
 
 // Which step owns a field the server complains about (anything else is in Settings).
 const FIELD_STEP: Record<string, number> = {
-  name: 0, description: 0, game: 1, platform: 1, format: 1, maxParticipants: 1, participantMode: 1,
+  name: 0, description: 0, game: 1, platform: 1, format: 1, maxParticipants: 1, participantMode: 1, settings: 1,
 }
 
 function fieldOf(err: ApiError): string | null {
@@ -48,6 +49,8 @@ const FORMAT_HINT: Record<Format, string> = {
     'Everyone plays everyone once. Points decide the table: 3 for a win, 1 for a draw. Ties go to goal difference, then goals scored.',
 }
 
+const LOBBY_HINT = "Everyone plays together. After each round you enter every participant's place and kills, and points decide the standings."
+
 export default function CreateTournamentPage() {
   const { user } = useAuth()
   const navigate = useNavigate()
@@ -61,6 +64,9 @@ export default function CreateTournamentPage() {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [format, setFormat] = useState<Format>('SingleElimination')
+  const [isLobby, setIsLobby] = useState(false)
+  const [killPoints, setKillPoints] = useState('1')
+  const [placementPoints, setPlacementPoints] = useState('10, 6, 5, 4, 3, 2, 1, 1')
   const [participantMode, setParticipantMode] = useState<'IndividualOnly' | 'SquadOnly'>('IndividualOnly')
   const [requireApproval, setRequireApproval] = useState(true)
   const [details, setDetails] = useState<DetailsValues>(emptyDetails)
@@ -74,13 +80,19 @@ export default function CreateTournamentPage() {
   if (!user) return null
   const username = user.username
   const unit = participantMode === 'SquadOnly' ? 'teams' : 'players'
-  const matchLine = matchCountLine(format, Number(maxParticipants), unit)
+  const matchLine = isLobby ? null : matchCountLine(format, Number(maxParticipants), unit)
 
   function stepError(i: number): string | null {
     if (i === 0) return name.trim() === '' ? 'Enter a tournament name.' : null
     if (i === 1) {
       const n = Number(maxParticipants)
-      return Number.isInteger(n) && n >= 2 ? null : 'Maximum participants must be a whole number, at least 2.'
+      if (!(Number.isInteger(n) && n >= 2)) return 'Maximum participants must be a whole number, at least 2.'
+      if (isLobby) {
+        const kp = Number(killPoints)
+        if (!Number.isInteger(kp) || kp < 0 || kp > 1000) return 'Points per kill must be a whole number from 0 to 1000.'
+        if (!/^\s*\d{1,4}\s*(,\s*\d{1,4}\s*){0,99}$/.test(placementPoints)) return 'Placement points must be whole numbers from 0 to 1000, separated by commas.'
+      }
+      return null
     }
     if (i === 2) return prizeError(details.prize) ?? feeError(details.entryFee) ?? deadlineError(details)
     return null
@@ -154,8 +166,16 @@ export default function CreateTournamentPage() {
         format,
         participantMode,
         requireApproval: participantMode === 'IndividualOnly' && requireApproval,
+        lobby: isLobby ? { killPoints: Number(killPoints), placementPoints } : null,
         ...toPayload(details),
       })
+      if (isLobby && participantMode === 'IndividualOnly' && requireApproval) {
+        try {
+          await setApprovalOnServer(res.tournamentId, true)
+        } catch {
+          // The lobby exists; the organizer can switch approval on from its page.
+        }
+      }
       if (bannerFile) {
         try {
           const blob = await resizeBannerToJpeg(bannerFile)
@@ -277,13 +297,49 @@ export default function CreateTournamentPage() {
                 <>
                   <label>
                     Format
-                    <select value={format} onChange={(e) => setFormat(e.target.value as Format)}>
+                    <select
+                      value={isLobby ? 'Lobby' : format}
+                      onChange={(e) => {
+                        if (e.target.value === 'Lobby') {
+                          setIsLobby(true)
+                        } else {
+                          setIsLobby(false)
+                          setFormat(e.target.value as Format)
+                        }
+                      }}
+                    >
                       <option value="SingleElimination">Single elimination</option>
                       <option value="DoubleElimination">Double elimination</option>
                       <option value="RoundRobin">Round robin</option>
+                      <option value="Lobby">Lobby (battle royale, everyone plays together)</option>
                     </select>
                   </label>
-                  <p className="muted">{FORMAT_HINT[format]}</p>
+                  <p className="muted">{isLobby ? LOBBY_HINT : FORMAT_HINT[format]}</p>
+                  {isLobby && (
+                    <>
+                      <label>
+                        Points per kill
+                        <input
+                          type="number"
+                          min={0}
+                          max={1000}
+                          value={killPoints}
+                          onChange={(e) => setKillPoints(e.target.value)}
+                        />
+                      </label>
+                      <label>
+                        Points for 1st, 2nd, 3rd... place
+                        <input
+                          value={placementPoints}
+                          placeholder="10, 6, 5, 4, 3, 2, 1, 1"
+                          onChange={(e) => setPlacementPoints(e.target.value)}
+                        />
+                      </label>
+                      <p className="muted">
+                        Places past the end of the list score 0. A round's points are the place points plus kills times points per kill.
+                      </p>
+                    </>
+                  )}
                 </>
               }
             />
@@ -320,7 +376,7 @@ export default function CreateTournamentPage() {
               />
             </label>
             <p className="muted">
-              {format === 'SingleElimination'
+              {isLobby ? 'Each round, every participant gets a place and a kills count. Points decide the standings.' : format === 'SingleElimination'
                 ? `A third-place match is always played, so 1st to 4th are decided (needs 4 or more ${unit}).`
                 : format === 'DoubleElimination'
                 ? 'Double elimination decides the top four by itself.'
@@ -385,7 +441,8 @@ export default function CreateTournamentPage() {
               <dt>Banner</dt><dd>{bannerFile ? bannerFile.name : 'Game art'}</dd>
               <dt>Game</dt><dd>{p.game ? gameLabel[p.game] : '-'}</dd>
               <dt>Platform</dt><dd>{platformLabel ?? '-'}</dd>
-              <dt>Format</dt><dd>{formatLabel[format]}</dd>
+              <dt>Format</dt><dd>{isLobby ? 'Lobby' : formatLabel[format]}</dd>
+              {isLobby && (<><dt>Points</dt><dd>{killPoints} per kill; places: {placementPoints}</dd></>)}
               <dt>Competing</dt><dd>{participantMode === 'SquadOnly' ? 'Teams' : 'Individual players'}, up to {maxParticipants}</dd>
               <dt>Starts</dt><dd>{details.start ? details.start.replace('T', ' ') : '-'}</dd>
               <dt>Registration deadline</dt><dd>{details.deadline ? details.deadline.replace('T', ' ') : '-'}</dd>

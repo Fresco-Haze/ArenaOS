@@ -17,6 +17,7 @@ import ErrorBanner from '../components/ErrorBanner'
 import LoadingBlock from '../components/LoadingBlock'
 import OrganizerPanel from '../components/OrganizerPanel'
 import PlayerLookup from '../components/PlayerLookup'
+import LobbyStandings from '../components/LobbyStandings'
 import Tabs from '../components/Tabs'
 import JoinBar from '../components/JoinBar'
 import BannerImg from '../components/BannerImg'
@@ -132,7 +133,7 @@ export default function TournamentPage({ id }: { id: string }) {
             {gameName && <li>{gameName}</li>}
             <li>
               <PeopleIcon />
-              {mode} &bull; {formatLabel[t.format]}
+              {mode} &bull; {(t.kind === 'Lobby' ? 'Lobby' : formatLabel[t.format])}
               {t.thirdPlaceMatch && <> &bull; third-place match</>}
             </li>
             <li>Up to {t.maxParticipants} {unit}</li>
@@ -160,7 +161,7 @@ export default function TournamentPage({ id }: { id: string }) {
         onChange={setTab}
         tabs={[
           { id: 'overview', label: 'Overview' },
-          { id: 'bracket', label: 'Bracket' },
+          { id: 'bracket', label: t.kind === 'Lobby' ? 'Standings' : 'Bracket' },
           { id: 'players', label: squads ? 'Teams' : 'Players', count: view.participants.length },
         ]}
       />
@@ -175,7 +176,7 @@ export default function TournamentPage({ id }: { id: string }) {
               <p className="muted">The organizer has not added a description.</p>
             )}
             <ul className="tp-tiles">
-              <li className="tp-tile"><span className="muted">Format</span><strong>{formatLabel[t.format]}</strong></li>
+              <li className="tp-tile"><span className="muted">Format</span><strong>{(t.kind === 'Lobby' ? 'Lobby' : formatLabel[t.format])}</strong></li>
               {gameName && <li className="tp-tile"><span className="muted">Game</span><strong>{gameName}</strong></li>}
               <li className="tp-tile"><span className="muted">Mode</span><strong>{squads ? 'Squads' : 'Individual players'}</strong></li>
               {platformName && <li className="tp-tile"><span className="muted">Platform</span><strong>{platformName}</strong></li>}
@@ -192,6 +193,10 @@ export default function TournamentPage({ id }: { id: string }) {
               </>
             )}
           </section>
+        </div>
+      ) : tab === 'bracket' && t.kind === 'Lobby' ? (
+        <div role="tabpanel" id="panel-bracket" aria-labelledby="tab-bracket">
+          <LobbyStandings tournament={t} />
         </div>
       ) : tab === 'bracket' ? (
         <div role="tabpanel" id="panel-bracket" aria-labelledby="tab-bracket">

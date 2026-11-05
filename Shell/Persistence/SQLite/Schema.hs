@@ -37,6 +37,7 @@ initializeSchema conn = do
   migrateBanners conn
   migrateUsernameIndex conn
   migrateGames conn
+  migrateLobby conn
 
 -- v0.12: CREATE TABLE IF NOT EXISTS never adds columns to an existing
 -- database, so add any missing tournament columns here. Safe on every start.
@@ -363,3 +364,16 @@ migrateGames conn = do
     backfill :: (String, String) -> IO ()
     backfill (old, new) =
       execute conn "UPDATE tournaments SET game_id = (SELECT id FROM games WHERE name = ?) WHERE game_id IS NULL AND game = ?" (new, old)
+
+-- v0.14: lobby tournaments (battle royale style). Additive only. A tournament's
+-- kind is 'Bracket' (every existing one) or 'Lobby'. Placement points are a
+-- comma list for 1st, 2nd, ...; places past the list score 0.
+migrateLobby :: Connection -> IO ()
+migrateLobby conn = do
+  cols <- query_ conn "PRAGMA table_info(tournaments)" :: IO [(Int, String, String, Int, Maybe String, Int)]
+  let present = [ c | (_, c, _, _, _, _) <- cols ]
+  when ("kind" `notElem` present) $
+    execute_ conn "ALTER TABLE tournaments ADD COLUMN kind TEXT NOT NULL DEFAULT 'Bracket' CHECK (kind IN ('Bracket', 'Lobby'))"
+  execute_ conn "CREATE TABLE IF NOT EXISTS lobby_settings (tournament_id INTEGER PRIMARY KEY REFERENCES tournaments(id), kill_points INTEGER NOT NULL DEFAULT 1 CHECK (kill_points >= 0), placement_points TEXT NOT NULL DEFAULT '10,6,5,4,3,2,1,1')"
+  execute_ conn "CREATE TABLE IF NOT EXISTS lobby_games (id INTEGER PRIMARY KEY, tournament_id INTEGER NOT NULL REFERENCES tournaments(id), game_number INTEGER NOT NULL CHECK (game_number >= 1), UNIQUE (tournament_id, game_number))"
+  execute_ conn "CREATE TABLE IF NOT EXISTS lobby_results (lobby_game_id INTEGER NOT NULL REFERENCES lobby_games(id), participant_id INTEGER NOT NULL REFERENCES participants(id), placement INTEGER NOT NULL CHECK (placement >= 1), kills INTEGER NOT NULL DEFAULT 0 CHECK (kills >= 0), PRIMARY KEY (lobby_game_id, participant_id), UNIQUE (lobby_game_id, placement))"

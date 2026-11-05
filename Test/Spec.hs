@@ -114,9 +114,17 @@ import Shell.Persistence.SQLite.EFootballScoreRepository ()
 import Shell.Persistence.SQLite.JoinRequestRepository ()
 import Shell.Persistence.SQLite.NotificationRepository ()
 import Shell.Persistence.SQLite.AvatarRepository ()
+import Shell.Persistence.SQLite.LobbyRepository ()
+import qualified Application.UseCases.Lobby as LobbyUC
+import qualified Domain.Tournament as LbDom
+import qualified Application.Internal.LifecycleTransition as LbLife
+import qualified Domain.Lobby as DL
 import qualified Data.ByteString as BSX
 import qualified Domain.Notification as Notif
 import qualified Engine.Rankings as Rk
+import qualified Engine.Lobby as Lobby
+import Domain.Tournament (TournamentKind(..), Tournament(tournamentKind))
+import qualified Database.SQLite.Simple as KSQ
 import qualified Application.UseCases.GetRankings as GRK
 import qualified Application.UseCases.GetPlayers as GPL
 import qualified Engine.Players as Pl
@@ -1438,7 +1446,7 @@ spec = before_ resetTestDb $ do
             , tournamentVisibility = Public
             , tournamentMaxParticipants = 2
             , tournamentBracket = Nothing
-            , tournamentOwner = UserId 1, tournamentThirdPlaceMatch = False, tournamentParticipantMode = IndividualOnly, tournamentGame = Nothing, tournamentStartTime = Nothing, tournamentPrize = Nothing, tournamentDescription = Nothing, tournamentRequireApproval = False, tournamentRegistrationDeadline = Nothing, tournamentEntryFee = Nothing, tournamentPlatform = Nothing, tournamentRules = Nothing
+            , tournamentOwner = UserId 1, tournamentThirdPlaceMatch = False, tournamentParticipantMode = IndividualOnly, tournamentKind = BracketKind, tournamentGame = Nothing, tournamentStartTime = Nothing, tournamentPrize = Nothing, tournamentDescription = Nothing, tournamentRequireApproval = False, tournamentRegistrationDeadline = Nothing, tournamentEntryFee = Nothing, tournamentPlatform = Nothing, tournamentRules = Nothing
             }
           tournaments = map mkT [Draft, Draft, Published, InProgress, Completed, Completed, Completed, Cancelled]
           overview = buildTournamentOverview tournaments
@@ -7168,6 +7176,314 @@ spec = before_ resetTestDb $ do
     it "keeps the old API values working as aliases" $ do
       map legacyGameName ["PubgMobile", " callofduty ", "eFootball", "Other", "PUBG Mobile", "Tekken 8"]
         `shouldBe` ["PUBG Mobile", "Call of Duty", "eFootball", "Other", "PUBG Mobile", "Tekken 8"]
+  describe "Engine.Lobby (pure)" $ do
+    let ent :: String -> Int -> Int -> Lobby.GameEntry String
+        ent = Lobby.GameEntry
+        regd = ["ann", "bob", "cat", "dan"] :: [String]
+        stg = Lobby.defaultLobbySettings
+
+    it "parses placement points and rejects bad lists" $ do
+      let bad r = either (const True) (const False) r
+      Lobby.parsePlacementPoints "10, 6,5" `shouldBe` Right [10, 6, 5]
+      Lobby.parsePlacementPoints "10,6,5,4,3,2,1,1" `shouldBe` Right (Lobby.lobbyPlacementPoints Lobby.defaultLobbySettings)
+      map (bad . Lobby.parsePlacementPoints) ["", "10,,5", "a", "-1", "1001", tail (concatMap (',' :) (replicate 101 "1"))]
+        `shouldBe` [True, True, True, True, True, True]
+
+    it "scores placement points plus kills, and 0 past the list" $ do
+      map (Lobby.entryPoints stg) [ent "ann" 1 3, ent "bob" 2 0, ent "cat" 8 2, ent "dan" 9 5]
+        `shouldBe` [13, 6, 3, 5]
+
+    it "accepts a complete game" $ do
+      Lobby.validateGame regd [ent "ann" 1 0, ent "bob" 2 1, ent "cat" 3 0, ent "dan" 4 2] `shouldBe` Right ()
+
+    it "rejects bad games" $ do
+      let vd = Lobby.validateGame regd
+      vd [] `shouldBe` Left Lobby.NoEntries
+      vd [ent "ann" 1 (-1), ent "bob" 2 0, ent "cat" 3 0, ent "dan" 4 0] `shouldBe` Left Lobby.NegativeKills
+      vd [ent "ann" 1 0, ent "ann" 2 0, ent "cat" 3 0, ent "dan" 4 0] `shouldBe` Left Lobby.DuplicateParticipant
+      vd [ent "ann" 1 0, ent "bob" 2 0, ent "cat" 3 0, ent "zed" 4 0] `shouldBe` Left Lobby.UnknownParticipant
+      vd [ent "ann" 1 0, ent "bob" 2 0, ent "cat" 3 0] `shouldBe` Left Lobby.MissingParticipant
+      vd [ent "ann" 1 0, ent "bob" 1 0, ent "cat" 3 0, ent "dan" 4 0] `shouldBe` Left Lobby.BadPlacements
+      vd [ent "ann" 1 0, ent "bob" 2 0, ent "cat" 3 0, ent "dan" 5 0] `shouldBe` Left Lobby.BadPlacements
+      vd [ent "ann" 0 0, ent "bob" 2 0, ent "cat" 3 0, ent "dan" 4 0] `shouldBe` Left Lobby.BadPlacements
+
+    it "totals points across games and orders the table" $ do
+      let g1 = [ent "ann" 1 3, ent "bob" 2 5, ent "cat" 3 0, ent "dan" 4 1]
+          g2 = [ent "bob" 1 2, ent "ann" 2 0, ent "dan" 3 4, ent "cat" 4 0]
+          table = Lobby.lobbyStandings stg regd [g1, g2]
+      map (\s -> (Lobby.lsEntrant s, Lobby.lsPoints s, Lobby.lsKills s, Lobby.lsGamesPlayed s)) table
+        `shouldBe` [("bob", 23, 7, 2), ("ann", 19, 3, 2), ("dan", 14, 5, 2), ("cat", 9, 0, 2)]
+      map fst (Lobby.lobbyRanks table) `shouldBe` [1, 2, 3, 4]
+      Lobby.lobbyChampion table `shouldBe` Just "bob"
+
+    it "breaks ties by kills, then best placement; a full tie has no champion" $ do
+      let reg2 = ["ann", "bob"] :: [String]
+          byKills = Lobby.lobbyStandings (Lobby.LobbySettings 1 [5, 3]) reg2 [[ent "ann" 1 0, ent "bob" 2 2]]
+          byBest = Lobby.lobbyStandings (Lobby.LobbySettings 0 [5, 3, 1]) reg2 [[ent "ann" 1 0, ent "bob" 2 0], [ent "ann" 3 0, ent "bob" 2 0]]
+          fullTie = Lobby.lobbyStandings (Lobby.LobbySettings 1 [5, 3]) reg2 [[ent "ann" 1 0, ent "bob" 2 2], [ent "ann" 2 2, ent "bob" 1 0]]
+      map Lobby.lsEntrant byKills `shouldBe` ["bob", "ann"]
+      Lobby.lobbyChampion byKills `shouldBe` Just "bob"
+      map Lobby.lsEntrant byBest `shouldBe` ["ann", "bob"]
+      map Lobby.lsPoints byBest `shouldBe` [6, 6]
+      Lobby.lobbyChampion byBest `shouldBe` Just "ann"
+      map fst (Lobby.lobbyRanks fullTie) `shouldBe` [1, 1]
+      Lobby.lobbyChampion fullTie `shouldBe` Nothing
+
+    it "lists everyone, including players with no games, and has no champion before any game" $ do
+      let table = Lobby.lobbyStandings stg regd []
+      map Lobby.lsEntrant table `shouldBe` regd
+      map Lobby.lsGamesPlayed table `shouldBe` [0, 0, 0, 0]
+      Lobby.lobbyChampion table `shouldBe` Nothing
+  describe "Tournament kind (v0.14)" $ do
+
+    it "reads a normal tournament as a Bracket" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "kd-owner-1"
+        tid <- dtCreate owner "Kind Cup A" noDetails
+        t <- Repo.getTournament tid
+        pure (tournamentKind t)
+      result `shouldBe` Right BracketKind
+    it "reads a stored Lobby kind as a Lobby" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "kd-owner-2"
+        tid <- dtCreate owner "Kind Cup B" noDetails
+        env <- ask
+        liftIO (KSQ.execute (envConnection env) "UPDATE tournaments SET kind = 'Lobby' WHERE name = ?" (KSQ.Only ("Kind Cup B" :: String)))
+        t <- Repo.getTournament tid
+        pure (tournamentKind t)
+      result `shouldBe` Right LobbyKind
+  describe "Lobby storage (v0.14)" $ do
+    let mkP n = do
+          let p = Player (PlayerName n)
+          Repo.savePlayer p
+          Repo.resolveParticipant (Individual p)
+
+    it "defaults, saves and updates the scoring settings" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "lr-owner-1"
+        tid <- dtCreate owner "Lobby Cup A" noDetails
+        s0 <- Repo.getLobbySettings tid
+        Repo.saveLobbySettings tid (DL.LobbySettings 2 [15, 12, 10])
+        s1 <- Repo.getLobbySettings tid
+        Repo.saveLobbySettings tid (DL.LobbySettings 0 [5])
+        s2 <- Repo.getLobbySettings tid
+        pure (s0, s1, s2)
+      result `shouldBe` Right (DL.defaultLobbySettings, DL.LobbySettings 2 [15, 12, 10], DL.LobbySettings 0 [5])
+
+    it "sets and reads back the kind of a tournament" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "lr-owner-2"
+        tid <- dtCreate owner "Lobby Cup B" noDetails
+        t0 <- Repo.getTournament tid
+        Repo.setTournamentKind tid LobbyKind
+        t1 <- Repo.getTournament tid
+        Repo.setTournamentKind tid BracketKind
+        t2 <- Repo.getTournament tid
+        pure (tournamentKind t0, tournamentKind t1, tournamentKind t2)
+      result `shouldBe` Right (BracketKind, LobbyKind, BracketKind)
+      missing <- runSQLiteM testDbPath $ do
+        setupSchema
+        Repo.setTournamentKind (TournamentId 999999) LobbyKind
+      either (const True) (const False) missing `shouldBe` True
+
+    it "numbers rounds, saves, replaces and lists results in order" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "lr-owner-3"
+        tid <- dtCreate owner "Lobby Cup C" noDetails
+        pa <- mkP "lr3-ann"
+        pb <- mkP "lr3-bob"
+        n1 <- Repo.addLobbyRound tid
+        n2 <- Repo.addLobbyRound tid
+        Repo.saveLobbyRoundResults tid n1 [DL.GameEntry pa 1 3, DL.GameEntry pb 2 0]
+        Repo.saveLobbyRoundResults tid n2 [DL.GameEntry pb 1 5, DL.GameEntry pa 2 1]
+        Repo.saveLobbyRoundResults tid n1 [DL.GameEntry pb 1 0, DL.GameEntry pa 2 4]
+        n3 <- Repo.addLobbyRound tid
+        rs <- Repo.listLobbyRounds tid
+        let expected =
+              [ (1, [DL.GameEntry pb 1 0, DL.GameEntry pa 2 4])
+              , (2, [DL.GameEntry pb 1 5, DL.GameEntry pa 2 1])
+              , (3, [])
+              ]
+        pure (n1, n2, n3, rs == expected)
+      result `shouldBe` Right (1, 2, 3, True)
+
+    it "rejects results for a round that does not exist" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "lr-owner-4"
+        tid <- dtCreate owner "Lobby Cup D" noDetails
+        pa <- mkP "lr4-ann"
+        Repo.saveLobbyRoundResults tid 99 [DL.GameEntry pa 1 0]
+      either (const True) (const False) result `shouldBe` True
+  describe "Lobby use cases (v0.14)" $ do
+    let mkP n = do
+          let p = Player (PlayerName n)
+          Repo.savePlayer p
+          Repo.resolveParticipant (Individual p)
+        reg tid p = Repo.createRegistration (Repo.NewRegistration tid p)
+        isBad :: Either e a -> Bool
+        isBad = either (const True) (const False)
+        rn :: Either LobbyUC.LobbyActionError Int -> Int
+        rn = either (const 0) id
+        tag :: Either LobbyUC.LobbyActionError a -> String
+        tag (Right _) = "ok"
+        tag (Left (LobbyUC.LobbyUnauthorized _)) = "unauthorized"
+        tag (Left (LobbyUC.LobbyInvalidLifecycle _)) = "lifecycle"
+        tag (Left LobbyUC.NotALobby) = "not-a-lobby"
+        tag (Left LobbyUC.LobbyNeedsTwoParticipants) = "few-participants"
+        tag (Left (LobbyUC.LobbyInvalidResults e)) = "results:" ++ show e
+        tag (Left (LobbyUC.LobbyRoundNotFound n)) = "no-round:" ++ show n
+        tag (Left (LobbyUC.LobbyCompleteInvalid e)) = "complete:" ++ show e
+
+    it "creates a lobby with its settings and rejects bad input" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "lb-owner-1"
+        tid <- unwrap =<< LobbyUC.createLobbyTournament (dtNew owner "Lobby Create A") noDetails (DL.LobbySettings 2 [15, 10, 5])
+        t <- Repo.getTournament tid
+        s <- Repo.getLobbySettings tid
+        bad1 <- LobbyUC.createLobbyTournament (dtNew owner "Lobby Create B") noDetails (DL.LobbySettings 1 [])
+        bad2 <- LobbyUC.createLobbyTournament (dtNew owner "") noDetails DL.defaultLobbySettings
+        bad3 <- LobbyUC.createLobbyTournament (dtNew owner "Lobby Create C") noDetails (DL.LobbySettings (-1) [5])
+        pure (tournamentKind t, LbDom.tournamentFormat t, LbDom.tournamentThirdPlaceMatch t, s, isBad bad1, isBad bad2, isBad bad3)
+      result `shouldBe` Right (LobbyKind, LbDom.SingleElimination, False, DL.LobbySettings 2 [15, 10, 5], True, True, True)
+
+    it "starts a lobby only for its owner, from Registration closed, with two players or more" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "lb-owner-2"
+        other <- createTestUser "lb-other-2"
+        tid <- unwrap =<< LobbyUC.createLobbyTournament (dtNew owner "Lobby Start") noDetails DL.defaultLobbySettings
+        bracketTid <- dtCreate owner "Bracket Start" noDetails
+        pa <- mkP "lb2-ann"
+        pb <- mkP "lb2-bob"
+        s0 <- LobbyUC.startLobby owner tid
+        Repo.updateTournamentState tid LbDom.RegistrationClosed
+        s1 <- LobbyUC.startLobby owner tid
+        _ <- reg tid pa
+        s2 <- LobbyUC.startLobby owner tid
+        _ <- reg tid pb
+        s3 <- LobbyUC.startLobby other tid
+        Repo.updateTournamentState bracketTid LbDom.RegistrationClosed
+        s4 <- LobbyUC.startLobby owner bracketTid
+        s5 <- LobbyUC.startLobby owner tid
+        t <- Repo.getTournament tid
+        pure (map tag [s0, s1, s2, s3, s4, s5], LbDom.tournamentState t)
+      result `shouldBe` Right (["lifecycle", "few-participants", "few-participants", "unauthorized", "not-a-lobby", "ok"], LbDom.InProgress)
+
+    it "records, adds and corrects rounds with full validation" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "lb-owner-3"
+        other <- createTestUser "lb-other-3"
+        tid <- unwrap =<< LobbyUC.createLobbyTournament (dtNew owner "Lobby Rounds") noDetails DL.defaultLobbySettings
+        pa <- mkP "lb3-ann"
+        pb <- mkP "lb3-bob"
+        pc <- mkP "lb3-cat"
+        let g1 = [DL.GameEntry pa 1 3, DL.GameEntry pb 2 0, DL.GameEntry pc 3 1]
+        r0 <- LobbyUC.recordLobbyRound owner tid Nothing g1
+        Repo.updateTournamentState tid LbDom.RegistrationClosed
+        mapM_ (reg tid) [pa, pb, pc]
+        r1 <- LobbyUC.recordLobbyRound owner tid Nothing g1
+        r2 <- LobbyUC.recordLobbyRound owner tid Nothing [DL.GameEntry pc 1 2, DL.GameEntry pa 2 2, DL.GameEntry pb 3 0]
+        r3 <- LobbyUC.recordLobbyRound owner tid (Just 1) [DL.GameEntry pb 1 4, DL.GameEntry pa 2 0, DL.GameEntry pc 3 0]
+        rDup <- LobbyUC.recordLobbyRound owner tid Nothing [DL.GameEntry pa 1 0, DL.GameEntry pb 1 0, DL.GameEntry pc 3 0]
+        rMissing <- LobbyUC.recordLobbyRound owner tid Nothing [DL.GameEntry pa 1 0, DL.GameEntry pb 2 0]
+        rNoRound <- LobbyUC.recordLobbyRound owner tid (Just 9) g1
+        rOther <- LobbyUC.recordLobbyRound other tid Nothing g1
+        rounds <- Repo.listLobbyRounds tid
+        let expected =
+              [ (1, [DL.GameEntry pb 1 4, DL.GameEntry pa 2 0, DL.GameEntry pc 3 0])
+              , (2, [DL.GameEntry pc 1 2, DL.GameEntry pa 2 2, DL.GameEntry pb 3 0])
+              ]
+        pure (tag r0, map rn [r1, r2, r3], map tag [rDup, rMissing, rNoRound, rOther], rounds == expected)
+      result `shouldBe` Right ("lifecycle", [1, 2, 1], ["results:BadPlacements", "results:MissingParticipant", "no-round:9", "unauthorized"], True)
+
+    it "completes only after a round, and the table names a champion" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "lb-owner-4"
+        other <- createTestUser "lb-other-4"
+        tid <- unwrap =<< LobbyUC.createLobbyTournament (dtNew owner "Lobby Finish") noDetails DL.defaultLobbySettings
+        pa <- mkP "lb4-ann"
+        pb <- mkP "lb4-bob"
+        Repo.updateTournamentState tid LbDom.RegistrationClosed
+        mapM_ (reg tid) [pa, pb]
+        c0 <- LobbyUC.completeLobby owner tid
+        _ <- LobbyUC.recordLobbyRound owner tid Nothing [DL.GameEntry pa 1 3, DL.GameEntry pb 2 0]
+        c1 <- LobbyUC.completeLobby other tid
+        table <- LobbyUC.loadLobbyStandings tid
+        c2 <- LobbyUC.completeLobby owner tid
+        c3 <- LobbyUC.completeLobby owner tid
+        t <- Repo.getTournament tid
+        pure (tag c0, tag c1, tag c2, tag c3, LbDom.tournamentState t, Lobby.lobbyChampion table == Just pa, map Lobby.lsPoints table)
+      result `shouldBe` Right ("complete:TournamentNotComplete", "unauthorized", "ok", "complete:TournamentAlreadyCompleted", LbDom.Completed, True, [13, 6])
+  describe "Bracket-only actions refuse a lobby (v0.14)" $ do
+    let asLobby owner name = do
+          tid <- dtCreate owner name noDetails
+          Repo.setTournamentKind tid LbDom.LobbyKind
+          pure tid
+        errOf :: Either e a -> Maybe e
+        errOf = either Just (const Nothing)
+
+    it "refuses to change the format" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "bk-owner-1"
+        tid <- asLobby owner "Guard Format"
+        t0 <- Repo.getTournament tid
+        r <- UTF.updateTournamentFormat owner tid LbDom.DoubleElimination
+        t1 <- Repo.getTournament tid
+        pure (errOf r, LbDom.tournamentFormat t0 == LbDom.tournamentFormat t1)
+      result `shouldBe` Right (Just (UTF.InvalidLifecycle LbLife.WrongKind), True)
+
+    it "refuses to change the third-place setting" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "bk-owner-2"
+        tid <- asLobby owner "Guard Third"
+        t0 <- Repo.getTournament tid
+        r <- UTTP.updateTournamentThirdPlaceMatch owner tid True
+        t1 <- Repo.getTournament tid
+        pure (errOf r, LbDom.tournamentThirdPlaceMatch t0 == LbDom.tournamentThirdPlaceMatch t1)
+      result `shouldBe` Right (Just (UTTP.InvalidLifecycle LbLife.WrongKind), True)
+
+    it "refuses to generate a bracket" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "bk-owner-3"
+        tid <- asLobby owner "Guard Generate"
+        Repo.updateTournamentState tid LbDom.RegistrationClosed
+        r <- GB.generateBracket owner tid
+        t <- Repo.getTournament tid
+        pure (errOf r, LbDom.tournamentBracket t == Nothing)
+      result `shouldBe` Right (Just (GB.InvalidLifecycle LbLife.WrongKind), True)
+
+    it "refuses the bracket start" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "bk-owner-4"
+        tid <- asLobby owner "Guard Start"
+        Repo.updateTournamentState tid LbDom.RegistrationClosed
+        r <- ST.startTournament owner tid
+        t <- Repo.getTournament tid
+        pure (errOf r, LbDom.tournamentState t)
+      result `shouldBe` Right (Just (ST.InvalidLifecycle LbLife.WrongKind), LbDom.RegistrationClosed)
+
+    it "refuses the bracket completion" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "bk-owner-5"
+        tid <- asLobby owner "Guard Complete"
+        r <- CT.completeTournament owner tid
+        t <- Repo.getTournament tid
+        pure (errOf r, LbDom.tournamentState t)
+      result `shouldBe` Right (Just (CT.WrongTournamentKind LbLife.WrongKind), LbDom.Draft)
   describe "Engine.User.validateRawPassword (pure)" $ do
 
     it "rejects a password shorter than 8 characters" $
@@ -7267,7 +7583,7 @@ spec = before_ resetTestDb $ do
           , tournamentOrganizer = OrganizerName "x", tournamentFormat = SingleElimination
           , tournamentState = st, tournamentVisibility = vis
           , tournamentMaxParticipants = 2, tournamentBracket = Nothing
-          , tournamentOwner = UserId 1, tournamentThirdPlaceMatch = False, tournamentParticipantMode = IndividualOnly, tournamentGame = Nothing, tournamentStartTime = Nothing, tournamentPrize = Nothing, tournamentDescription = Nothing, tournamentRequireApproval = False, tournamentRegistrationDeadline = Nothing, tournamentEntryFee = Nothing, tournamentPlatform = Nothing, tournamentRules = Nothing }
+          , tournamentOwner = UserId 1, tournamentThirdPlaceMatch = False, tournamentParticipantMode = IndividualOnly, tournamentKind = BracketKind, tournamentGame = Nothing, tournamentStartTime = Nothing, tournamentPrize = Nothing, tournamentDescription = Nothing, tournamentRequireApproval = False, tournamentRegistrationDeadline = Nothing, tournamentEntryFee = Nothing, tournamentPlatform = Nothing, tournamentRules = Nothing }
         owner    = Just (UserId 1)
         stranger = Just (UserId 2)
 
@@ -7323,7 +7639,7 @@ spec = before_ resetTestDb $ do
           , tournamentOrganizer = OrganizerName "x", tournamentFormat = SingleElimination
           , tournamentState = st, tournamentVisibility = vis
           , tournamentMaxParticipants = 2, tournamentBracket = Nothing
-          , tournamentOwner = UserId 1, tournamentThirdPlaceMatch = False, tournamentParticipantMode = IndividualOnly, tournamentGame = Nothing, tournamentStartTime = Nothing, tournamentPrize = Nothing, tournamentDescription = Nothing, tournamentRequireApproval = False, tournamentRegistrationDeadline = Nothing, tournamentEntryFee = Nothing, tournamentPlatform = Nothing, tournamentRules = Nothing }
+          , tournamentOwner = UserId 1, tournamentThirdPlaceMatch = False, tournamentParticipantMode = IndividualOnly, tournamentKind = BracketKind, tournamentGame = Nothing, tournamentStartTime = Nothing, tournamentPrize = Nothing, tournamentDescription = Nothing, tournamentRequireApproval = False, tournamentRegistrationDeadline = Nothing, tournamentEntryFee = Nothing, tournamentPlatform = Nothing, tournamentRules = Nothing }
         ids = map (unTournamentId . tournamentId)
 
     it "keeps only Public tournaments past Draft, newest first" $
@@ -9503,7 +9819,7 @@ plT i name g = Tournament
   , tournamentMaxParticipants = 2, tournamentBracket = Nothing
   , tournamentOwner = UserId 1, tournamentThirdPlaceMatch = False
   , tournamentParticipantMode = IndividualOnly
-  , tournamentGame = g, tournamentStartTime = Nothing, tournamentPrize = Nothing, tournamentDescription = Nothing, tournamentRequireApproval = False, tournamentRegistrationDeadline = Nothing, tournamentEntryFee = Nothing, tournamentPlatform = Nothing, tournamentRules = Nothing }
+  , tournamentKind = BracketKind, tournamentGame = g, tournamentStartTime = Nothing, tournamentPrize = Nothing, tournamentDescription = Nothing, tournamentRequireApproval = False, tournamentRegistrationDeadline = Nothing, tournamentEntryFee = Nothing, tournamentPlatform = Nothing, tournamentRules = Nothing }
 
 -- ids 1..60; id 3 is "Zebra Open" (Call of Duty); other even ids are eFootball
 plAll :: [Tournament]
