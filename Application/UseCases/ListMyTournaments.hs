@@ -11,10 +11,10 @@ import Data.Ord (comparing)
 import Domain.Ids (UserId)
 import qualified Domain.Match as M
 import Domain.Registration (registrationParticipant)
-import Domain.Tournament (Tournament(..), TournamentFormat(RoundRobin), TournamentState(InProgress, Paused, Completed))
+import Domain.Tournament (Tournament(..), TournamentFormat(RoundRobin), TournamentKind(..), TournamentState(InProgress, Paused, Completed))
 import Engine.Champion (tournamentChampionWith)
-import Application.UseCases.GetRankings (loadMatchScores)
-import Shell.Persistence.Port (TournamentRepository, RegistrationRepository, MatchRepository, BracketRepository, EFootballScoreRepository)
+import Application.UseCases.GetRankings (loadMatchScores, lobbyChampionOf)
+import Shell.Persistence.Port (TournamentRepository, RegistrationRepository, MatchRepository, BracketRepository, EFootballScoreRepository, LobbyRepository, ParticipantRepository)
 import qualified Shell.Persistence.Port as Repo
 
 listMyTournaments :: TournamentRepository m => UserId -> m [Tournament]
@@ -29,7 +29,7 @@ data MatchSummary = MatchSummary
   }
 
 myMatchSummary
-  :: (TournamentRepository m, RegistrationRepository m, MatchRepository m, BracketRepository m, EFootballScoreRepository m)
+  :: (TournamentRepository m, RegistrationRepository m, MatchRepository m, BracketRepository m, EFootballScoreRepository m, LobbyRepository m, ParticipantRepository m)
   => UserId
   -> m MatchSummary
 myMatchSummary uid = do
@@ -47,6 +47,10 @@ myMatchSummary uid = do
       t <- Repo.getTournament tid
       mrid <- Repo.findUserRegistration tid uid
       case (tournamentBracket t, mrid) of
+        (Nothing, Just rid) | tournamentKind t == LobbyKind -> do
+          reg <- Repo.getRegistration rid
+          champ <- lobbyChampionOf t
+          pure ([], if champ == Just (registrationParticipant reg) then 1 else 0)
         (Just bid, Just rid) -> do
           reg <- Repo.getRegistration rid
           ms <- Repo.listMatchesForBracket bid

@@ -7484,6 +7484,106 @@ spec = before_ resetTestDb $ do
         t <- Repo.getTournament tid
         pure (errOf r, LbDom.tournamentState t)
       result `shouldBe` Right (Just (CT.WrongTournamentKind LbLife.WrongKind), LbDom.Draft)
+  describe "Lobby titles in rankings (v0.14)" $ do
+    let mkP n = do
+          let p = Player (PlayerName n)
+          Repo.savePlayer p
+          Repo.resolveParticipant (Individual p)
+        reg tid p = Repo.createRegistration (Repo.NewRegistration tid p)
+        playedLobby owner name game vis rounds = do
+          tid <- unwrap =<< LobbyUC.createLobbyTournament (dtNew owner name) (noDetails { detailsGame = game }) DL.defaultLobbySettings
+          Repo.updateTournamentVisibility tid vis
+          Repo.updateTournamentState tid LbDom.RegistrationClosed
+          pure tid
+        titlesOf ranks = [ (Rk.rankPlayer e, Rk.rankTitles e, Rk.rankWins e) | e <- ranks ]
+
+    it "gives the champion of a completed public lobby one title and no match wins" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "rk-owner-1"
+        tid <- playedLobby owner "Rank Lobby A" Nothing LbDom.Public ()
+        pa <- mkP "rkl1-ann"
+        pb <- mkP "rkl1-bob"
+        mapM_ (reg tid) [pa, pb]
+        _ <- LobbyUC.recordLobbyRound owner tid Nothing [DL.GameEntry pa 1 2, DL.GameEntry pb 2 0]
+        _ <- LobbyUC.completeLobby owner tid
+        ranks <- GRK.getRankings Nothing 50
+        pure (filter (\(n, _, _) -> n `elem` ["rkl1-ann", "rkl1-bob"]) (titlesOf ranks))
+      result `shouldBe` Right [("rkl1-ann", 1, 0)]
+
+    it "gives no title for a tie at the top" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "rk-owner-2"
+        tid <- playedLobby owner "Rank Lobby B" Nothing LbDom.Public ()
+        pa <- mkP "rkl2-ann"
+        pb <- mkP "rkl2-bob"
+        mapM_ (reg tid) [pa, pb]
+        _ <- LobbyUC.recordLobbyRound owner tid Nothing [DL.GameEntry pa 1 0, DL.GameEntry pb 2 2]
+        _ <- LobbyUC.recordLobbyRound owner tid Nothing [DL.GameEntry pb 1 0, DL.GameEntry pa 2 2]
+        _ <- LobbyUC.completeLobby owner tid
+        ranks <- GRK.getRankings Nothing 50
+        pure (filter (\(n, _, _) -> n `elem` ["rkl2-ann", "rkl2-bob"]) (titlesOf ranks))
+      result `shouldBe` Right []
+
+    it "gives no title while the lobby is not completed" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "rk-owner-3"
+        tid <- playedLobby owner "Rank Lobby C" Nothing LbDom.Public ()
+        pa <- mkP "rkl3-ann"
+        pb <- mkP "rkl3-bob"
+        mapM_ (reg tid) [pa, pb]
+        _ <- LobbyUC.recordLobbyRound owner tid Nothing [DL.GameEntry pa 1 2, DL.GameEntry pb 2 0]
+        ranks <- GRK.getRankings Nothing 50
+        pure (filter (\(n, _, _) -> n `elem` ["rkl3-ann", "rkl3-bob"]) (titlesOf ranks))
+      result `shouldBe` Right []
+
+    it "gives no title for a private lobby" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "rk-owner-4"
+        tid <- playedLobby owner "Rank Lobby D" Nothing LbDom.Private ()
+        pa <- mkP "rkl4-ann"
+        pb <- mkP "rkl4-bob"
+        mapM_ (reg tid) [pa, pb]
+        _ <- LobbyUC.recordLobbyRound owner tid Nothing [DL.GameEntry pa 1 2, DL.GameEntry pb 2 0]
+        _ <- LobbyUC.completeLobby owner tid
+        ranks <- GRK.getRankings Nothing 50
+        pure (filter (\(n, _, _) -> n `elem` ["rkl4-ann", "rkl4-bob"]) (titlesOf ranks))
+      result `shouldBe` Right []
+
+    it "counts a lobby title under its game only" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "rk-owner-5"
+        g <- unwrap (mkGame "Rank Lobby Game")
+        other <- unwrap (mkGame "Some Other Game")
+        tid <- playedLobby owner "Rank Lobby E" (Just g) LbDom.Public ()
+        pa <- mkP "rkl5-ann"
+        pb <- mkP "rkl5-bob"
+        mapM_ (reg tid) [pa, pb]
+        _ <- LobbyUC.recordLobbyRound owner tid Nothing [DL.GameEntry pa 1 2, DL.GameEntry pb 2 0]
+        _ <- LobbyUC.completeLobby owner tid
+        inGame <- GRK.getRankings (Just g) 50
+        inOther <- GRK.getRankings (Just other) 50
+        let mine = filter (\(n, _, _) -> n == "rkl5-ann") . titlesOf
+        pure (mine inGame, mine inOther)
+      result `shouldBe` Right ([("rkl5-ann", 1, 0)], [])
+
+    it "shows the same title on the player profile and in the personal title count" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "rk-owner-6"
+        tid <- playedLobby owner "Rank Lobby F" Nothing LbDom.Public ()
+        pa <- mkP "rkl6-ann"
+        pb <- mkP "rkl6-bob"
+        mapM_ (reg tid) [pa, pb]
+        _ <- LobbyUC.recordLobbyRound owner tid Nothing [DL.GameEntry pa 1 2, DL.GameEntry pb 2 0]
+        _ <- LobbyUC.completeLobby owner tid
+        prof <- GPL.getPlayerProfile "rkl6-ann"
+        pure (fmap (Pl.psTitles . GPL.ppSummary) prof)
+      result `shouldBe` Right (Just 1)
   describe "Engine.User.validateRawPassword (pure)" $ do
 
     it "rejects a password shorter than 8 characters" $
