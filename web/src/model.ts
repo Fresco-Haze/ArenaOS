@@ -31,6 +31,7 @@ export const Tournament = z.object({
   thirdPlaceMatch: z.boolean(),
   requireApproval: z.boolean().default(false),
   participantMode: ParticipantMode,
+  kind: z.enum(['Bracket', 'Lobby']).default('Bracket'),
   game: Game.nullish(),
   startTime: z.string().nullish(),
   registrationDeadline: z.string().nullish(),

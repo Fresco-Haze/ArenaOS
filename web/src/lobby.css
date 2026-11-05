@@ -1,0 +1,7 @@
+.lobby-wrap { overflow-x: auto; }
+.lobby-table { width: 100%; border-collapse: collapse; }
+.lobby-table th, .lobby-table td { padding: 10px 12px; text-align: left; border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
+.lobby-table th { font-weight: 600; font-size: 0.85em; opacity: 0.7; }
+.lobby-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.lobby-champ td { background: rgba(255, 200, 60, 0.1); }
+.lobby-badge { margin-left: 8px; padding: 2px 8px; border-radius: 999px; font-size: 0.75em; background: rgba(255, 200, 60, 0.22); }
