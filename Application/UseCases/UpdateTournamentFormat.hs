@@ -11,7 +11,7 @@ import Shell.Persistence.Port (TournamentRepository, TournamentHistoryRepository
 import qualified Shell.Persistence.Port as Repo
 
 import Application.Internal.Authorization (AuthorizationError, requireTournamentOwner)
-import Application.Internal.LifecycleTransition (LifecycleError, requireTournamentStateNotIn)
+import Application.Internal.LifecycleTransition (LifecycleError, requireTournamentStateNotIn, requireBracketTournament)
 import Engine.TournamentValidation (TournamentValidationError, validateThirdPlaceMatch)
 
 data UpdateTournamentFormatError
@@ -32,7 +32,7 @@ updateTournamentFormat currentUser tid newFormat = do
     case requireTournamentOwner currentUser tournament of
         Left err -> pure (Left (Unauthorized err))
         Right () ->
-            case requireTournamentStateNotIn [InProgress, Completed, Cancelled] tournament of
+            case (requireBracketTournament tournament >> requireTournamentStateNotIn [InProgress, Completed, Cancelled] tournament) of
                 Left err -> pure (Left (InvalidLifecycle err))
                 Right ()
                     | Just _ <- tournamentBracket tournament -> pure (Left BracketAlreadyGenerated)

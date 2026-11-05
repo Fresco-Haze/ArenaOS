@@ -185,6 +185,8 @@ fromLifecycle :: LifecycleError -> ApiError
 fromLifecycle (InvalidTransition cur expected) =
   ApiError status409 "INVALID_TRANSITION" "Tournament is not in the required state"
     (object ["current" .= show cur, "expected" .= show expected])
+fromLifecycle WrongKind =
+  ApiError status409 "NOT_A_BRACKET_TOURNAMENT" "This action is for bracket tournaments, not lobbies" (object [])
 fromLifecycle (ForbiddenState cur) =
   ApiError status409 "FORBIDDEN_STATE" "Not allowed in the current state"
     (object ["current" .= show cur])
@@ -1093,6 +1095,7 @@ fromTournamentError TournamentPaused =
 fromComplete :: Complete.CompleteTournamentError -> ApiError
 fromComplete (Complete.Unauthorized a)      = fromAuthorization a
 fromComplete (Complete.InvalidCompletion e) = fromTournamentError e
+fromComplete (Complete.WrongTournamentKind l) = fromLifecycle l
 fromComplete Complete.TournamentPausedCannotComplete =
   fromTournamentError TournamentPaused
 

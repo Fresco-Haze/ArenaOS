@@ -27,6 +27,7 @@ import Shell.Persistence.Port
 import qualified Shell.Persistence.Port as Repo
 
 import Application.Internal.Authorization (AuthorizationError, requireTournamentOwner)
+import Application.Internal.LifecycleTransition (LifecycleError, requireBracketTournament)
 import Data.Maybe (isJust)
 import Engine.Champion (findChampionMatch, findChampionMatchDoubleElim, lookupMatchForNode, championOutcome)
 
@@ -35,6 +36,7 @@ data CompleteTournamentError
   = Unauthorized AuthorizationError
   | InvalidCompletion TournamentError
   | TournamentPausedCannotComplete
+  | WrongTournamentKind LifecycleError
   deriving (Eq, Show)
 
 completeTournament
@@ -43,7 +45,7 @@ completeTournament
   => UserId -> TournamentId -> m (Either CompleteTournamentError Tournament)
 completeTournament currentUser tid = do
   tournament <- Repo.getTournament tid
-  case first Unauthorized (requireTournamentOwner currentUser tournament) of
+  case first Unauthorized (requireTournamentOwner currentUser tournament) >> first WrongTournamentKind (requireBracketTournament tournament) of
     Left err -> pure (Left err)
     Right () ->
       fmap (first InvalidCompletion) $ case tournamentState tournament of

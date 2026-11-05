@@ -12,7 +12,7 @@ import Domain.Notification (NotificationKind(NoteTournamentStarted))
 import qualified Shell.Persistence.Port as Repo
 
 import Application.Internal.Authorization (AuthorizationError, requireTournamentOwner)
-import Application.Internal.LifecycleTransition (LifecycleError, requireTournamentState)
+import Application.Internal.LifecycleTransition (LifecycleError, requireTournamentState, requireBracketTournament)
 
 data StartTournamentError
     = Unauthorized AuthorizationError
@@ -30,7 +30,7 @@ startTournament currentUser tid = do
     case requireTournamentOwner currentUser tournament of
         Left err -> pure (Left (Unauthorized err))
         Right () ->
-            case requireTournamentState RegistrationClosed tournament of
+            case (requireBracketTournament tournament >> requireTournamentState RegistrationClosed tournament) of
                 Left err -> pure (Left (InvalidLifecycle err))
                 Right () ->
                     case tournamentBracket tournament of

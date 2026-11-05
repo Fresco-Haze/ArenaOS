@@ -117,6 +117,7 @@ import Shell.Persistence.SQLite.AvatarRepository ()
 import Shell.Persistence.SQLite.LobbyRepository ()
 import qualified Application.UseCases.Lobby as LobbyUC
 import qualified Domain.Tournament as LbDom
+import qualified Application.Internal.LifecycleTransition as LbLife
 import qualified Domain.Lobby as DL
 import qualified Data.ByteString as BSX
 import qualified Domain.Notification as Notif
@@ -7422,6 +7423,67 @@ spec = before_ resetTestDb $ do
         t <- Repo.getTournament tid
         pure (tag c0, tag c1, tag c2, tag c3, LbDom.tournamentState t, Lobby.lobbyChampion table == Just pa, map Lobby.lsPoints table)
       result `shouldBe` Right ("complete:TournamentNotComplete", "unauthorized", "ok", "complete:TournamentAlreadyCompleted", LbDom.Completed, True, [13, 6])
+  describe "Bracket-only actions refuse a lobby (v0.14)" $ do
+    let asLobby owner name = do
+          tid <- dtCreate owner name noDetails
+          Repo.setTournamentKind tid LbDom.LobbyKind
+          pure tid
+        errOf :: Either e a -> Maybe e
+        errOf = either Just (const Nothing)
+
+    it "refuses to change the format" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "bk-owner-1"
+        tid <- asLobby owner "Guard Format"
+        t0 <- Repo.getTournament tid
+        r <- UTF.updateTournamentFormat owner tid LbDom.DoubleElimination
+        t1 <- Repo.getTournament tid
+        pure (errOf r, LbDom.tournamentFormat t0 == LbDom.tournamentFormat t1)
+      result `shouldBe` Right (Just (UTF.InvalidLifecycle LbLife.WrongKind), True)
+
+    it "refuses to change the third-place setting" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "bk-owner-2"
+        tid <- asLobby owner "Guard Third"
+        t0 <- Repo.getTournament tid
+        r <- UTTP.updateTournamentThirdPlaceMatch owner tid True
+        t1 <- Repo.getTournament tid
+        pure (errOf r, LbDom.tournamentThirdPlaceMatch t0 == LbDom.tournamentThirdPlaceMatch t1)
+      result `shouldBe` Right (Just (UTTP.InvalidLifecycle LbLife.WrongKind), True)
+
+    it "refuses to generate a bracket" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "bk-owner-3"
+        tid <- asLobby owner "Guard Generate"
+        Repo.updateTournamentState tid LbDom.RegistrationClosed
+        r <- GB.generateBracket owner tid
+        t <- Repo.getTournament tid
+        pure (errOf r, LbDom.tournamentBracket t == Nothing)
+      result `shouldBe` Right (Just (GB.InvalidLifecycle LbLife.WrongKind), True)
+
+    it "refuses the bracket start" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "bk-owner-4"
+        tid <- asLobby owner "Guard Start"
+        Repo.updateTournamentState tid LbDom.RegistrationClosed
+        r <- ST.startTournament owner tid
+        t <- Repo.getTournament tid
+        pure (errOf r, LbDom.tournamentState t)
+      result `shouldBe` Right (Just (ST.InvalidLifecycle LbLife.WrongKind), LbDom.RegistrationClosed)
+
+    it "refuses the bracket completion" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "bk-owner-5"
+        tid <- asLobby owner "Guard Complete"
+        r <- CT.completeTournament owner tid
+        t <- Repo.getTournament tid
+        pure (errOf r, LbDom.tournamentState t)
+      result `shouldBe` Right (Just (CT.WrongTournamentKind LbLife.WrongKind), LbDom.Draft)
   describe "Engine.User.validateRawPassword (pure)" $ do
 
     it "rejects a password shorter than 8 characters" $

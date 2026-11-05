@@ -40,7 +40,7 @@ import qualified Engine.ByeResolution     as ByeResolution
 import qualified Engine.Materialization   as Materialization
 import Application.Internal.MatchCreation (createMatchForReadyNode)
 import Application.Internal.Authorization (AuthorizationError, requireTournamentOwner)
-import Application.Internal.LifecycleTransition (LifecycleError, requireTournamentState)
+import Application.Internal.LifecycleTransition (LifecycleError, requireTournamentState, requireBracketTournament)
 import Domain.TournamentHistory (TournamentHistoryEvent(BracketGenerated))
 import Shell.Persistence.Port (TournamentHistoryRepository)
 
@@ -71,7 +71,7 @@ generateBracket currentUser tid = do
   case first Unauthorized (requireTournamentOwner currentUser tournament) of
     Left err -> pure (Left err)
     Right () ->
-      case first InvalidLifecycle (requireTournamentState RegistrationClosed tournament) of
+      case first InvalidLifecycle (requireBracketTournament tournament >> requireTournamentState RegistrationClosed tournament) of
         Left err -> pure (Left err)
         Right () ->
           case requireNoBracket tournament >> requireSupportedFormat tournament of
