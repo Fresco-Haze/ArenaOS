@@ -70,10 +70,18 @@ export function createTournament(input: {
   entryFee?: number | null
   platform?: string | null
   rules?: string | null
+  lobby?: { killPoints: number; placementPoints: string } | null
 }) {
+  const { lobby, ...rest } = input
+  if (lobby) {
+    return api('/lobbies', CreateTournamentResponse, {
+      method: 'POST',
+      body: JSON.stringify({ ...rest, settings: lobby }),
+    })
+  }
   return api('/tournaments', CreateTournamentResponse, {
     method: 'POST',
-    body: JSON.stringify({ ...input, format: input.format ?? 'SingleElimination' }),
+    body: JSON.stringify({ ...rest, format: rest.format ?? 'SingleElimination' }),
   })
 }
 

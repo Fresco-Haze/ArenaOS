@@ -593,7 +593,7 @@ export default function OrganizerPanel({ tournament, bracket, participantCount, 
         <ApprovalToggle tournament={tournament} onDone={reload} />
       )}
 
-      {tournament.format === 'SingleElimination' && !tournament.thirdPlaceMatch &&
+      {tournament.kind !== 'Lobby' && tournament.format === 'SingleElimination' && !tournament.thirdPlaceMatch &&
        (['Draft', 'Published', 'RegistrationOpen'].includes(tournament.state) ||
           (tournament.state === 'RegistrationClosed' && !tournament.bracketId)) && (
           <ThirdPlaceToggle tournament={tournament} onDone={reload} />
@@ -635,7 +635,7 @@ export default function OrganizerPanel({ tournament, bracket, participantCount, 
         </>
       )}
 
-      {tournament.state === 'RegistrationClosed' && (
+      {tournament.state === 'RegistrationClosed' && tournament.kind !== 'Lobby' && (
         <div className="action-row">
           {!tournament.bracketId && (
             <ActionButton primary label="Generate bracket" onRun={async () => { await generateBracket(id); await reload() }} />
@@ -696,12 +696,15 @@ export default function OrganizerPanel({ tournament, bracket, participantCount, 
         </>
       )}
 
-      {tournament.state === 'Completed' && (
+      {tournament.state === 'Completed' && tournament.kind !== 'Lobby' && (
         <div className="action-row">
           <ReopenAction tournamentId={id} onDone={reload} />
         </div>
       )}
 
+      {tournament.state === 'Completed' && tournament.kind === 'Lobby' && (
+        <p className="muted">This lobby is completed. The final standings are on the Standings tab.</p>
+      )}
       {tournament.state === 'Cancelled' && (
         <p className="muted">No further actions are available.</p>
       )}
