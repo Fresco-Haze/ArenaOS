@@ -38,6 +38,7 @@ initializeSchema conn = do
   migrateUsernameIndex conn
   migrateGames conn
   migrateLobby conn
+  migratePredictions conn
 
 -- v0.12: CREATE TABLE IF NOT EXISTS never adds columns to an existing
 -- database, so add any missing tournament columns here. Safe on every start.
@@ -365,6 +366,13 @@ migrateGames conn = do
     backfill :: (String, String) -> IO ()
     backfill (old, new) =
       execute conn "UPDATE tournaments SET game_id = (SELECT id FROM games WHERE name = ?) WHERE game_id IS NULL AND game = ?" (new, old)
+
+-- Predictions (free points, no money). One pick per user per match. The app locks a
+-- pick once the match leaves Scheduled. Points are computed on read, never stored.
+migratePredictions :: Connection -> IO ()
+migratePredictions conn = do
+  execute_ conn "CREATE TABLE IF NOT EXISTS predictions (match_id INTEGER NOT NULL REFERENCES matches(id), user_id INTEGER NOT NULL REFERENCES users(id), pick TEXT NOT NULL CHECK (pick IN ('A', 'B', 'Draw')), created_at TEXT NOT NULL, PRIMARY KEY (match_id, user_id))"
+  execute_ conn "CREATE INDEX IF NOT EXISTS idx_predictions_user ON predictions(user_id)"
 
 -- v0.14: lobby tournaments (battle royale style). Additive only. A tournament's
 -- kind is 'Bracket' (every existing one) or 'Lobby'. Placement points are a

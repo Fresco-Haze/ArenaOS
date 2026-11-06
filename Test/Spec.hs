@@ -53,6 +53,8 @@ import Domain.Match (Match(..),MatchId(..), MatchStatus(Scheduled), MatchOutcome
 import Domain.User (User(..),Email(..), PasswordHash(..), Username(..), AccountStatus(..))
 import Domain.MatchError (MatchError(..))
 import qualified Domain.Match as Match
+import qualified Domain.Ids as PredIds
+import qualified Engine.Predictions as Pred
 import Domain.TournamentError (TournamentError(..))
 
 import Application.UseCases.CreateTournament (createTournament)
@@ -7639,6 +7641,72 @@ spec = before_ resetTestDb $ do
         bad <- CTD.createTournamentWithDetails (dtNew owner "Stream E") (noDetails { detailsStreamUrl = Just "ftp://kick.com/x" })
         pure (tournamentStreamUrl t, isBad bad)
       result `shouldBe` Right (Just "https://kick.com/sweatlobby", True)
+  describe "Engine.Predictions (pure)" $ do
+    let ann = Individual (Player (PlayerName "ann"))
+        bob = Individual (Player (PlayerName "bob"))
+        cat = Individual (Player (PlayerName "cat"))
+        mk :: Match.MatchStatus -> Maybe MatchOutcome -> Match
+        mk st out = Match
+          { matchId = MatchId 1
+          , matchTournament = TournamentId 1
+          , matchBracket = PredIds.BracketId 1
+          , matchBracketNode = PredIds.BracketNodeId 1
+          , matchCompetitorA = ann
+          , matchCompetitorB = bob
+          , matchStatus = st
+          , matchOutcome = out
+          , matchScheduledStart = Nothing
+          }
+        done = mk Match.Completed . Just
+        uid = PredIds.UserId
+
+    it "is open only while the match is Scheduled" $ do
+      map Pred.predictionOpen [mk Match.Scheduled Nothing, mk Match.InProgress Nothing, done (Winner ann), mk Match.Cancelled Nothing]
+        `shouldBe` [True, False, False, False]
+
+    it "allows a draw pick only in round robin" $ do
+      map (`Pred.pickAllowed` Pred.PickDraw) [RoundRobin, SingleElimination, DoubleElimination]
+        `shouldBe` [True, False, False]
+      map (`Pred.pickAllowed` Pred.PickA) [RoundRobin, SingleElimination, DoubleElimination]
+        `shouldBe` [True, True, True]
+
+    it "scores a winner, forfeit and disqualification for the side that advances" $ do
+      let sc o = map (Pred.scorePrediction (done o)) [Pred.PickA, Pred.PickB, Pred.PickDraw]
+      sc (Winner ann) `shouldBe` [Pred.Correct, Pred.Wrong, Pred.Wrong]
+      sc (Winner bob) `shouldBe` [Pred.Wrong, Pred.Correct, Pred.Wrong]
+      sc (Forfeit ann) `shouldBe` [Pred.Correct, Pred.Wrong, Pred.Wrong]
+      sc (Disqualification bob) `shouldBe` [Pred.Wrong, Pred.Correct, Pred.Wrong]
+
+    it "scores a draw only for a draw pick, and a no contest is void" $ do
+      let sc o = map (Pred.scorePrediction (done o)) [Pred.PickA, Pred.PickB, Pred.PickDraw]
+      sc Draw `shouldBe` [Pred.Wrong, Pred.Wrong, Pred.Correct]
+      sc NoContest `shouldBe` [Pred.Void, Pred.Void, Pred.Void]
+
+    it "is pending until a result exists, and void when cancelled" $ do
+      Pred.scorePrediction (mk Match.Scheduled Nothing) Pred.PickA `shouldBe` Pred.Pending
+      Pred.scorePrediction (mk Match.InProgress Nothing) Pred.PickB `shouldBe` Pred.Pending
+      Pred.scorePrediction (mk Match.Completed Nothing) Pred.PickA `shouldBe` Pred.Pending
+      Pred.scorePrediction (mk Match.Cancelled Nothing) Pred.PickA `shouldBe` Pred.Void
+
+    it "treats an outcome naming someone outside the match as void" $ do
+      Pred.scorePrediction (done (Winner cat)) Pred.PickA `shouldBe` Pred.Void
+
+    it "counts one point per correct pick and skips void and pending" $ do
+      let entries = [ (uid 2, Pred.Correct), (uid 1, Pred.Correct), (uid 1, Pred.Correct)
+                    , (uid 2, Pred.Wrong), (uid 3, Pred.Void), (uid 3, Pred.Pending), (uid 4, Pred.Wrong) ]
+      Pred.buildLeaderboard entries
+        `shouldBe` [ Pred.LeaderboardRow (uid 1) 2 0, Pred.LeaderboardRow (uid 2) 1 1, Pred.LeaderboardRow (uid 4) 0 1 ]
+
+    it "breaks ties by fewest wrong picks, then lowest user id" $ do
+      let entries = [ (uid 5, Pred.Correct), (uid 5, Pred.Wrong), (uid 3, Pred.Correct)
+                    , (uid 2, Pred.Correct), (uid 2, Pred.Wrong) ]
+          table = Pred.buildLeaderboard entries
+      map Pred.lbUser table `shouldBe` [uid 3, uid 2, uid 5]
+      map Pred.leaderboardPoints table `shouldBe` [1, 1, 1]
+
+    it "has an empty leaderboard when nobody has a settled pick" $ do
+      Pred.buildLeaderboard [] `shouldBe` []
+      Pred.buildLeaderboard [(uid 1, Pred.Pending), (uid 2, Pred.Void)] `shouldBe` []
   describe "Engine.User.validateRawPassword (pure)" $ do
 
     it "rejects a password shorter than 8 characters" $

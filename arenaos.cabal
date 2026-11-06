@@ -111,6 +111,7 @@ library
                       Engine.Players
                       Application.UseCases.GetPlayers
                       Domain.Notification
+                      Engine.Predictions
 
 
     hs-source-dirs:   .
