@@ -9,7 +9,7 @@ import { resizeBannerToJpeg } from '../lib/bannerImage'
 import { createTournament, uploadBanner } from '../lib/tournamentActions'
 import { formatKes } from '../lib/money'
 import DetailsFields from '../components/DetailsFields'
-import { PLATFORMS, deadlineError, detailsFromTournament, emptyDetails, feeError, prizeError, toPayload } from '../lib/details'
+import { PLATFORMS, deadlineError, detailsFromTournament, emptyDetails, feeError, prizeError, streamError, toPayload } from '../lib/details'
 import type { DetailsValues } from '../lib/details'
 import { formatLabel, gameLabel } from '../model'
 import type { Tournament } from '../model'
@@ -99,7 +99,7 @@ export default function CreateTournamentPage() {
       }
       return null
     }
-    if (i === 2) return prizeError(details.prize) ?? feeError(details.entryFee) ?? deadlineError(details)
+    if (i === 2) return prizeError(details.prize) ?? feeError(details.entryFee) ?? deadlineError(details) ?? streamError(details.streamUrl)
     return null
   }
 
@@ -460,6 +460,7 @@ export default function CreateTournamentPage() {
               <dt>Prize pool</dt><dd>{p.prize != null ? formatKes(p.prize) : '-'}</dd>
               <dt>Entry fee</dt><dd>{p.entryFee == null ? '-' : p.entryFee === 0 ? 'Free' : formatKes(p.entryFee)}</dd>
               <dt>Rules</dt><dd className="create-review-rules">{p.rules ?? '-'}</dd>
+                  <dt>Stream link</dt><dd className="create-review-rules">{p.streamUrl ?? '-'}</dd>
               <dt>Visibility</dt><dd>{visibility}</dd>
               {participantMode === 'IndividualOnly' && (
                 <><dt>Joining</dt><dd>{requireApproval ? 'You approve each request' : 'Open to anyone signed in'}</dd></>

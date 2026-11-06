@@ -70,6 +70,7 @@ export function createTournament(input: {
   entryFee?: number | null
   platform?: string | null
   rules?: string | null
+  streamUrl?: string | null
   lobby?: { killPoints: number; placementPoints: string } | null
 }) {
   const { lobby, ...rest } = input
@@ -194,7 +195,7 @@ export function createTeam(input: { name: string; captain: string; members: stri
 // Replaces game, start time and prize; null clears a field.
 export function updateDetails(
   id: number,
-  details: { game: Game | null; startTime: string | null; registrationDeadline: string | null; prize: number | null; entryFee: number | null; platform: string | null; description: string | null; rules: string | null },
+  details: { game: Game | null; startTime: string | null; registrationDeadline: string | null; prize: number | null; entryFee: number | null; platform: string | null; description: string | null; rules: string | null; streamUrl: string | null },
 ) {
   return apiVoid(`/tournaments/${id}/details`, {
     method: 'PUT',

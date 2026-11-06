@@ -9,6 +9,7 @@ import { participantName } from '../lib/participants'
 import { formatCardDate } from '../lib/cardDate'
 import { formatKes } from '../lib/money'
 import { PLATFORMS } from '../lib/details'
+import { parseStream } from '../lib/stream'
 import { formatLabel, gameLabel, stateLabel, type Participant } from '../model'
 
 import Bracket from '../components/Bracket'
@@ -109,6 +110,7 @@ export default function TournamentPage({ id }: { id: string }) {
   const rulesList = (t.rules ?? '').split('\n').map((r) => r.trim()).filter((r) => r.length > 0)
   // Player profiles are built from public tournaments past Draft, so only link there.
   const profileLinks = t.visibility === 'Public' && t.state !== 'Draft' && t.state !== 'Cancelled'
+  const stream = t.streamUrl ? parseStream(t.streamUrl, window.location.hostname) : null
 
   return (
     <div className="tp">
@@ -182,6 +184,27 @@ export default function TournamentPage({ id }: { id: string }) {
               {platformName && <li className="tp-tile"><span className="muted">Platform</span><strong>{platformName}</strong></li>}
               {feeText && <li className="tp-tile"><span className="muted">Entry fee</span><strong>{feeText}</strong></li>}
             </ul>
+            {stream && (
+              <>
+                <h3 className="tp-rules-title">Stream</h3>
+                {stream.embedUrl && (
+                  <div className="tp-stream">
+                    <iframe
+                      src={stream.embedUrl}
+                      title={stream.label + ' stream'}
+                      allowFullScreen
+                      loading="lazy"
+                      referrerPolicy="strict-origin-when-cross-origin"
+                    />
+                  </div>
+                )}
+                <p>
+                  <a href={stream.url} target="_blank" rel="noopener noreferrer">
+                    {stream.embedUrl ? 'Open on ' + stream.label : 'Watch stream'}
+                  </a>
+                </p>
+              </>
+            )}
             {rulesList.length > 0 && (
               <>
                 <h3 className="tp-rules-title">Tournament rules</h3>
