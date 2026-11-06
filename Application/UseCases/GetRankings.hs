@@ -6,6 +6,7 @@ module Application.UseCases.GetRankings
   , loadPublicFacts
   , loadMatchScores
   , rankingsFrom
+  , lobbyChampionOf
   ) where
 
 import Data.Maybe (mapMaybe)
@@ -20,13 +21,14 @@ import Engine.Standings (MatchScores)
 import Domain.Scoreable (unEFootballScore)
 import Engine.Rankings (RankingEntry, computeRankings)
 
-import Shell.Persistence.Port (TournamentRepository, BracketRepository, MatchRepository, RegistrationRepository, EFootballScoreRepository)
+import Shell.Persistence.Port (TournamentRepository, BracketRepository, MatchRepository, RegistrationRepository, EFootballScoreRepository, LobbyRepository, ParticipantRepository)
+import qualified Engine.Lobby as EL
 import qualified Shell.Persistence.Port as Repo
 
 -- Public tournaments past Draft, not cancelled, optionally of one game.
 -- Computed on read, never stored, so corrections and reopenings are always reflected.
 getRankings
-  :: (TournamentRepository m, BracketRepository m, MatchRepository m, EFootballScoreRepository m)
+  :: (TournamentRepository m, BracketRepository m, MatchRepository m, EFootballScoreRepository m, RegistrationRepository m, LobbyRepository m, ParticipantRepository m)
   => Maybe T.Game
   -> Int
   -> m [RankingEntry]
@@ -43,8 +45,9 @@ counted mGame t =
     && maybe True (\g -> T.tournamentGame t == Just g) mGame
 
 tournamentFacts
-  :: (BracketRepository m, MatchRepository m, EFootballScoreRepository m)
+  :: (BracketRepository m, MatchRepository m, EFootballScoreRepository m, RegistrationRepository m, LobbyRepository m, ParticipantRepository m)
   => T.Tournament -> m [(Maybe Participant, [Participant])]
+tournamentFacts t | T.tournamentKind t == T.LobbyKind = lobbyFact t
 tournamentFacts t = case T.tournamentBracket t of
   Nothing  -> pure []
   Just bid -> do
@@ -59,6 +62,31 @@ tournamentFacts t = case T.tournamentBracket t of
               tournamentChampionWith scores (T.tournamentFormat t) bracket nodes matches
           | otherwise = Nothing
     pure [(champ, winners)]
+
+-- A lobby has no bracket and no matches, so its only fact is its champion:
+-- one title, and no match wins. A tie at the top, or an unfinished lobby, has none.
+lobbyFact
+  :: (RegistrationRepository m, LobbyRepository m, ParticipantRepository m)
+  => T.Tournament -> m [(Maybe Participant, [Participant])]
+lobbyFact t = do
+  champ <- lobbyChampionOf t
+  pure [(champ, [])]
+
+lobbyChampionOf
+  :: (RegistrationRepository m, LobbyRepository m, ParticipantRepository m)
+  => T.Tournament -> m (Maybe Participant)
+lobbyChampionOf t
+  | T.tournamentKind t /= T.LobbyKind || T.tournamentState t /= T.Completed = pure Nothing
+  | otherwise = do
+      let tid = T.tournamentId t
+      settings <- Repo.getLobbySettings tid
+      regs <- Repo.listRegistrations tid
+      let people = map registrationParticipant regs
+      ids <- mapM Repo.resolveParticipant people
+      rounds <- Repo.listLobbyRounds tid
+      let table = EL.lobbyStandings settings ids (map snd rounds)
+          byId = zip ids people
+      pure (EL.lobbyChampion table >>= \pid -> lookup pid byId)
 
 completedWinner :: M.Match -> Maybe Participant
 completedWinner m
@@ -80,7 +108,7 @@ data PublicFact = PublicFact
   }
 
 loadPublicFacts
-  :: (TournamentRepository m, BracketRepository m, MatchRepository m, RegistrationRepository m, EFootballScoreRepository m)
+  :: (TournamentRepository m, BracketRepository m, MatchRepository m, RegistrationRepository m, EFootballScoreRepository m, LobbyRepository m, ParticipantRepository m)
   => m [PublicFact]
 loadPublicFacts = do
   ts <- Repo.listAllTournaments

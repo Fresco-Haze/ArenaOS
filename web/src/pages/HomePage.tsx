@@ -285,7 +285,7 @@ export default function HomePage() {
                     <div className="gtile-body">
                       <h3 className="gtile-name">{gameLabel[g]}</h3>
                       <p className="gtile-count">{n} {n === 1 ? 'tournament' : 'tournaments'}</p>
-                      <Link to={`/tournaments?game=${g}`} className="gtile-cta">Explore &rarr;</Link>
+                      <Link to={`/tournaments?game=${encodeURIComponent(g)}`} className="gtile-cta">Explore &rarr;</Link>
                     </div>
                   </li>
                 )
