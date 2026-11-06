@@ -48,6 +48,7 @@ updateTournamentDetails currentUser tid new = do
                              ++ [ FieldEntryFee | tournamentEntryFee tournament /= detailsEntryFee d ]
                              ++ [ FieldPlatform | tournamentPlatform tournament /= detailsPlatform d ]
                              ++ [ FieldRules | tournamentRules tournament /= detailsRules d ]
+                             ++ [ FieldStreamUrl | tournamentStreamUrl tournament /= detailsStreamUrl d ]
                         withTxN $ do
                             Repo.updateTournamentDetails tid d
                             mapM_ (Repo.recordHistoryEvent tid . ConfigurationChanged) changed

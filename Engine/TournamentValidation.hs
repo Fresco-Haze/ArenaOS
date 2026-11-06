@@ -81,6 +81,7 @@ data DetailsValidationError
   | EntryFeeOutOfRange Int
   | PlatformInvalid
   | RulesTooLong Int
+  | StreamUrlInvalid
   deriving (Eq, Show)
 
 maxPrizeKes :: Int
@@ -95,6 +96,13 @@ maxRulesLength = 1000
 platforms :: [String]
 platforms = ["PC", "Console", "Mobile", "CrossPlatform"]
 
+-- v0.14: a stream link is optional. It must be a full https:// address of at most
+-- 200 characters, with no spaces or control characters. Which sites get an embedded
+-- player is decided by the web page, not here.
+validStreamUrl :: String -> Bool
+validStreamUrl u =
+  null u || (take 8 u == "https://" && length u > 8 && length u <= 200 && all (\c -> c > ' ' && c /= '\DEL') u)
+
 validateDetails :: TournamentDetails -> Either DetailsValidationError TournamentDetails
 validateDetails d =
   case (detailsPrize d, trimmed) of
@@ -103,15 +111,18 @@ validateDetails d =
     _ | Just n <- detailsEntryFee d, n < 0 || n > maxPrizeKes -> Left (EntryFeeOutOfRange n)
     _ | Just p <- detailsPlatform d, p `notElem` platforms -> Left PlatformInvalid
     _ | Just r <- trimmedRules, length r > maxRulesLength -> Left (RulesTooLong (length r))
+    _ | Just u <- trimmedStream, not (validStreamUrl u) -> Left StreamUrlInvalid
     _ | deadlineAfterStart -> Left DeadlineAfterStart
     _ -> Right d { detailsPrize = detailsPrize d >>= nonZero
                  , detailsDescription = trimmed >>= nonBlank
                  , detailsStartTime = truncSecs <$> detailsStartTime d
                  , detailsRegistrationDeadline = truncSecs <$> detailsRegistrationDeadline d
-                 , detailsRules = trimmedRules >>= nonBlank }
+                 , detailsRules = trimmedRules >>= nonBlank
+                 , detailsStreamUrl = trimmedStream >>= nonBlank }
   where
     trimmed = trim <$> detailsDescription d
     trimmedRules = trim <$> detailsRules d
+    trimmedStream = trim <$> detailsStreamUrl d
     deadlineAfterStart = case (detailsRegistrationDeadline d, detailsStartTime d) of
       (Just r, Just s) -> r > s
       _ -> False

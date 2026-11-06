@@ -23,6 +23,7 @@ data ChangedField
     | FieldEntryFee
     | FieldPlatform
     | FieldRules
+    | FieldStreamUrl
     deriving (Show, Eq)
 
 data TournamentHistoryEvent
