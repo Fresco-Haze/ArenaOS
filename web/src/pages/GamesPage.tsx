@@ -1,16 +1,18 @@
 import { Link } from 'react-router'
 import { useApi } from '../hooks/useApi'
-import { gameLabel, PublicStatsView } from '../model'
-import type { Game } from '../model'
+import { useGames } from '../lib/useGames'
+import { PublicStatsView } from '../model'
 import ErrorBanner from '../components/ErrorBanner'
 import LoadingBlock from '../components/LoadingBlock'
 import PageHeader from '../components/PageHeader'
 
-// "Other" is a catch-all tag, not a game, so it is not listed here.
-const GAMES: readonly Game[] = ['eFootball', 'PUBG Mobile', 'Call of Duty']
+const filterHref = (name: string) => `/tournaments?game=${encodeURIComponent(name)}`
 
+// Every game that has public tournaments gets a tile, most active first (the API
+// already sorts the counts). The rest of the list is below, as plain links.
 export default function GamesPage() {
   const stats = useApi('/stats', PublicStatsView, true)
+  const allGames = useGames()
   const s = stats.data
 
   return (
@@ -21,27 +23,38 @@ export default function GamesPage() {
       ) : s === null ? (
         <LoadingBlock label="Loading games" />
       ) : (
-        <ul className="gtiles">
-          {GAMES.map((g) => {
-            const n = s.byGame.find((x) => x.game === g)?.count ?? 0
-            return (
-              <li key={g} className="gtile">
-                <div className="gtile-art" data-game={g} />
-                <div className="gtile-body">
-                  <h2 className="gtile-name">{gameLabel[g]}</h2>
-                  <p className="gtile-count">{n} {n === 1 ? 'tournament' : 'tournaments'}</p>
-                  <Link to={`/tournaments?game=${encodeURIComponent(g)}`} className="gtile-cta">Explore &rarr;</Link>
-                </div>
-              </li>
-            )
-          })}
-          <li className="gtile gtile-soon">
-            <div className="gtile-body">
-              <h2 className="gtile-name">More games</h2>
-              <p className="gtile-count">Coming soon</p>
-            </div>
-          </li>
-        </ul>
+        <>
+          {s.byGame.length === 0 ? (
+            <p className="muted">No public tournaments have a game yet.</p>
+          ) : (
+            <ul className="gtiles">
+              {s.byGame.map(({ game, count }) => (
+                <li key={game} className="gtile">
+                  <div className="gtile-art" data-game={game} />
+                  <div className="gtile-body">
+                    <h2 className="gtile-name">{game}</h2>
+                    <p className="gtile-count">{count} {count === 1 ? 'tournament' : 'tournaments'}</p>
+                    <Link to={filterHref(game)} className="gtile-cta">Explore &rarr;</Link>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+          {allGames.length > 0 && (
+            <>
+              <h2 className="panel-title">All games</h2>
+              <ul className="games-all">
+                {allGames
+                  .filter((g) => !s.byGame.some((x) => x.game.toLowerCase() === g.toLowerCase()))
+                  .map((g) => (
+                    <li key={g}>
+                      <Link to={filterHref(g)}>{g}</Link>
+                    </li>
+                  ))}
+              </ul>
+            </>
+          )}
+        </>
       )}
     </div>
   )

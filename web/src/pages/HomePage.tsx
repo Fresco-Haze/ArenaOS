@@ -7,7 +7,7 @@ import { participantName } from '../lib/participants'
 import { useAuth } from '../auth/context'
 import { formatKes } from '../lib/money'
 import { ActivityList, gameLabel, MyMatchSummary, PublicStatsView, RankingList, TournamentList } from '../model'
-import type { ActivityItem, Game } from '../model'
+import type { ActivityItem } from '../model'
 import EmptyState from '../components/EmptyState'
 import ErrorBanner from '../components/ErrorBanner'
 import LoadingBlock from '../components/LoadingBlock'
@@ -17,7 +17,7 @@ import BannerImg from '../components/BannerImg'
 // The backend has no "featured" concept: the four newest public
 // tournaments that are open for registration or running.
 const FEATURED_STATES: readonly string[] = ['RegistrationOpen', 'InProgress']
-const POPULAR: readonly Game[] = ['eFootball', 'PUBG Mobile', 'Call of Duty']
+const POPULAR_COUNT = 3
 
 const PATHS = {
   trophy: 'M8 4h8v5a4 4 0 0 1-8 0V4zM8 6H4v2a3 3 0 0 0 3 3M16 6h4v2a3 3 0 0 1-3 3M12 13v4M8 20h8M10 17h4',
@@ -277,13 +277,12 @@ export default function HomePage() {
             <LoadingBlock label="Loading games" />
           ) : (
             <ul className="gtiles">
-              {POPULAR.map((g) => {
-                const n = s.byGame.find((x) => x.game === g)?.count ?? 0
+              {s.byGame.slice(0, POPULAR_COUNT).map(({ game: g, count: n }) => {
                 return (
                   <li key={g} className="gtile">
                     <div className="gtile-art" data-game={g} />
                     <div className="gtile-body">
-                      <h3 className="gtile-name">{gameLabel[g]}</h3>
+                      <h3 className="gtile-name">{g}</h3>
                       <p className="gtile-count">{n} {n === 1 ? 'tournament' : 'tournaments'}</p>
                       <Link to={`/tournaments?game=${encodeURIComponent(g)}`} className="gtile-cta">Explore &rarr;</Link>
                     </div>
@@ -293,7 +292,7 @@ export default function HomePage() {
               <li className="gtile gtile-soon">
                 <div className="gtile-body">
                   <h3 className="gtile-name">More games</h3>
-                  <p className="gtile-count">Coming soon</p>
+                  <p className="gtile-count"><Link to="/games">See all</Link></p>
                 </div>
               </li>
             </ul>
