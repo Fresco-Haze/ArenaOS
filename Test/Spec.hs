@@ -1446,7 +1446,7 @@ spec = before_ resetTestDb $ do
             , tournamentVisibility = Public
             , tournamentMaxParticipants = 2
             , tournamentBracket = Nothing
-            , tournamentOwner = UserId 1, tournamentThirdPlaceMatch = False, tournamentParticipantMode = IndividualOnly, tournamentKind = BracketKind, tournamentGame = Nothing, tournamentStartTime = Nothing, tournamentPrize = Nothing, tournamentDescription = Nothing, tournamentRequireApproval = False, tournamentRegistrationDeadline = Nothing, tournamentEntryFee = Nothing, tournamentPlatform = Nothing, tournamentRules = Nothing
+            , tournamentOwner = UserId 1, tournamentThirdPlaceMatch = False, tournamentParticipantMode = IndividualOnly, tournamentKind = BracketKind, tournamentStreamUrl = Nothing, tournamentGame = Nothing, tournamentStartTime = Nothing, tournamentPrize = Nothing, tournamentDescription = Nothing, tournamentRequireApproval = False, tournamentRegistrationDeadline = Nothing, tournamentEntryFee = Nothing, tournamentPlatform = Nothing, tournamentRules = Nothing
             }
           tournaments = map mkT [Draft, Draft, Published, InProgress, Completed, Completed, Completed, Cancelled]
           overview = buildTournamentOverview tournaments
@@ -7584,6 +7584,61 @@ spec = before_ resetTestDb $ do
         prof <- GPL.getPlayerProfile "rkl6-ann"
         pure (fmap (Pl.psTitles . GPL.ppSummary) prof)
       result `shouldBe` Right (Just 1)
+  describe "Stream link (v0.14)" $ do
+    let isBad :: Either e a -> Bool
+        isBad = either (const True) (const False)
+
+    it "stores a stream link trimmed, reads it back and logs one history entry" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "sl-owner-1"
+        tid <- dtCreate owner "Stream A" noDetails
+        r <- UTD.updateTournamentDetails owner tid (noDetails { detailsStreamUrl = Just "  https://www.twitch.tv/sweatlobby  " })
+        t <- Repo.getTournament tid
+        changed <- dtChanged tid
+        pure (r, tournamentStreamUrl t, changed)
+      case result of
+        Left err -> expectationFailure (show err)
+        Right (r, url, changed) -> do
+          r `shouldBe` Right ()
+          url `shouldBe` Just "https://www.twitch.tv/sweatlobby"
+          changed `shouldMatchList` [TournamentHistory.FieldStreamUrl]
+
+    it "clears the stream link, and a blank link counts as none" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "sl-owner-2"
+        tid <- dtCreate owner "Stream B" (noDetails { detailsStreamUrl = Just "https://www.youtube.com/watch?v=abc123" })
+        t1 <- Repo.getTournament tid
+        _ <- UTD.updateTournamentDetails owner tid (noDetails { detailsStreamUrl = Just "   " })
+        t2 <- Repo.getTournament tid
+        pure (tournamentStreamUrl t1, tournamentStreamUrl t2)
+      result `shouldBe` Right (Just "https://www.youtube.com/watch?v=abc123", Nothing)
+
+    it "rejects a link that is not a full https address, is too long, or has a space" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "sl-owner-3"
+        tid <- dtCreate owner "Stream C" noDetails
+        let bad u = UTD.updateTournamentDetails owner tid (noDetails { detailsStreamUrl = Just u })
+        a <- bad "http://www.twitch.tv/sweatlobby"
+        b <- bad "www.twitch.tv/sweatlobby"
+        c <- bad ("https://" ++ replicate 193 'a')
+        d <- bad "https://www.twitch.tv/has space"
+        e <- bad "https://"
+        ok <- bad ("https://" ++ replicate 192 'a')
+        pure (map isBad [a, b, c, d, e], isBad ok)
+      result `shouldBe` Right ([True, True, True, True, True], False)
+
+    it "accepts a stream link when creating, and refuses a bad one" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "sl-owner-4"
+        tid <- dtCreate owner "Stream D" (noDetails { detailsStreamUrl = Just "https://kick.com/sweatlobby" })
+        t <- Repo.getTournament tid
+        bad <- CTD.createTournamentWithDetails (dtNew owner "Stream E") (noDetails { detailsStreamUrl = Just "ftp://kick.com/x" })
+        pure (tournamentStreamUrl t, isBad bad)
+      result `shouldBe` Right (Just "https://kick.com/sweatlobby", True)
   describe "Engine.User.validateRawPassword (pure)" $ do
 
     it "rejects a password shorter than 8 characters" $
@@ -7683,7 +7738,7 @@ spec = before_ resetTestDb $ do
           , tournamentOrganizer = OrganizerName "x", tournamentFormat = SingleElimination
           , tournamentState = st, tournamentVisibility = vis
           , tournamentMaxParticipants = 2, tournamentBracket = Nothing
-          , tournamentOwner = UserId 1, tournamentThirdPlaceMatch = False, tournamentParticipantMode = IndividualOnly, tournamentKind = BracketKind, tournamentGame = Nothing, tournamentStartTime = Nothing, tournamentPrize = Nothing, tournamentDescription = Nothing, tournamentRequireApproval = False, tournamentRegistrationDeadline = Nothing, tournamentEntryFee = Nothing, tournamentPlatform = Nothing, tournamentRules = Nothing }
+          , tournamentOwner = UserId 1, tournamentThirdPlaceMatch = False, tournamentParticipantMode = IndividualOnly, tournamentKind = BracketKind, tournamentStreamUrl = Nothing, tournamentGame = Nothing, tournamentStartTime = Nothing, tournamentPrize = Nothing, tournamentDescription = Nothing, tournamentRequireApproval = False, tournamentRegistrationDeadline = Nothing, tournamentEntryFee = Nothing, tournamentPlatform = Nothing, tournamentRules = Nothing }
         owner    = Just (UserId 1)
         stranger = Just (UserId 2)
 
@@ -7739,7 +7794,7 @@ spec = before_ resetTestDb $ do
           , tournamentOrganizer = OrganizerName "x", tournamentFormat = SingleElimination
           , tournamentState = st, tournamentVisibility = vis
           , tournamentMaxParticipants = 2, tournamentBracket = Nothing
-          , tournamentOwner = UserId 1, tournamentThirdPlaceMatch = False, tournamentParticipantMode = IndividualOnly, tournamentKind = BracketKind, tournamentGame = Nothing, tournamentStartTime = Nothing, tournamentPrize = Nothing, tournamentDescription = Nothing, tournamentRequireApproval = False, tournamentRegistrationDeadline = Nothing, tournamentEntryFee = Nothing, tournamentPlatform = Nothing, tournamentRules = Nothing }
+          , tournamentOwner = UserId 1, tournamentThirdPlaceMatch = False, tournamentParticipantMode = IndividualOnly, tournamentKind = BracketKind, tournamentStreamUrl = Nothing, tournamentGame = Nothing, tournamentStartTime = Nothing, tournamentPrize = Nothing, tournamentDescription = Nothing, tournamentRequireApproval = False, tournamentRegistrationDeadline = Nothing, tournamentEntryFee = Nothing, tournamentPlatform = Nothing, tournamentRules = Nothing }
         ids = map (unTournamentId . tournamentId)
 
     it "keeps only Public tournaments past Draft, newest first" $
@@ -9583,7 +9638,7 @@ dtTime :: UTCTime
 dtTime = UTCTime (fromGregorian 2026 12 12) 64800
 
 dtDetails :: TournamentDetails
-dtDetails = TournamentDetails (Just GameEFootball) (Just dtTime) (Just 50000) Nothing Nothing Nothing Nothing Nothing
+dtDetails = TournamentDetails (Just GameEFootball) (Just dtTime) (Just 50000) Nothing Nothing Nothing Nothing Nothing Nothing
 
 dtCreate :: UserId -> String -> TournamentDetails -> SQLiteM TournamentId
 dtCreate owner name d = unwrap =<< CTD.createTournamentWithDetails (dtNew owner name) d
@@ -9660,8 +9715,8 @@ detailsSpec = describe "Tournament details: game, start time, prize in KSh (v0.1
     result <- runSQLiteM testDbPath $ do
       setupSchema
       owner <- createTestUser "dt-owner-6"
-      tid <- dtCreate owner "Edit Cup" (TournamentDetails (Just GameEFootball) Nothing (Just 10000) Nothing Nothing Nothing Nothing Nothing)
-      r <- UTD.updateTournamentDetails owner tid (TournamentDetails (Just GameEFootball) (Just dtTime) (Just 20000) Nothing Nothing Nothing Nothing Nothing)
+      tid <- dtCreate owner "Edit Cup" (TournamentDetails (Just GameEFootball) Nothing (Just 10000) Nothing Nothing Nothing Nothing Nothing Nothing)
+      r <- UTD.updateTournamentDetails owner tid (TournamentDetails (Just GameEFootball) (Just dtTime) (Just 20000) Nothing Nothing Nothing Nothing Nothing Nothing)
       t <- Repo.getTournament tid
       changed <- dtChanged tid
       pure (r, t, changed)
@@ -9919,7 +9974,7 @@ plT i name g = Tournament
   , tournamentMaxParticipants = 2, tournamentBracket = Nothing
   , tournamentOwner = UserId 1, tournamentThirdPlaceMatch = False
   , tournamentParticipantMode = IndividualOnly
-  , tournamentKind = BracketKind, tournamentGame = g, tournamentStartTime = Nothing, tournamentPrize = Nothing, tournamentDescription = Nothing, tournamentRequireApproval = False, tournamentRegistrationDeadline = Nothing, tournamentEntryFee = Nothing, tournamentPlatform = Nothing, tournamentRules = Nothing }
+  , tournamentKind = BracketKind, tournamentStreamUrl = Nothing, tournamentGame = g, tournamentStartTime = Nothing, tournamentPrize = Nothing, tournamentDescription = Nothing, tournamentRequireApproval = False, tournamentRegistrationDeadline = Nothing, tournamentEntryFee = Nothing, tournamentPlatform = Nothing, tournamentRules = Nothing }
 
 -- ids 1..60; id 3 is "Zebra Open" (Call of Duty); other even ids are eFootball
 plAll :: [Tournament]

@@ -178,6 +178,7 @@ changedFieldToText FieldRegistrationDeadline = "RegistrationDeadline"
 changedFieldToText FieldEntryFee = "EntryFee"
 changedFieldToText FieldPlatform = "Platform"
 changedFieldToText FieldRules = "Rules"
+changedFieldToText FieldStreamUrl = "StreamUrl"
 
 textToChangedField :: String -> IO ChangedField
 textToChangedField "Name"             = pure FieldName
@@ -193,6 +194,7 @@ textToChangedField "RegistrationDeadline" = pure FieldRegistrationDeadline
 textToChangedField "EntryFee" = pure FieldEntryFee
 textToChangedField "Platform" = pure FieldPlatform
 textToChangedField "Rules" = pure FieldRules
+textToChangedField "StreamUrl" = pure FieldStreamUrl
 textToChangedField other              =
     throwIO (StorageFailure ("Unknown changed field in storage: " ++ other))
 
@@ -209,19 +211,19 @@ tournamentSelect :: Query
 tournamentSelect =
     "SELECT id, name, organizer_name, owner_id, format, state, visibility, \
     \max_participants, third_place_match, bracket_id, \
-    \participant_mode, (SELECT name FROM games WHERE id = tournaments.game_id), start_time, prize_kes, description, require_approval, registration_deadline, entry_fee_kes, platform, rules, tournaments.kind \
+    \participant_mode, (SELECT name FROM games WHERE id = tournaments.game_id), start_time, prize_kes, description, require_approval, registration_deadline, entry_fee_kes, platform, rules, tournaments.kind, tournaments.stream_url \
     \FROM tournaments"
 
 type TournamentRow =
     (Int, String, String, Int, String, String, String, Int, Int, Maybe Int)
     :. (String, Maybe String, Maybe String, Maybe Int, Maybe String, Int, Maybe String, Maybe Int, Maybe String, Maybe String)
-    :. Only String
+    :. (String, Maybe String)
 
 decodeTournamentRow :: TournamentRow -> IO Tournament
 decodeTournamentRow
     ( (tidInt, name, organizer, ownerId, formatText, stateText, visText, maxP, thirdPlaceInt, bracketIdMaybe)
       :. (modeText, gameMaybe, startMaybe, prizeMaybe, descMaybe, approvalInt, deadlineMaybe, feeMaybe, platformMaybe, rulesMaybe)
-      :. Only kindText ) = do
+      :. (kindText, streamMaybe) ) = do
     format <- textToFormat formatText
     state  <- textToState stateText
     vis    <- textToVisibility visText
@@ -252,6 +254,7 @@ decodeTournamentRow
         , tournamentPlatform = platformMaybe
         , tournamentRules = rulesMaybe
         , tournamentKind = kind
+        , tournamentStreamUrl = streamMaybe
         }
 
 -- v0.12: public stats. "Public" = Public and past Draft (same set as the list).
@@ -341,8 +344,8 @@ instance TournamentRepository SQLiteM where
             bracketIdMaybe          = (\(BracketId bid) -> bid) <$> tournamentBracket t
         gid <- liftIO (resolveGameId conn (tournamentGame t))
         liftIO $ execute conn
-            "INSERT INTO tournaments (id, name, organizer_name, owner_id, format, state, visibility, max_participants, third_place_match, bracket_id, participant_mode, game_id, start_time, prize_kes, description, require_approval, registration_deadline, entry_fee_kes, platform, rules) \
-            \VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
+            "INSERT INTO tournaments (id, name, organizer_name, owner_id, format, state, visibility, max_participants, third_place_match, bracket_id, participant_mode, game_id, start_time, prize_kes, description, require_approval, registration_deadline, entry_fee_kes, platform, rules, stream_url) \
+            \VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
             \ON CONFLICT(id) DO UPDATE SET \
             \  name = excluded.name, \
             \  organizer_name = excluded.organizer_name, \
@@ -361,7 +364,8 @@ instance TournamentRepository SQLiteM where
             \  registration_deadline = excluded.registration_deadline, \
                 \  entry_fee_kes = excluded.entry_fee_kes, \
                 \  platform = excluded.platform, \
-                \  rules = excluded.rules"
+                \  rules = excluded.rules, \
+                \  stream_url = excluded.stream_url"
             ( ( tidInt
               , tname
               , organizer
@@ -383,6 +387,8 @@ instance TournamentRepository SQLiteM where
                  , tournamentEntryFee t
                  , tournamentPlatform t
                  , tournamentRules t
+                 )
+              :. Only (tournamentStreamUrl t
                  )
             )
 
@@ -485,7 +491,7 @@ instance TournamentRepository SQLiteM where
         conn <- asks envConnection
         gid <- liftIO (resolveGameId conn (detailsGame d))
         liftIO $ execute conn
-            "UPDATE tournaments SET game_id = ?, start_time = ?, prize_kes = ?, description = ?, registration_deadline = ?, entry_fee_kes = ?, platform = ?, rules = ? WHERE id = ?"
+            "UPDATE tournaments SET game_id = ?, start_time = ?, prize_kes = ?, description = ?, registration_deadline = ?, entry_fee_kes = ?, platform = ?, rules = ?, stream_url = ? WHERE id = ?"
             ( gid
             , timeToText <$> detailsStartTime d
             , detailsPrize d
@@ -494,6 +500,7 @@ instance TournamentRepository SQLiteM where
             , detailsEntryFee d
             , detailsPlatform d
             , detailsRules d
+            , detailsStreamUrl d
             , tidInt
             )
         n <- liftIO $ changes conn
