@@ -1,4 +1,4 @@
-import { Link } from 'react-router'
+import { Link, useNavigate } from 'react-router'
 import { useApi } from '../hooks/useApi'
 import { LobbyRoundsView, LobbyStandingsView } from '../lib/lobby'
 import { participantName } from '../lib/participants'
@@ -759,10 +759,15 @@ function LobbyControls({ tournament, onDone }: { tournament: Tournament; onDone:
 
 export default function OrganizerPanel({ tournament, bracket, participantCount, registered, refreshKey, reload }: Props) {
   const id = tournament.tournamentId
+  const navigate = useNavigate()
 
   return (
     <section className="section organizer-panel">
       <h2>Organizer controls</h2>
+
+      <div className="action-row">
+        <button onClick={() => navigate('/me/new', { state: { copyOf: tournament } })}>Duplicate this tournament</button>
+      </div>
 
       {tournament.participantMode === 'IndividualOnly' &&
        ['Draft', 'Published', 'RegistrationOpen', 'RegistrationClosed'].includes(tournament.state) && (
