@@ -116,7 +116,7 @@ export default function DetailsFields({
               onChange={(e) => onChange({ ...values, streamUrl: e.target.value })}
             />
             {streamProblem && <span role="alert" className="form-error">{streamProblem}</span>}
-            <span className="muted">{values.streamUrl.trim().length}/{STREAM_MAX}. Twitch, YouTube and Kick links play on the tournament page; any other https link shows as a link.</span>
+            <span className="muted">{values.streamUrl.trim().length}/{STREAM_MAX}. Twitch and YouTube links play on the tournament page; any other https link shows as a link.</span>
           </label>
         </>
       )}

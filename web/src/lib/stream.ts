@@ -9,10 +9,8 @@ export type StreamInfo = {
 
 const TWITCH_HOSTS = ['twitch.tv', 'www.twitch.tv']
 const YOUTUBE_HOSTS = ['youtube.com', 'www.youtube.com']
-const KICK_HOSTS = ['kick.com', 'www.kick.com']
 
 const TWITCH_CHANNEL = /^[A-Za-z0-9_]{1,25}$/
-const KICK_CHANNEL = /^[A-Za-z0-9_-]{1,40}$/
 const YOUTUBE_ID = /^[A-Za-z0-9_-]{11}$/
 
 // parentHost is window.location.hostname (Twitch refuses to embed without it).
@@ -51,10 +49,7 @@ export function parseStream(raw: string, parentHost: string): StreamInfo | null 
     return { url, label: 'YouTube', embedUrl: ok ? 'https://www.youtube.com/embed/' + id : null }
   }
 
-  if (KICK_HOSTS.includes(host)) {
-    const ok = parts.length === 1 && KICK_CHANNEL.test(first)
-    return { url, label: 'Kick', embedUrl: ok ? 'https://player.kick.com/' + first : null }
-  }
-
+  // Kick is deliberately not embedded: its player showed "misconfigured" when tested.
+  // Kick links fall through to the plain link below.
   return { url, label: 'stream', embedUrl: null }
 }
