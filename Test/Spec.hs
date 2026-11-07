@@ -116,6 +116,7 @@ import Shell.Persistence.SQLite.JoinRequestRepository ()
 import Shell.Persistence.SQLite.NotificationRepository ()
 import Shell.Persistence.SQLite.AvatarRepository ()
 import Shell.Persistence.SQLite.LobbyRepository ()
+import Shell.Persistence.SQLite.IdentityRepository ()
 import qualified Application.UseCases.Lobby as LobbyUC
 import qualified Domain.Tournament as LbDom
 import qualified Application.Internal.LifecycleTransition as LbLife
@@ -319,6 +320,7 @@ spec = before_ resetTestDb $ do
   descriptionSpec
   formatChangeSpec
   googleSignInSpec
+  identitySpec
   describe "Tournament Lifecycle (4-participant golden scenario)" $
     it "runs the full pipeline from creation to completion" $ do
       result <- runSQLiteM testDbPath $ do
@@ -10425,3 +10427,59 @@ gsIdent :: Bool -> GoogleIdentity
 gsIdent verified = GoogleIdentity { giSubject = "gs-subject-1", giEmail = "person@example.com", giEmailVerified = verified, giName = Just "Pat Example" }
 gsUser :: Int -> AccountStatus -> User
 gsUser n st = User { userId = UserId n, username = Username "gs_user", email = Email "person@example.com", passwordHash = PasswordHash "x", accountStatus = st }
+
+idnExpect :: (Show a, Eq a) => a -> SQLiteM a -> IO ()
+idnExpect expected action = do
+  result <- runSQLiteM testDbPath (setupSchema >> action)
+  case result of
+    Right v -> v `shouldBe` expected
+    Left e  -> expectationFailure (show e)
+identitySpec :: Spec
+identitySpec = describe "Identity storage (Google sign-in)" $ do
+  it "a linked Google id is found, an unknown one is not" $ idnExpect (True, True, Nothing) $ do
+    u <- createTestUser "idn-u1"
+    ok <- Repo.linkIdentity u "google" "sub-1"
+    found <- Repo.findIdentityUser "google" "sub-1"
+    missing <- Repo.findIdentityUser "google" "sub-2"
+    pure (ok, found == Just u, missing)
+  it "the same Google id cannot be linked to a second user" $ idnExpect (True, False, True) $ do
+    u1 <- createTestUser "idn-u1"
+    u2 <- createTestUser "idn-u2"
+    a <- Repo.linkIdentity u1 "google" "sub-1"
+    b <- Repo.linkIdentity u2 "google" "sub-1"
+    owner <- Repo.findIdentityUser "google" "sub-1"
+    pure (a, b, owner == Just u1)
+  it "the same subject under another provider is allowed" $ idnExpect (True, True) $ do
+    u <- createTestUser "idn-u1"
+    a <- Repo.linkIdentity u "google" "sub-1"
+    b <- Repo.linkIdentity u "other" "sub-1"
+    pure (a, b)
+  it "a user cannot link a second Google id" $ idnExpect (True, False) $ do
+    u <- createTestUser "idn-u1"
+    a <- Repo.linkIdentity u "google" "sub-1"
+    b <- Repo.linkIdentity u "google" "sub-2"
+    pure (a, b)
+  it "a login handoff is consumed once, the second try gives nothing" $ idnExpect (True, Nothing) $ do
+    u <- createTestUser "idn-u1"
+    Repo.createHandoff "h1" (Repo.HandoffLogin u) 1000
+    a <- Repo.consumeHandoff "h1" 500
+    b <- Repo.consumeHandoff "h1" 501
+    pure (a == Just (Repo.HandoffLogin u), b)
+  it "an expired handoff gives nothing, also exactly at its expiry second" $ idnExpect (Nothing, Nothing) $ do
+    u <- createTestUser "idn-u1"
+    Repo.createHandoff "h2" (Repo.HandoffLogin u) 1000
+    a <- Repo.consumeHandoff "h2" 1000
+    b <- Repo.consumeHandoff "h2" 1001
+    pure (a, b)
+  it "a wrong code gives nothing and does not use up the real handoff" $ idnExpect (Nothing, True) $ do
+    u <- createTestUser "idn-u1"
+    Repo.createHandoff "h3" (Repo.HandoffLogin u) 1000
+    a <- Repo.consumeHandoff "wrong" 500
+    b <- Repo.consumeHandoff "h3" 500
+    pure (a, b == Just (Repo.HandoffLogin u))
+  it "a sign-up handoff carries subject, email and optional name" $ idnExpect (Just (Repo.HandoffSignUp "sub-9" "p@example.com" (Just "Pat")), Just (Repo.HandoffSignUp "sub-10" "q@example.com" Nothing)) $ do
+    Repo.createHandoff "h4" (Repo.HandoffSignUp "sub-9" "p@example.com" (Just "Pat")) 1000
+    Repo.createHandoff "h5" (Repo.HandoffSignUp "sub-10" "q@example.com" Nothing) 1000
+    a <- Repo.consumeHandoff "h4" 10
+    b <- Repo.consumeHandoff "h5" 10
+    pure (a, b)

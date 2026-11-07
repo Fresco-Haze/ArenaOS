@@ -102,6 +102,7 @@ library
                       Shell.Persistence.SQLite.NotificationRepository
                       Shell.Persistence.SQLite.AvatarRepository
                       Shell.Persistence.SQLite.LobbyRepository
+                      Shell.Persistence.SQLite.IdentityRepository
                       Application.UseCases.Lobby
                       Engine.Champion
                       Engine.Rankings
