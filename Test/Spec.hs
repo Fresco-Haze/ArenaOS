@@ -35,6 +35,7 @@ import Shell.Persistence.SQLite.UserRepository ()
 import Shell.Persistence.SQLite.TournamentHistoryRepository ()
 import Shell.Persistence.SQLite.RoleRepository ()
 import Shell.Persistence.SQLite.AuditLogRepository ()
+import Shell.Persistence.SQLite.PredictionRepository ()
 import Shell.Persistence.SQLite.Error (PersistenceError(..))
 
 import Domain.Participant (Participant(..), Player(..), PlayerName(..), Team(..), TeamName(..), TeamCaptain(..))
@@ -55,6 +56,7 @@ import Domain.MatchError (MatchError(..))
 import qualified Domain.Match as Match
 import qualified Domain.Ids as PredIds
 import qualified Engine.Predictions as Pred
+import qualified Application.UseCases.Predictions as PredUC
 import Domain.TournamentError (TournamentError(..))
 
 import Application.UseCases.CreateTournament (createTournament)
@@ -7707,6 +7709,114 @@ spec = before_ resetTestDb $ do
     it "has an empty leaderboard when nobody has a settled pick" $ do
       Pred.buildLeaderboard [] `shouldBe` []
       Pred.buildLeaderboard [(uid 1, Pred.Pending), (uid 2, Pred.Void)] `shouldBe` []
+  describe "Predictions use cases (slice 2b)" $ do
+
+    it "saves a pick, and a changed pick replaces the earlier one" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "pr-owner-1"
+        a <- createTestUser "pr-a-1"
+        b <- createTestUser "pr-b-1"
+        fan <- createTestUser "pr-fan-1"
+        tid <- msTwo owner a b "Predict Cup 1"
+        t <- Repo.getTournament tid
+        let Just bid = tournamentBracket t
+        ms <- Repo.listMatchesForBracket bid
+        let m = head ms
+        r1 <- PredUC.submitPrediction fan (matchId m) Pred.PickA
+        r2 <- PredUC.submitPrediction fan (matchId m) Pred.PickB
+        mine <- Repo.listUserPredictions tid fan
+        pure (r1, r2, mine, matchId m)
+      case result of
+        Left err -> expectationFailure (show err)
+        Right (r1, r2, mine, mid) -> do
+          r1 `shouldBe` Right ()
+          r2 `shouldBe` Right ()
+          mine `shouldBe` [(mid, Pred.PickB)]
+
+    it "refuses the organizer and registered players" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "pr-owner-2"
+        a <- createTestUser "pr-a-2"
+        b <- createTestUser "pr-b-2"
+        tid <- msTwo owner a b "Predict Cup 2"
+        t <- Repo.getTournament tid
+        let Just bid = tournamentBracket t
+        ms <- Repo.listMatchesForBracket bid
+        let m = head ms
+        ro <- PredUC.submitPrediction owner (matchId m) Pred.PickA
+        ra <- PredUC.submitPrediction a (matchId m) Pred.PickA
+        pure (ro, ra)
+      case result of
+        Left err -> expectationFailure (show err)
+        Right r  -> r `shouldBe` (Left PredUC.NotAllowedToPredict, Left PredUC.NotAllowedToPredict)
+
+    it "refuses a pick once the match has started" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "pr-owner-3"
+        a <- createTestUser "pr-a-3"
+        b <- createTestUser "pr-b-3"
+        fan <- createTestUser "pr-fan-3"
+        tid <- msTwo owner a b "Predict Cup 3"
+        t <- Repo.getTournament tid
+        let Just bid = tournamentBracket t
+        ms <- Repo.listMatchesForBracket bid
+        let m = head ms
+        _ <- unwrap =<< startMatch owner (matchId m)
+        PredUC.submitPrediction fan (matchId m) Pred.PickA
+      case result of
+        Left err -> expectationFailure (show err)
+        Right r  -> r `shouldBe` Left PredUC.PredictionsClosed
+
+    it "refuses a draw pick outside round robin" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "pr-owner-4"
+        a <- createTestUser "pr-a-4"
+        b <- createTestUser "pr-b-4"
+        fan <- createTestUser "pr-fan-4"
+        tid <- msTwo owner a b "Predict Cup 4"
+        t <- Repo.getTournament tid
+        let Just bid = tournamentBracket t
+        ms <- Repo.listMatchesForBracket bid
+        let m = head ms
+        PredUC.submitPrediction fan (matchId m) Pred.PickDraw
+      case result of
+        Left err -> expectationFailure (show err)
+        Right r  -> r `shouldBe` Left PredUC.PickNotAllowed
+
+    it "scores picks once the match is decided and orders the leaderboard" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "pr-owner-5"
+        a <- createTestUser "pr-a-5"
+        b <- createTestUser "pr-b-5"
+        fan1 <- createTestUser "pr-fan1-5"
+        fan2 <- createTestUser "pr-fan2-5"
+        tid <- msTwo owner a b "Predict Cup 5"
+        t <- Repo.getTournament tid
+        let Just bid = tournamentBracket t
+        ms <- Repo.listMatchesForBracket bid
+        let m = head ms
+            champ = Individual (Player (PlayerName "pr-a-5"))
+            other = Individual (Player (PlayerName "pr-b-5"))
+            sideOf p = if matchCompetitorA m == p then Pred.PickA else Pred.PickB
+        _ <- unwrap =<< PredUC.submitPrediction fan1 (matchId m) (sideOf champ)
+        _ <- unwrap =<< PredUC.submitPrediction fan2 (matchId m) (sideOf other)
+        _ <- unwrap =<< startMatch owner (matchId m)
+        _ <- unwrap =<< recordMatchResult owner (matchId m) (Winner champ)
+        mine1 <- unwrap =<< PredUC.myPredictions fan1 tid
+        mine2 <- unwrap =<< PredUC.myPredictions fan2 tid
+        board <- unwrap =<< PredUC.leaderboard Nothing tid
+        pure (map PredUC.pvResult mine1, map PredUC.pvResult mine2, board, fan1, fan2)
+      case result of
+        Left err -> expectationFailure (show err)
+        Right (r1, r2, board, fan1, fan2) -> do
+          r1 `shouldBe` [Pred.Correct]
+          r2 `shouldBe` [Pred.Wrong]
+          board `shouldBe` [Pred.LeaderboardRow fan1 1 0, Pred.LeaderboardRow fan2 0 1]
   describe "Engine.User.validateRawPassword (pure)" $ do
 
     it "rejects a password shorter than 8 characters" $

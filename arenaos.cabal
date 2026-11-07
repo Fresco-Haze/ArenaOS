@@ -112,6 +112,9 @@ library
                       Application.UseCases.GetPlayers
                       Domain.Notification
                       Engine.Predictions
+                      Domain.Prediction
+                      Shell.Persistence.SQLite.PredictionRepository
+                      Application.UseCases.Predictions
 
 
     hs-source-dirs:   .

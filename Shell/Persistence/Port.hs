@@ -41,12 +41,14 @@ module Shell.Persistence.Port
   ,AvatarRepository(..)
   ,BannerRepository(..)
   ,LobbyRepository(..)
+  ,PredictionRepository(..)
   
   ) where
 
 import Domain.Tournament (Game)
 import Domain.Tournament (TournamentKind)
 import Domain.Lobby (LobbySettings, GameEntry)
+import Domain.Prediction (Pick)
 import Domain.Participant (Player, PlayerName, Team, TeamName, Participant, ParticipantId)
 import Domain.Tournament (Tournament, TournamentId, TournamentName, OrganizerName, TournamentFormat, Visibility, TournamentState
  , ParticipantMode, TournamentDetails, PublicStats)
@@ -264,6 +266,13 @@ class Monad m => EFootballScoreRepository m where
   saveEFootballScore :: MatchId -> EFootballScore -> EFootballScore -> m ()
   getEFootballScore   :: MatchId -> m (Maybe (EFootballScore, EFootballScore))
   deleteEFootballScore :: MatchId -> m ()
+
+-- Predictions (free points). One pick per user per match; saving again replaces it.
+-- Scores are computed on read from the match results, never stored.
+class Monad m => PredictionRepository m where
+  savePrediction :: MatchId -> UserId -> Pick -> m ()
+  listUserPredictions :: TournamentId -> UserId -> m [(MatchId, Pick)]
+  listTournamentPredictions :: TournamentId -> m [(MatchId, UserId, Pick)]
 
 class Monad m => JoinRequestRepository m where
   getJoinRequest    :: TournamentId -> UserId -> m (Maybe JoinRequestStatus)

@@ -14,12 +14,9 @@ import Data.List (groupBy, sortBy)
 import Data.Ord (comparing, Down(..))
 
 import Domain.Ids (UserId(..))
+import Domain.Prediction (Pick(..))
 import Domain.Match (Match(..), MatchOutcome(..), MatchStatus(..))
 import Domain.Tournament (TournamentFormat(..))
-
--- | A user's guess for one match: competitor A wins, B wins, or a draw.
-data Pick = PickA | PickB | PickDraw
-  deriving (Eq, Show)
 
 -- | How one pick turned out. Void = no contest, cancelled, or an outcome that
 -- names someone who is not in the match. Pending = the match is not finished.
