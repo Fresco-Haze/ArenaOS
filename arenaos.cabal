@@ -107,6 +107,7 @@ library
                       Engine.Champion
                       Engine.Rankings
                       Engine.GoogleSignIn
+                      Engine.GoogleOAuth
                       Engine.Lobby
                       Domain.Lobby
                       Application.UseCases.GetRankings
@@ -126,6 +127,8 @@ library
                     , directory
                     , filepath
                     , text-short
+                    , aeson
+                    , crypton
                     , bytestring
                     , time
     default-language: Haskell2010

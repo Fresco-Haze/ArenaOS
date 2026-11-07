@@ -69,6 +69,9 @@ import Application.UseCases.CancelTournament (cancelTournament, CancelTournament
 import Application.Internal.Authorization (AuthorizationError(..))
 import Application.Internal.LifecycleTransition (LifecycleError(..))
 import Engine.GoogleSignIn
+import qualified Engine.GoogleOAuth as GOA
+import qualified Data.Text as GoT
+import qualified Data.ByteString as GoB
 import Application.UseCases.LogoutUser (logoutUser)
 import Shell.Auth.Session (saveSession)
 import Data.Either (isLeft)
@@ -321,6 +324,7 @@ spec = before_ resetTestDb $ do
   formatChangeSpec
   googleSignInSpec
   identitySpec
+  googleOAuthSpec
   describe "Tournament Lifecycle (4-participant golden scenario)" $
     it "runs the full pipeline from creation to completion" $ do
       result <- runSQLiteM testDbPath $ do
@@ -10483,3 +10487,77 @@ identitySpec = describe "Identity storage (Google sign-in)" $ do
     a <- Repo.consumeHandoff "h4" 10
     b <- Repo.consumeHandoff "h5" 10
     pure (a, b)
+
+gofCfg :: GOA.GoogleConfig
+gofCfg = GOA.GoogleConfig { GOA.gcClientId = "cid.apps", GOA.gcClientSecret = "s3cr&t", GOA.gcRedirectUri = "http://localhost:5173/api/auth/google/callback" }
+gofHas :: GoT.Text -> [GoT.Text] -> Bool
+gofHas whole parts = all (\p -> GoT.isInfixOf p whole) parts
+gofIsLeft :: Either a b -> Bool
+gofIsLeft = either (const True) (const False)
+gofVerified :: GoB.ByteString -> Either GoT.Text Bool
+gofVerified = fmap giEmailVerified . GOA.parseUserInfo
+googleOAuthSpec :: Spec
+googleOAuthSpec = describe "Google OAuth helpers (pure)" $ do
+  it "a config is made when all three values are present" $
+    fmap GOA.gcClientId (GOA.googleConfigFrom " cid " "sec" "https://x.test/cb") `shouldBe` Just "cid"
+  it "a blank value in the config switches Google off" $
+    map (fmap GOA.gcClientId) [GOA.googleConfigFrom "" "sec" "u", GOA.googleConfigFrom "cid" "  " "u", GOA.googleConfigFrom "cid" "sec" ""] `shouldBe` [Nothing, Nothing, Nothing]
+  it "the authorize URL carries the expected parameters" $ do
+    let url = GOA.authorizeUrl gofCfg "state123"
+    GoT.isPrefixOf "https://accounts.google.com/o/oauth2/v2/auth?" url `shouldBe` True
+    gofHas url [ "response_type=code", "client_id=cid.apps", "state=state123"
+               , "redirect_uri=http%3A%2F%2Flocalhost%3A5173%2Fapi%2Fauth%2Fgoogle%2Fcallback"
+               , "scope=openid%20email%20profile" ] `shouldBe` True
+  it "the authorize URL encodes special characters and never contains the secret" $ do
+    let url = GOA.authorizeUrl gofCfg "a b&c=d"
+    GoT.isInfixOf "state=a%20b%26c%3Dd" url `shouldBe` True
+    GoT.isInfixOf "s3cr" url `shouldBe` False
+  it "the token request body is a form with the encoded code and secret" $ do
+    let body = GOA.tokenRequestBody gofCfg "4/0AbC"
+    map (\p -> GoB.isInfixOf p body) ["grant_type=authorization_code", "code=4%2F0AbC", "client_secret=s3cr%26t", "client_id=cid.apps"] `shouldBe` [True, True, True, True]
+  it "an access token is read from the token response" $
+    GOA.parseTokenResponse "{\"access_token\":\"ya29.abc\",\"expires_in\":3599,\"token_type\":\"Bearer\"}" `shouldBe` Right "ya29.abc"
+  it "error, empty and non-JSON token responses are refused" $
+    map (gofIsLeft . GOA.parseTokenResponse) ["{\"error\":\"invalid_grant\"}", "{\"access_token\":\"\"}", "not json"] `shouldBe` [True, True, True]
+  it "a full userinfo response becomes an identity with a lowercase email" $
+    GOA.parseUserInfo "{\"sub\":\"1234\",\"email\":\"Pat@Example.com\",\"email_verified\":true,\"name\":\"Pat Example\"}" `shouldBe` Right (GoogleIdentity "1234" "pat@example.com" True (Just "Pat Example"))
+  it "email_verified is true only for the boolean true or the string true" $
+    map gofVerified
+      [ "{\"sub\":\"1\",\"email\":\"a@b.c\",\"email_verified\":true}"
+      , "{\"sub\":\"1\",\"email\":\"a@b.c\",\"email_verified\":\"true\"}"
+      , "{\"sub\":\"1\",\"email\":\"a@b.c\",\"email_verified\":false}"
+      , "{\"sub\":\"1\",\"email\":\"a@b.c\"}"
+      , "{\"sub\":\"1\",\"email\":\"a@b.c\",\"email_verified\":1}"
+      , "{\"sub\":\"1\",\"email\":\"a@b.c\",\"email_verified\":\"yes\"}"
+      ] `shouldBe` [Right True, Right True, Right False, Right False, Right False, Right False]
+  it "a missing or blank subject or email is refused" $
+    map (gofIsLeft . GOA.parseUserInfo)
+      [ "{\"email\":\"a@b.c\"}"
+      , "{\"sub\":\"\",\"email\":\"a@b.c\"}"
+      , "{\"sub\":\"1\"}"
+      , "{\"sub\":\"1\",\"email\":\"  \"}"
+      , "{\"sub\":42,\"email\":\"a@b.c\"}"
+      , "not json"
+      ] `shouldBe` replicate 6 True
+  it "a blank or missing name becomes Nothing and a name is trimmed" $
+    map (fmap giName . GOA.parseUserInfo)
+      [ "{\"sub\":\"1\",\"email\":\"a@b.c\",\"name\":\"  \"}"
+      , "{\"sub\":\"1\",\"email\":\"a@b.c\"}"
+      , "{\"sub\":\"1\",\"email\":\"a@b.c\",\"name\":\" Pat \"}"
+      ] `shouldBe` [Right Nothing, Right Nothing, Right (Just "Pat")]
+  it "the handoff code hash is SHA-256 in hex" $ do
+    GOA.hashHandoffCode "abc" `shouldBe` "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    (GOA.hashHandoffCode "abc" == GOA.hashHandoffCode "abd") `shouldBe` False
+  it "cookieValue finds a named cookie and ignores look-alikes and empty values" $
+    map (GOA.cookieValue "sl_google_state") ["a=1; sl_google_state=xyz; b=2", "xsl_google_state=1", "sl_google_state=", "other=1", ""] `shouldBe` [Just "xyz", Nothing, Nothing, Nothing, Nothing]
+  it "stateMatches needs two equal, non-empty values" $
+    map (uncurry GOA.stateMatches) [(Just "a", Just "a"), (Just "a", Just "b"), (Nothing, Nothing), (Just "", Just ""), (Just "a", Nothing)] `shouldBe` [True, False, False, False, False]
+  it "the state cookie is HttpOnly, SameSite=Lax and Secure only over https" $ do
+    let sec = GOA.stateCookieHeader True "tok"
+        plain = GOA.stateCookieHeader False "tok"
+    GoT.isPrefixOf "sl_google_state=tok" sec `shouldBe` True
+    gofHas sec ["HttpOnly", "SameSite=Lax", "Path=/api/auth/google", "Secure"] `shouldBe` True
+    GoT.isInfixOf "Secure" plain `shouldBe` False
+    gofHas (GOA.clearStateCookieHeader True) ["Max-Age=0", "Secure"] `shouldBe` True
+  it "each refusal has a fixed error code" $
+    map GOA.refusalCode [EmailNotVerified, EmailAlreadyUsed, AccountNotActive Suspended, AccountNotActive Deactivated] `shouldBe` ["email_not_verified", "email_in_use", "account_not_active", "account_not_active"]
