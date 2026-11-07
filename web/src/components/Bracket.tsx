@@ -140,7 +140,7 @@ function sameRank(a: StandingRow, b: StandingRow): boolean {
 function signed(n: number): string {
   return n > 0 ? `+${n}` : String(n)
 }
-function RoundRobinView({ bracket }: { bracket: BracketView }) {
+function RoundRobinView({ bracket, game }: { bracket: BracketView; game?: string | null }) {
   const nodes = [...bracket.nodes].sort((a, b) => a.nodeId - b.nodeId)
   const rows = bracket.standings ?? []
   const decided = isBracketDecided(bracket)
@@ -156,6 +156,10 @@ function RoundRobinView({ bracket }: { bracket: BracketView }) {
   }
   const levelAtTop = rows.length > 1 && sameRank(rows[0], rows[1])
   const anyLevel = rows.some((r, i) => i > 0 && sameRank(r, rows[i - 1]))
+  const goals = game === 'eFootball'
+  const L = goals
+    ? { f: 'GF', a: 'GA', d: 'GD', excl: 'Goals', tie: 'goal difference and goals scored' }
+    : { f: 'For', a: 'Against', d: 'Diff', excl: 'Scores', tie: 'score difference and total score' }
   const labels = new Map<number, string>()
 
   return (
@@ -163,7 +167,7 @@ function RoundRobinView({ bracket }: { bracket: BracketView }) {
       {decided && rows.length > 0 && !levelAtTop && (
         <ChampionBanner label="Winner" name={participantName(rows[0].participant)} />
       )}
-      {decided && levelAtTop && <p className="muted">The top places are level on points, goal difference and goals scored.</p>}
+      {decided && levelAtTop && <p className="muted">The top places are level on points, {L.tie}.</p>}
       <h3 className="bracket-section-heading">Standings</h3>
       <div className="rr-scroll">
       <table className="rr-table">
@@ -172,9 +176,9 @@ function RoundRobinView({ bracket }: { bracket: BracketView }) {
             <th>#</th>
             <th>Name</th>
             <th>Played</th>
-            <th>GF</th>
-            <th>GA</th>
-            <th>GD</th>
+            <th>{L.f}</th>
+            <th>{L.a}</th>
+            <th>{L.d}</th>
             <th>Pts</th>
           </tr>
         </thead>
@@ -198,12 +202,12 @@ function RoundRobinView({ bracket }: { bracket: BracketView }) {
       </div>
       {(bracket.unscoredMatches ?? 0) > 0 && (
         <p className="muted">
-          Goals exclude {bracket.unscoredMatches} completed {bracket.unscoredMatches === 1 ? 'match' : 'matches'} recorded without a score.
+          {L.excl} exclude {bracket.unscoredMatches} completed {bracket.unscoredMatches === 1 ? 'match' : 'matches'} recorded without a score.
         </p>
       )}
       {anyLevel && (
         <p className="muted">
-          Level on points, goal difference and goals scored: ordered by the results between them where possible. If they are still level, the order shown is not a ranking.
+          Level on points, {L.tie}: ordered by the results between them where possible. If they are still level, the order shown is not a ranking.
         </p>
       )}
       <h3 className="bracket-section-heading">Matches</h3>
@@ -357,18 +361,18 @@ function RoundSwitcher({
 
 const CancelledContext = createContext(false)
 
-export default function Bracket({ bracket, tournamentState }: { bracket: BracketView; tournamentState?: string }) {
+export default function Bracket({ bracket, tournamentState, game }: { bracket: BracketView; tournamentState?: string; game?: string | null }) {
   return (
     <CancelledContext.Provider value={tournamentState === 'Cancelled'}>
-      <BracketInner bracket={bracket} />
+      <BracketInner bracket={bracket} game={game} />
     </CancelledContext.Provider>
   )
 }
 
-function BracketInner({ bracket }: { bracket: BracketView }) {
+function BracketInner({ bracket, game }: { bracket: BracketView; game?: string | null }) {
   const phone = useMediaQuery('(max-width: 600px)')
   if (bracket.grandFinalNodeId != null) return <DoubleElimBracket bracket={bracket} />
-  if (bracket.format === 'RoundRobin') return <RoundRobinView bracket={bracket} />
+  if (bracket.format === 'RoundRobin') return <RoundRobinView bracket={bracket} game={game} />
   const { main, thirdPlace } = splitThirdPlace(bracket)
   const groups = groupByRound(main)
   if (groups.length === 0) {

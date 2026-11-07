@@ -761,7 +761,8 @@ instance FromJSON DetailsReq where
     ef <- o .:? "entryFee"
     pf <- o .:? "platform"
     ru <- o .:? "rules"
-    pure (DetailsReq (TournamentDetails g st pz ds rd ef pf ru))
+    su <- o .:? "streamUrl"
+    pure (DetailsReq (TournamentDetails g st pz ds rd ef pf ru su))
 
 -- ?q= (name contains), ?game= (a game name, any case; old PubgMobile and CallOfDuty still work), ?limit= (1..100)
 parseListFilter :: UTCTime -> Maybe Text -> Maybe Text -> Maybe Text -> Maybe Text -> Maybe Text -> Either ApiError ListPublic.PublicFilter
@@ -942,6 +943,7 @@ tournamentPairs t =
   , "entryFee" .= tournamentEntryFee t
   , "platform" .= tournamentPlatform t
   , "rules" .= tournamentRules t
+  , "streamUrl" .= tournamentStreamUrl t
   , "participantMode" .= T.pack (show (tournamentParticipantMode t))
   , "bracketId"       .= fmap unBracketId (tournamentBracket t)
   ]
@@ -1137,6 +1139,9 @@ fromDetailsValidation PlatformInvalid =
 fromDetailsValidation (RulesTooLong n) =
   ApiError status400 "VALIDATION_FAILED" "Rules must be 1,000 characters or fewer"
     (object ["field" .= ("rules" :: Text), "maximum" .= (1000 :: Int), "actual" .= n])
+fromDetailsValidation StreamUrlInvalid =
+  ApiError status400 "VALIDATION_FAILED" "Stream link must be a full https:// address of at most 200 characters, with no spaces"
+    (object ["field" .= ("streamUrl" :: Text)])
 fromDetailsValidation (DescriptionTooLong n) =
   ApiError status400 "VALIDATION_FAILED" "Description must be 500 characters or fewer"
     (object ["field" .= ("description" :: Text), "maximum" .= (500 :: Int), "actual" .= n])

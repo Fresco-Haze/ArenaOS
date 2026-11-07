@@ -36,6 +36,7 @@ changedFieldToText FieldRegistrationDeadline = "RegistrationDeadline"
 changedFieldToText FieldEntryFee = "EntryFee"
 changedFieldToText FieldPlatform = "Platform"
 changedFieldToText FieldRules = "Rules"
+changedFieldToText FieldStreamUrl = "StreamUrl"
 
 textToChangedField :: String -> IO ChangedField
 textToChangedField "Name"            = pure FieldName
@@ -51,6 +52,7 @@ textToChangedField "RegistrationDeadline" = pure FieldRegistrationDeadline
 textToChangedField "EntryFee" = pure FieldEntryFee
 textToChangedField "Platform" = pure FieldPlatform
 textToChangedField "Rules" = pure FieldRules
+textToChangedField "StreamUrl" = pure FieldStreamUrl
 textToChangedField other             =
     throwIO (StorageFailure ("Unknown changed field in storage: " ++ other))
 

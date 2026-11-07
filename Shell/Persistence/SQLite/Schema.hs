@@ -52,6 +52,7 @@ newTournamentColumns =
   , ("entry_fee_kes", "ALTER TABLE tournaments ADD COLUMN entry_fee_kes INTEGER CHECK (entry_fee_kes IS NULL OR entry_fee_kes >= 0)")
   , ("platform", "ALTER TABLE tournaments ADD COLUMN platform TEXT CHECK (platform IS NULL OR platform IN ('PC', 'Console', 'Mobile', 'CrossPlatform'))")
   , ("rules", "ALTER TABLE tournaments ADD COLUMN rules TEXT")
+  , ("stream_url", "ALTER TABLE tournaments ADD COLUMN stream_url TEXT")
   , ("require_approval", "ALTER TABLE tournaments ADD COLUMN require_approval INTEGER NOT NULL DEFAULT 0 CHECK (require_approval IN (0, 1))")
   ]
 

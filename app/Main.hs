@@ -412,6 +412,7 @@ dispatch args = case args of
       describeField FieldEntryFee = "entry fee"
       describeField FieldPlatform = "platform"
       describeField FieldRules = "rules"
+      describeField FieldStreamUrl = "stream link"
 
   ("create-team":teamNameStr:captainNameStr:memberStrs) -> do
     let team = Team

@@ -1,7 +1,7 @@
 import { setRequireApproval as setApprovalOnServer } from '../lib/tournamentActions'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, FormEvent } from 'react'
-import { useNavigate } from 'react-router'
+import { useLocation, useNavigate } from 'react-router'
 import { ApiError } from '../api'
 import { useAuth } from '../auth/context'
 import { bumpBanner } from '../lib/banner'
@@ -9,9 +9,10 @@ import { resizeBannerToJpeg } from '../lib/bannerImage'
 import { createTournament, uploadBanner } from '../lib/tournamentActions'
 import { formatKes } from '../lib/money'
 import DetailsFields from '../components/DetailsFields'
-import { PLATFORMS, deadlineError, emptyDetails, feeError, prizeError, toPayload } from '../lib/details'
+import { PLATFORMS, deadlineError, detailsFromTournament, emptyDetails, feeError, prizeError, toPayload } from '../lib/details'
 import type { DetailsValues } from '../lib/details'
 import { formatLabel, gameLabel } from '../model'
+import type { Tournament } from '../model'
 
 type Format = 'SingleElimination' | 'DoubleElimination' | 'RoundRobin'
 
@@ -54,22 +55,26 @@ const LOBBY_HINT = "Everyone plays together. After each round you enter every pa
 export default function CreateTournamentPage() {
   const { user } = useAuth()
   const navigate = useNavigate()
+  // "Duplicate" on a tournament page sends that tournament here. It only fills the starting
+  // values. Start time, deadline and banner are left empty on purpose.
+  const copyOf = (useLocation().state as { copyOf?: Tournament } | null)?.copyOf ?? null
+  const copied = copyOf ? { ...detailsFromTournament(copyOf), start: '', deadline: '' } : null
 
   const [step, setStep] = useState(0)
-  const [name, setName] = useState('')
-  const [visibility, setVisibility] = useState<'Public' | 'Private'>('Public')
-  const [maxParticipants, setMaxParticipants] = useState('8')
+  const [name, setName] = useState(copyOf ? copyOf.name + ' (copy)' : '')
+  const [visibility, setVisibility] = useState<'Public' | 'Private'>(copyOf?.visibility ?? 'Public')
+  const [maxParticipants, setMaxParticipants] = useState(copyOf ? String(copyOf.maxParticipants) : '8')
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
   const [stepProblem, setStepProblem] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const [format, setFormat] = useState<Format>('SingleElimination')
-  const [isLobby, setIsLobby] = useState(false)
+  const [format, setFormat] = useState<Format>(copyOf ? copyOf.format : 'SingleElimination')
+  const [isLobby, setIsLobby] = useState(copyOf?.kind === 'Lobby')
   const [killPoints, setKillPoints] = useState('1')
   const [placementPoints, setPlacementPoints] = useState('10, 6, 5, 4, 3, 2, 1, 1')
-  const [participantMode, setParticipantMode] = useState<'IndividualOnly' | 'SquadOnly'>('IndividualOnly')
-  const [requireApproval, setRequireApproval] = useState(true)
-  const [details, setDetails] = useState<DetailsValues>(emptyDetails)
+  const [participantMode, setParticipantMode] = useState<'IndividualOnly' | 'SquadOnly'>(copyOf?.participantMode ?? 'IndividualOnly')
+  const [requireApproval, setRequireApproval] = useState(copyOf ? copyOf.requireApproval : true)
+  const [details, setDetails] = useState<DetailsValues>(copied ?? emptyDetails)
   const [bannerFile, setBannerFile] = useState<File | null>(null)
   const [bannerNote, setBannerNote] = useState<string | null>(null)
   const bannerInput = useRef<HTMLInputElement>(null)
@@ -220,6 +225,12 @@ export default function CreateTournamentPage() {
   return (
     <>
       <h1>Create tournament</h1>
+      {copyOf && (
+        <p className="muted" role="status">
+          Copied from {copyOf.name}. Start time, registration deadline and banner are not copied.
+          {copyOf.kind === 'Lobby' && ' Scoring settings are not copied, check them before creating.'}
+        </p>
+      )}
       <ol className="create-steps" aria-label="Steps">
         {STEPS.map((label, i) => (
           <li key={label}>

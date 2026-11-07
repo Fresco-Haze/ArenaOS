@@ -212,7 +212,7 @@ export default function TournamentPage({ id }: { id: string }) {
           )}
 
           {bracket ? (
-            <Bracket bracket={bracket} tournamentState={t.state} />
+            <Bracket bracket={bracket} tournamentState={t.state} game={t.game} />
           ) : (
             <EmptyState title="No bracket yet">
               The bracket appears here once the organizer generates it.
