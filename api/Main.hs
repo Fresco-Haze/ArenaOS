@@ -7,6 +7,7 @@ import Domain.Lobby (LobbySettings(..), defaultLobbySettings)
 import qualified Engine.Lobby as EL
 import qualified Application.UseCases.Lobby as LobbyUC
 import Shell.Persistence.SQLite.LobbyRepository ()
+import Shell.Persistence.SQLite.CheckInRepository ()
 import Domain.Lobby (GameEntry(..))
 import Domain.Participant (ParticipantId(..))
 import Data.Aeson.Types (Parser)
@@ -74,6 +75,7 @@ import Engine.TournamentValidation
   (TournamentValidationError(..), ParticipantValidationError(..), DetailsValidationError(..))
 import Domain.Registration (RegistrationId(..))
 import qualified Application.UseCases.RegisterParticipant as Register
+import qualified Application.UseCases.CheckIn as CkIn
 import Data.IORef (IORef, newIORef, readIORef, atomicModifyIORef')
 import qualified Data.Map.Strict as Map
 import qualified Data.ByteString as BS
@@ -1039,6 +1041,30 @@ fromRemove (Register.RemoveLifecycle l)    = fromLifecycle l
 fromRemove Register.RemoveNotRegistered =
   ApiError status404 "NOT_REGISTERED" "That participant is not registered for this tournament" (object [])
 
+fromCheckIn :: CkIn.CheckInError -> ApiError
+fromCheckIn (CkIn.CheckInUnauthorized a) = fromAuthorization a
+fromCheckIn (CkIn.CheckInLifecycle l)    = fromLifecycle l
+fromCheckIn CkIn.CheckInNotOpen =
+  ApiError status409 "CHECK_IN_NOT_OPEN" "Check-in is not open" (object [])
+fromCheckIn CkIn.CheckInNotRegistered =
+  ApiError status404 "NOT_REGISTERED" "That participant is not registered for this tournament" (object [])
+
+-- Organizer toggles one participant: the participant fields plus "checkedIn".
+data CheckInToggleReq = CheckInToggleReq ParticipantReq Bool
+
+instance FromJSON CheckInToggleReq where
+  parseJSON = withObject "checkInToggle" $ \o -> do
+    p <- parseJSON (Object o)
+    flag <- o .: "checkedIn"
+    pure (CheckInToggleReq p flag)
+
+checkInJson :: CkIn.CheckInView -> Value
+checkInJson v = object
+  [ "open"            .= CkIn.checkInOpen v
+  , "checkedIn"       .= map participantJson (CkIn.checkedInParticipants v)
+  , "viewerCheckedIn" .= CkIn.viewerCheckedIn v
+  ]
+
 newtype JoinTeamReq = JoinTeamReq String
 
 instance FromJSON JoinTeamReq where
@@ -1910,6 +1936,36 @@ main = do
               runAction lock
                 (\uid tid -> Register.removeParticipant uid tid p)
                 fromRemove (\() -> status status204)
+
+    post "/tournaments/:id/check-in/open" $
+      runTransition lock CkIn.startCheckIn fromCheckIn
+
+    post "/tournaments/:id/check-in/close" $
+      runTransition lock CkIn.stopCheckIn fromCheckIn
+
+    post "/tournaments/:id/check-in" $
+      runTransition lock CkIn.checkInSelf fromCheckIn
+
+    get "/tournaments/:id/check-in" $
+      runViewAction lock CkIn.loadCheckIn fromCheckIn $ \v ->
+        json (checkInJson v)
+
+    post "/tournaments/:id/check-in/participant" $ do
+      raw <- body
+      case eitherDecode raw of
+        Left reason -> sendError (invalidBody reason)
+        Right (CheckInToggleReq preq flag) -> do
+          resolved <- do
+            mu <- currentUser lock
+            case mu of
+              Nothing -> pure (Left unauthenticated)
+              Just _  -> runUseCase lock (resolveParticipantReq preq)
+          case resolved of
+            Left apiErr -> sendError apiErr
+            Right p ->
+              runTransition lock
+                (\uid tid -> CkIn.setParticipantCheckedIn uid tid p flag)
+                fromCheckIn
 
     post "/tournaments/:id/withdraw" $
       runAction lock Register.withdrawFromTournament fromWithdraw (\() -> status status204)
