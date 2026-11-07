@@ -105,6 +105,7 @@ library
                       Application.UseCases.Lobby
                       Engine.Champion
                       Engine.Rankings
+                      Engine.GoogleSignIn
                       Engine.Lobby
                       Domain.Lobby
                       Application.UseCases.GetRankings
