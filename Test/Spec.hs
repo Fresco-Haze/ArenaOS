@@ -68,6 +68,7 @@ import Application.UseCases.StartTournament (startTournament, StartTournamentErr
 import Application.UseCases.CancelTournament (cancelTournament, CancelTournamentError(..))
 import Application.Internal.Authorization (AuthorizationError(..))
 import Application.Internal.LifecycleTransition (LifecycleError(..))
+import Engine.GoogleSignIn
 import Application.UseCases.LogoutUser (logoutUser)
 import Shell.Auth.Session (saveSession)
 import Data.Either (isLeft)
@@ -317,6 +318,7 @@ spec = before_ resetTestDb $ do
   prizePoolSpec
   descriptionSpec
   formatChangeSpec
+  googleSignInSpec
   describe "Tournament Lifecycle (4-participant golden scenario)" $
     it "runs the full pipeline from creation to completion" $ do
       result <- runSQLiteM testDbPath $ do
@@ -10400,3 +10402,26 @@ gamesSpec = describe "Games (v0.13)" $ do
     fmap gameName (mkGame "   ") `shouldBe` Left "game name is required"
     fmap gameName (mkGame (replicate 41 'a')) `shouldBe` Left "game name must be 40 characters or fewer"
     fmap gameName (mkGame "  Tom   Clancy's  ") `shouldBe` Right "Tom Clancy's"
+
+googleSignInSpec :: Spec
+googleSignInSpec = describe "Google sign-in decisions" $ do
+  it "linked and active: logs in as that user" $
+    decideGoogleSignIn (gsIdent True) (Just (gsUser 7 Active)) Nothing `shouldBe` LogInAs (UserId 7)
+  it "linked and suspended: refused, naming the status" $
+    decideGoogleSignIn (gsIdent True) (Just (gsUser 7 Suspended)) Nothing `shouldBe` Refuse (AccountNotActive Suspended)
+  it "linked and deactivated: refused, naming the status" $
+    decideGoogleSignIn (gsIdent True) (Just (gsUser 7 Deactivated)) Nothing `shouldBe` Refuse (AccountNotActive Deactivated)
+  it "linked with an unverified email: still logs in" $
+    decideGoogleSignIn (gsIdent False) (Just (gsUser 7 Active)) Nothing `shouldBe` LogInAs (UserId 7)
+  it "not linked, unverified email: refused" $
+    decideGoogleSignIn (gsIdent False) Nothing Nothing `shouldBe` Refuse EmailNotVerified
+  it "not linked, email owned by an active account: refused, no linking" $
+    decideGoogleSignIn (gsIdent True) Nothing (Just (gsUser 8 Active)) `shouldBe` Refuse EmailAlreadyUsed
+  it "not linked, email owned by a deactivated account: refused" $
+    decideGoogleSignIn (gsIdent True) Nothing (Just (gsUser 8 Deactivated)) `shouldBe` Refuse EmailAlreadyUsed
+  it "not linked, verified, no owner: needs a username" $
+    decideGoogleSignIn (gsIdent True) Nothing Nothing `shouldBe` NeedsUsername
+gsIdent :: Bool -> GoogleIdentity
+gsIdent verified = GoogleIdentity { giSubject = "gs-subject-1", giEmail = "person@example.com", giEmailVerified = verified, giName = Just "Pat Example" }
+gsUser :: Int -> AccountStatus -> User
+gsUser n st = User { userId = UserId n, username = Username "gs_user", email = Email "person@example.com", passwordHash = PasswordHash "x", accountStatus = st }
