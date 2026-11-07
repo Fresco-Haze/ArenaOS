@@ -116,6 +116,7 @@ import Shell.Persistence.SQLite.NotificationRepository ()
 import Shell.Persistence.SQLite.AvatarRepository ()
 import Shell.Persistence.SQLite.LobbyRepository ()
 import Shell.Persistence.SQLite.CheckInRepository ()
+import qualified Application.UseCases.CheckIn as CkIn
 import qualified Application.UseCases.Lobby as LobbyUC
 import qualified Domain.Tournament as LbDom
 import qualified Application.Internal.LifecycleTransition as LbLife
@@ -312,6 +313,7 @@ spec = before_ resetTestDb $ do
   bracketLinksViewSpec
   detailsSpec
   checkInSpec
+  checkInUseCaseSpec
   statsSpec
   gamesSpec
   publicFilterSpec
@@ -10464,3 +10466,103 @@ checkInSpec = describe "Check-in storage" $ do
       afterNew <- Repo.listCheckedIn tid
       pure (before == [a], afterDelete, d `elem` afterNew)
     result `shouldBe` Right (True, [], False)
+
+-- Check-in use cases (slice 2)
+ciTag :: Either CkIn.CheckInError () -> String
+ciTag (Right ())                          = "ok"
+ciTag (Left (CkIn.CheckInUnauthorized _)) = "unauthorized"
+ciTag (Left (CkIn.CheckInLifecycle _))    = "lifecycle"
+ciTag (Left CkIn.CheckInNotOpen)          = "not-open"
+ciTag (Left CkIn.CheckInNotRegistered)    = "not-registered"
+
+ciOpenTid :: UserId -> String -> SQLiteM TournamentId
+ciOpenTid owner name = do
+  tid <- dtCreate owner name noDetails
+  _ <- unwrap =<< publishTournament owner tid
+  _ <- unwrap =<< openRegistration owner tid
+  pure tid
+
+checkInUseCaseSpec :: Spec
+checkInUseCaseSpec = describe "Check-in use cases" $ do
+
+  it "only the owner opens or closes check-in, and only while registration is open or closed" $ do
+    result <- runSQLiteM testDbPath $ do
+      setupSchema
+      owner <- createTestUser "cu-owner-1"
+      other <- createTestUser "cu-other-1"
+      draftTid <- dtCreate owner "Check-in use A draft" noDetails
+      tid <- ciOpenTid owner "Check-in use A"
+      a <- CkIn.startCheckIn other tid
+      b <- CkIn.startCheckIn owner draftTid
+      c <- CkIn.startCheckIn owner tid
+      open1 <- Repo.isCheckInOpen tid
+      d <- CkIn.stopCheckIn owner tid
+      open2 <- Repo.isCheckInOpen tid
+      _ <- unwrap =<< closeRegistration owner tid
+      e <- CkIn.startCheckIn owner tid
+      pure (ciTag a, ciTag b, ciTag c, open1, ciTag d, open2, ciTag e)
+    result `shouldBe` Right ("unauthorized", "lifecycle", "ok", True, "ok", False, "ok")
+
+  it "a registered player checks in only while check-in is open" $ do
+    result <- runSQLiteM testDbPath $ do
+      setupSchema
+      owner <- createTestUser "cu-owner-2"
+      joiner <- createTestUser "cu-joiner-2"
+      stranger <- createTestUser "cu-stranger-2"
+      tid <- ciOpenTid owner "Check-in use B"
+      _ <- unwrap =<< RPC.joinTournament joiner tid
+      r1 <- CkIn.checkInSelf joiner tid
+      _ <- unwrap =<< CkIn.startCheckIn owner tid
+      r2 <- CkIn.checkInSelf joiner tid
+      r3 <- CkIn.checkInSelf stranger tid
+      v1 <- unwrap =<< CkIn.loadCheckIn (Just joiner) tid
+      v2 <- unwrap =<< CkIn.loadCheckIn (Just stranger) tid
+      pure (ciTag r1, ciTag r2, ciTag r3, CkIn.viewerCheckedIn v1, length (CkIn.checkedInParticipants v1), CkIn.viewerCheckedIn v2)
+    result `shouldBe` Right ("not-open", "ok", "not-registered", True, 1, False)
+
+  it "the organizer checks a hand-added player in and out, and others cannot" $ do
+    result <- runSQLiteM testDbPath $ do
+      setupSchema
+      owner <- createTestUser "cu-owner-3"
+      other <- createTestUser "cu-other-3"
+      tid <- ciOpenTid owner "Check-in use C"
+      let p = Individual (Player (PlayerName "cu-hand"))
+      _ <- unwrap =<< RPC.registerParticipantChecked owner tid p
+      a <- CkIn.setParticipantCheckedIn other tid p True
+      b <- CkIn.setParticipantCheckedIn owner tid (Individual (Player (PlayerName "cu-nobody"))) True
+      c <- CkIn.setParticipantCheckedIn owner tid (Individual (Player (PlayerName "CU-HAND"))) True
+      v1 <- unwrap =<< CkIn.loadCheckIn Nothing tid
+      d <- CkIn.setParticipantCheckedIn owner tid p False
+      v2 <- unwrap =<< CkIn.loadCheckIn Nothing tid
+      pure (ciTag a, ciTag b, ciTag c, length (CkIn.checkedInParticipants v1), ciTag d, length (CkIn.checkedInParticipants v2))
+    result `shouldBe` Right ("unauthorized", "not-registered", "ok", 1, "ok", 0)
+
+  it "the organizer can remove a participant after registration closes, but a player cannot withdraw" $ do
+    result <- runSQLiteM testDbPath $ do
+      setupSchema
+      owner <- createTestUser "cu-owner-4"
+      joiner <- createTestUser "cu-joiner-4"
+      tid <- ciOpenTid owner "Check-in use D"
+      let p = Individual (Player (PlayerName "cu-typed-4"))
+      _ <- unwrap =<< RPC.registerParticipantChecked owner tid p
+      _ <- unwrap =<< RPC.joinTournament joiner tid
+      _ <- unwrap =<< closeRegistration owner tid
+      w <- RPC.withdrawFromTournament joiner tid
+      r <- RPC.removeParticipant owner tid p
+      regs <- length <$> Repo.listRegistrations tid
+      pure (isLeft w, rmTag r, regs)
+    result `shouldBe` Right (True, "ok", 1)
+
+  it "removing a checked-in participant clears their check-in" $ do
+    result <- runSQLiteM testDbPath $ do
+      setupSchema
+      owner <- createTestUser "cu-owner-5"
+      tid <- ciOpenTid owner "Check-in use E"
+      let p = Individual (Player (PlayerName "cu-typed-5"))
+      _ <- unwrap =<< RPC.registerParticipantChecked owner tid p
+      _ <- unwrap =<< CkIn.setParticipantCheckedIn owner tid p True
+      _ <- unwrap =<< RPC.removeParticipant owner tid p
+      _ <- unwrap =<< RPC.registerParticipantChecked owner tid p
+      v <- unwrap =<< CkIn.loadCheckIn Nothing tid
+      pure (length (CkIn.checkedInParticipants v))
+    result `shouldBe` Right 0

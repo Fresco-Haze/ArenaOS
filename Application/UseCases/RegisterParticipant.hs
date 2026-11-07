@@ -24,9 +24,9 @@ import Domain.Ids (UserId)
 import Domain.Participant (Participant(..), Player(..), PlayerName(..), TeamName(..))
 import Domain.Registration (registrationParticipant, registrationId)
 import Domain.Tournament
-  (Tournament, TournamentId, TournamentState(RegistrationOpen), tournamentMaxParticipants, tournamentParticipantMode, tournamentRequireApproval, tournamentRegistrationDeadline, ParticipantMode(..))
+  (Tournament, TournamentId, TournamentState(..), tournamentMaxParticipants, tournamentParticipantMode, tournamentRequireApproval, tournamentRegistrationDeadline, ParticipantMode(..))
 import Application.Internal.Authorization (AuthorizationError, requireTournamentOwner, requireVisibleToViewer)
-import Application.Internal.LifecycleTransition (requireTournamentState, LifecycleError)
+import Application.Internal.LifecycleTransition (requireTournamentState, requireTournamentStateNotIn, LifecycleError)
 import Engine.TournamentValidation (ParticipantValidationError, validateParticipant, participantMatchesMode)
 import Shell.Persistence.Port
   ( TournamentRepository
@@ -216,7 +216,7 @@ accountBehind tid (Individual (Player (PlayerName n))) rid = do
       pure (if owned == Just rid then Just (userId u) else Nothing)
 accountBehind _ (Squad _) _ = pure Nothing
 
--- Organizer removes a participant while registration is open. On an approval
+-- Organizer removes a participant while registration is open or closed (closed: to drop no-shows after check-in). On an approval
 -- tournament a self-registered player is also marked Declined, so they cannot
 -- simply request again.
 removeParticipant
@@ -246,7 +246,7 @@ removeParticipant caller tid participant =
   where
     preChecks t = do
       first RemoveUnauthorized (requireTournamentOwner caller t)
-      first RemoveLifecycle (requireTournamentState RegistrationOpen t)
+      first RemoveLifecycle (requireTournamentStateNotIn [Draft, Published, InProgress, Paused, Completed, Cancelled] t)
 
 listMyRegistrations
   :: (TournamentRepository m, RegistrationRepository m)

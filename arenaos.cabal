@@ -104,6 +104,7 @@ library
                       Shell.Persistence.SQLite.LobbyRepository
                       Shell.Persistence.SQLite.CheckInRepository
                       Application.UseCases.Lobby
+                      Application.UseCases.CheckIn
                       Engine.Champion
                       Engine.Rankings
                       Engine.Lobby
