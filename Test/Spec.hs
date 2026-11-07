@@ -115,6 +115,7 @@ import Shell.Persistence.SQLite.JoinRequestRepository ()
 import Shell.Persistence.SQLite.NotificationRepository ()
 import Shell.Persistence.SQLite.AvatarRepository ()
 import Shell.Persistence.SQLite.LobbyRepository ()
+import Shell.Persistence.SQLite.CheckInRepository ()
 import qualified Application.UseCases.Lobby as LobbyUC
 import qualified Domain.Tournament as LbDom
 import qualified Application.Internal.LifecycleTransition as LbLife
@@ -310,6 +311,7 @@ spec = before_ resetTestDb $ do
   doubleElimParitySpec
   bracketLinksViewSpec
   detailsSpec
+  checkInSpec
   statsSpec
   gamesSpec
   publicFilterSpec
@@ -10400,3 +10402,65 @@ gamesSpec = describe "Games (v0.13)" $ do
     fmap gameName (mkGame "   ") `shouldBe` Left "game name is required"
     fmap gameName (mkGame (replicate 41 'a')) `shouldBe` Left "game name must be 40 characters or fewer"
     fmap gameName (mkGame "  Tom   Clancy's  ") `shouldBe` Right "Tom Clancy's"
+
+-- Check-in storage (slice 1)
+ciReg :: TournamentId -> String -> SQLiteM RegistrationId
+ciReg tid name = do
+  let p = Player (PlayerName name)
+  Repo.savePlayer p
+  pid <- Repo.resolveParticipant (Individual p)
+  Repo.createRegistration NewRegistration
+    { newRegistrationTournament  = tid
+    , newRegistrationParticipant = pid
+    }
+
+checkInSpec :: Spec
+checkInSpec = describe "Check-in storage" $ do
+
+  it "check-in is closed until opened, and can be closed again" $ do
+    result <- runSQLiteM testDbPath $ do
+      setupSchema
+      owner <- createTestUser "ci-owner-1"
+      tid <- dtCreate owner "Check-in A" noDetails
+      before <- Repo.isCheckInOpen tid
+      Repo.openCheckIn tid
+      opened <- Repo.isCheckInOpen tid
+      Repo.closeCheckIn tid
+      closed <- Repo.isCheckInOpen tid
+      pure (before, opened, closed)
+    result `shouldBe` Right (False, True, False)
+
+  it "checks in and un-checks, lists only this tournament, and checking in twice is harmless" $ do
+    result <- runSQLiteM testDbPath $ do
+      setupSchema
+      owner <- createTestUser "ci-owner-2"
+      tid1 <- dtCreate owner "Check-in B1" noDetails
+      tid2 <- dtCreate owner "Check-in B2" noDetails
+      a <- ciReg tid1 "ci-b-a"
+      b <- ciReg tid1 "ci-b-b"
+      c <- ciReg tid2 "ci-b-c"
+      Repo.setCheckedIn a True
+      Repo.setCheckedIn a True
+      Repo.setCheckedIn b True
+      Repo.setCheckedIn c True
+      both <- Repo.listCheckedIn tid1
+      Repo.setCheckedIn a False
+      onlyB <- Repo.listCheckedIn tid1
+      other <- Repo.listCheckedIn tid2
+      pure (both == [a, b], onlyB == [b], other == [c])
+    result `shouldBe` Right (True, True, True)
+
+  it "removing a registration removes its check-in, and a new registration is not checked in" $ do
+    result <- runSQLiteM testDbPath $ do
+      setupSchema
+      owner <- createTestUser "ci-owner-3"
+      tid <- dtCreate owner "Check-in C" noDetails
+      a <- ciReg tid "ci-c-a"
+      Repo.setCheckedIn a True
+      before <- Repo.listCheckedIn tid
+      Repo.deleteRegistration a
+      afterDelete <- Repo.listCheckedIn tid
+      d <- ciReg tid "ci-c-d"
+      afterNew <- Repo.listCheckedIn tid
+      pure (before == [a], afterDelete, d `elem` afterNew)
+    result `shouldBe` Right (True, [], False)

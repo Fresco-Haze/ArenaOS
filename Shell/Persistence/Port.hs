@@ -41,6 +41,7 @@ module Shell.Persistence.Port
   ,AvatarRepository(..)
   ,BannerRepository(..)
   ,LobbyRepository(..)
+  ,CheckInRepository(..)
   
   ) where
 
@@ -288,4 +289,13 @@ class Monad m => BannerRepository m where
   getBanner    :: TournamentId -> m (Maybe ByteString)
   hasBanner    :: TournamentId -> m Bool
   deleteBanner :: TournamentId -> m ()
+
+-- Check-in: the organizer opens a window, registered players confirm they are present.
+-- A check-in row disappears with its registration (ON DELETE CASCADE).
+class Monad m => CheckInRepository m where
+  openCheckIn    :: TournamentId -> m ()
+  closeCheckIn   :: TournamentId -> m ()
+  isCheckInOpen  :: TournamentId -> m Bool
+  setCheckedIn   :: RegistrationId -> Bool -> m ()
+  listCheckedIn  :: TournamentId -> m [RegistrationId]
 

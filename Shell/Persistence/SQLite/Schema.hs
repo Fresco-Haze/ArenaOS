@@ -38,6 +38,7 @@ initializeSchema conn = do
   migrateUsernameIndex conn
   migrateGames conn
   migrateLobby conn
+  migrateCheckIn conn
 
 -- v0.12: CREATE TABLE IF NOT EXISTS never adds columns to an existing
 -- database, so add any missing tournament columns here. Safe on every start.
@@ -110,6 +111,13 @@ migrateTeamColumns conn = do
 migrateBanners :: Connection -> IO ()
 migrateBanners conn =
   execute_ conn "CREATE TABLE IF NOT EXISTS tournament_banners (tournament_id INTEGER PRIMARY KEY REFERENCES tournaments(id), image BLOB NOT NULL, updated_at TEXT NOT NULL)"
+
+-- Check-in: which tournaments opened check-in, and which registrations checked in.
+-- The check-in row is deleted together with its registration.
+migrateCheckIn :: Connection -> IO ()
+migrateCheckIn conn = do
+  execute_ conn "CREATE TABLE IF NOT EXISTS tournament_checkin (tournament_id INTEGER PRIMARY KEY REFERENCES tournaments(id), is_open INTEGER NOT NULL DEFAULT 0 CHECK (is_open IN (0, 1)))"
+  execute_ conn "CREATE TABLE IF NOT EXISTS registration_checkins (registration_id INTEGER PRIMARY KEY REFERENCES registrations(id) ON DELETE CASCADE, checked_in_at TEXT NOT NULL)"
 
 -- v0.12: usernames are unique ignoring case ("Jae" and "jae" are one name).
 -- Fails loudly if two existing users already differ only by case.
