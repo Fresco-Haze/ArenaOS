@@ -13,6 +13,7 @@ import { formatLabel, gameLabel, stateLabel, type Participant } from '../model'
 
 import Bracket from '../components/Bracket'
 import PredictionProvider from '../components/PredictionProvider'
+import PredictionLeaderboard from '../components/PredictionLeaderboard'
 import EmptyState from '../components/EmptyState'
 import ErrorBanner from '../components/ErrorBanner'
 import LoadingBlock from '../components/LoadingBlock'
@@ -26,7 +27,7 @@ import BannerEditor from '../components/BannerEditor'
 import ConfirmDialog from '../components/ConfirmDialog'
 import { removeParticipant } from '../lib/tournamentActions'
 
-type TabId = 'overview' | 'bracket' | 'players'
+type TabId = 'overview' | 'bracket' | 'predictions' | 'players'
 
 function PeopleIcon() {
   return (
@@ -110,6 +111,8 @@ export default function TournamentPage({ id }: { id: string }) {
   const rulesList = (t.rules ?? '').split('\n').map((r) => r.trim()).filter((r) => r.length > 0)
   // Player profiles are built from public tournaments past Draft, so only link there.
   const profileLinks = t.visibility === 'Public' && t.state !== 'Draft' && t.state !== 'Cancelled'
+  // Predictions exist for bracket tournaments once the bracket is generated (matches exist).
+  const hasPredictions = t.kind === 'Bracket' && ['RegistrationClosed', 'InProgress', 'Paused', 'Completed'].includes(t.state)
 
   return (
     <div className="tp">
@@ -163,6 +166,7 @@ export default function TournamentPage({ id }: { id: string }) {
         tabs={[
           { id: 'overview', label: 'Overview' },
           { id: 'bracket', label: t.kind === 'Lobby' ? 'Standings' : 'Bracket' },
+          ...(hasPredictions ? [{ id: 'predictions' as const, label: 'Predictions' }] : []),
           { id: 'players', label: squads ? 'Teams' : 'Players', count: view.participants.length },
         ]}
       />
@@ -221,6 +225,10 @@ export default function TournamentPage({ id }: { id: string }) {
               The bracket appears here once the organizer generates it.
             </EmptyState>
           )}
+        </div>
+      ) : tab === 'predictions' && hasPredictions ? (
+        <div role="tabpanel" id="panel-predictions" aria-labelledby="tab-predictions">
+          <PredictionLeaderboard tournament={t} />
         </div>
       ) : (
         <div role="tabpanel" id="panel-players" aria-labelledby="tab-players">

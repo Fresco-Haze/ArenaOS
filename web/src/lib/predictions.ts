@@ -21,3 +21,15 @@ export function submitPrediction(matchId: number, pick: PredictionPick) {
     body: JSON.stringify({ pick }),
   })
 }
+
+export const LeaderboardList = z.array(
+  z.object({
+    rank: z.number(),
+    userId: z.number(),
+    username: z.string(),
+    correct: z.number(),
+    wrong: z.number(),
+    points: z.number(),
+  }),
+)
+export type LeaderboardList = z.infer<typeof LeaderboardList>
