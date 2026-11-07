@@ -119,6 +119,11 @@ import qualified Domain.TournamentHistory as TH
 import qualified Domain.Notification as Notif
 import qualified Application.UseCases.ChangePassword as ChgPw
 import qualified Application.UseCases.GetRankings as GRK
+import qualified Application.UseCases.Predictions as PredUC
+import qualified Engine.Predictions as PredEng
+import qualified Domain.Prediction as PredDom
+import qualified Domain.Ids as PredIds
+import Shell.Persistence.SQLite.PredictionRepository ()
 import qualified Engine.Rankings as Rk
 import qualified Application.UseCases.GetPlayers as GPL
 import qualified Engine.Players as Pl
@@ -1064,6 +1069,66 @@ fromJoinTeam Register.JoinTeamAlreadyRegistered =
   ApiError status409 "ALREADY_REGISTERED" "This team is already registered" (object [])
 fromJoinTeam Register.JoinTeamFull =
   ApiError status409 "REGISTRATION_CAPACITY_REACHED" "The tournament is full" (object [])
+
+-- ===== Predictions (free points, no money) =====
+
+newtype PredictionReq = PredictionReq PredDom.Pick
+
+pickFromApi :: Text -> Maybe PredDom.Pick
+pickFromApi "A"    = Just PredDom.PickA
+pickFromApi "B"    = Just PredDom.PickB
+pickFromApi "Draw" = Just PredDom.PickDraw
+pickFromApi _      = Nothing
+
+instance FromJSON PredictionReq where
+  parseJSON = withObject "prediction" $ \o -> do
+    raw <- o .: "pick"
+    case pickFromApi raw of
+      Just p  -> pure (PredictionReq p)
+      Nothing -> fail "pick must be A, B or Draw"
+
+pickToApi :: PredDom.Pick -> Text
+pickToApi PredDom.PickA    = "A"
+pickToApi PredDom.PickB    = "B"
+pickToApi PredDom.PickDraw = "Draw"
+
+resultToApi :: PredEng.PredictionResult -> Text
+resultToApi PredEng.Correct = "correct"
+resultToApi PredEng.Wrong   = "wrong"
+resultToApi PredEng.Void    = "void"
+resultToApi PredEng.Pending = "pending"
+
+parseIntId :: Text -> Maybe Int
+parseIntId t = case reads (T.unpack t) :: [(Int, String)] of
+  [(n, "")] | n > 0 -> Just n
+  _                 -> Nothing
+
+notFoundApi :: ApiError
+notFoundApi = ApiError status404 "NOT_FOUND" "Resource not found" (object [])
+
+fromPrediction :: PredUC.PredictionError -> ApiError
+fromPrediction (PredUC.Unauthorized a)     = fromAuthorization a
+fromPrediction (PredUC.InvalidLifecycle l) = fromLifecycle l
+fromPrediction PredUC.NotAllowedToPredict =
+  ApiError status403 "PREDICTION_NOT_ALLOWED"
+    "The organizer and registered players cannot predict their own tournament" (object [])
+fromPrediction PredUC.PredictionsClosed =
+  ApiError status409 "PREDICTIONS_CLOSED" "Predictions close when the match starts" (object [])
+fromPrediction PredUC.PickNotAllowed =
+  ApiError status400 "PICK_NOT_ALLOWED" "A draw can only be picked in round robin" (object [])
+
+leaderboardNamed
+  :: Maybe UserId -> TournamentId
+  -> SQLiteM (Either PredUC.PredictionError [(PredEng.LeaderboardRow, Text)])
+leaderboardNamed viewer tid = do
+  r <- PredUC.leaderboard viewer tid
+  case r of
+    Left err   -> pure (Left err)
+    Right rows -> do
+      named <- mapM (\row -> do
+                       mu <- Repo.findUserById (PredEng.lbUser row)
+                       pure (row, maybe "unknown" (unUsername . username) mu)) rows
+      pure (Right named)
 
 fromGetTournament :: GetT.GetTournamentError -> ApiError
 fromGetTournament (GetT.Unauthorized a) = fromAuthorization a
@@ -2347,6 +2412,63 @@ main = do
     get "/tournaments/:id" $
       runViewAction lock GetT.getTournament fromGetTournament $ \v ->
         json (tournamentViewJson v)
+
+    -- predictions (free points): pick a winner before the match starts
+    put "/matches/:id/prediction" $ do
+      rawId <- pathParam "id" :: ActionM Text
+      mUser <- currentUser lock
+      case mUser of
+        Nothing  -> sendError unauthenticated
+        Just uid -> do
+          raw <- body
+          case (parseIntId rawId, eitherDecode raw) of
+            (Nothing, _)       -> sendError notFoundApi
+            (_, Left reason)   -> sendError (invalidBody reason)
+            (Just n, Right (PredictionReq pick)) -> do
+              result <- runUseCase lock (PredUC.submitPrediction uid (MatchId (fromIntegral n)) pick)
+              case result of
+                Left apiErr       -> sendError apiErr
+                Right (Left perr) -> sendError (fromPrediction perr)
+                Right (Right ())  -> json (object ["saved" .= True, "pick" .= pickToApi pick])
+
+    -- my picks in one tournament, with how each turned out
+    get "/tournaments/:id/predictions" $ do
+      rawId <- pathParam "id" :: ActionM Text
+      mUser <- currentUser lock
+      case mUser of
+        Nothing  -> sendError unauthenticated
+        Just uid -> case parseIntId rawId of
+          Nothing -> sendError notFoundApi
+          Just n -> do
+            result <- runUseCase lock (PredUC.myPredictions uid (TournamentId n))
+            case result of
+              Left apiErr       -> sendError apiErr
+              Right (Left perr) -> sendError (fromPrediction perr)
+              Right (Right views) -> json
+                [ object [ "matchId" .= unMatchId (matchId (PredUC.pvMatch v))
+                         , "pick"    .= pickToApi (PredUC.pvPick v)
+                         , "result"  .= resultToApi (PredUC.pvResult v) ]
+                | v <- views ]
+
+    -- public: one point per correct pick, readable by anyone who can see the tournament
+    get "/tournaments/:id/predictions/leaderboard" $ do
+      rawId <- pathParam "id" :: ActionM Text
+      mUser <- currentUser lock
+      case parseIntId rawId of
+        Nothing -> sendError notFoundApi
+        Just n -> do
+          result <- runUseCase lock (leaderboardNamed mUser (TournamentId n))
+          case result of
+            Left apiErr       -> sendError apiErr
+            Right (Left perr) -> sendError (fromPrediction perr)
+            Right (Right named) -> json
+              [ object [ "rank"     .= i
+                       , "userId"   .= PredIds.unUserId (PredEng.lbUser row)
+                       , "username" .= name
+                       , "correct"  .= PredEng.lbCorrect row
+                       , "wrong"    .= PredEng.lbWrong row
+                       , "points"   .= PredEng.leaderboardPoints row ]
+              | (i, (row, name)) <- zip [1 :: Int ..] named ]
 
     -- public, no login: all games, for the dropdown
     get "/games" $ do

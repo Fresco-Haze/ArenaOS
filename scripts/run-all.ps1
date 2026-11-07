@@ -1,4 +1,4 @@
-﻿param(
+param(
   [string]$Base = 'http://localhost:3000',
   [string[]]$Only = @(),      # e.g. -Only de,squad  (matches the part after "e2e-")
   [switch]$StopOnFail,        # stop at the first script that fails
@@ -20,7 +20,8 @@ $suite = @(
   @('3p',        'e2e-3p.ps1',        'third-place match'),
   @('ef',        'e2e-ef.ps1',        'eFootball score corrections'),
   @('lifecycle', 'e2e-lifecycle.ps1', 'pause, resume, reopen, cancel, ownership'),
-  @('squad',     'e2e-squad.ps1',     'teams, squad registration, play-through')
+  @('squad',     'e2e-squad.ps1',     'teams, squad registration, play-through'),
+  @('predictions','e2e-predictions.ps1','predictions: picks, who may predict, locking, leaderboard')
 )
 if ($Only.Count -gt 0) { $suite = @($suite | Where-Object { $Only -contains $_[0] }) }
 if ($suite.Count -eq 0) { Write-Host 'No scripts match -Only.' -ForegroundColor Red; exit 2 }
