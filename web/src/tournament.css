@@ -210,3 +210,18 @@
 /* v0.12: player names on the Players tab link to their profile */
 .prow-link { color: inherit; text-decoration: none; }
 .prow-link:hover { text-decoration: underline; }
+
+/* Predictions (free points): the pick buttons inside a match card */
+.predict { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
+.predict-btn { font-size: 0.8125rem; padding: 4px 10px; }
+.predict-btn.predict-on { font-weight: 700; border-color: var(--accent, #4f8cff); box-shadow: 0 0 0 1px var(--accent, #4f8cff); }
+.predict-result { margin: 8px 0 0; font-size: 0.8125rem; }
+.predict-ok { color: #2ea043; font-weight: 700; }
+.predict-bad { color: #f85149; font-weight: 700; }
+
+/* Predictions: the "Predict the winners" panel above the bracket */
+.predict-panel { margin: var(--space-4, 16px) 0; padding: var(--space-3, 12px) var(--space-4, 16px); border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.predict-panel .bracket-section-heading { margin-top: 0; }
+.predict-list { list-style: none; margin: var(--space-3, 12px) 0 0; padding: 0; display: grid; gap: var(--space-3, 12px); }
+.predict-match { margin: 0; font-weight: 600; }
+.predict-row .predict { margin-top: 4px; }

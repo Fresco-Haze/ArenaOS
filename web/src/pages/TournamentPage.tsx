@@ -12,6 +12,7 @@ import { PLATFORMS } from '../lib/details'
 import { formatLabel, gameLabel, stateLabel, type Participant } from '../model'
 
 import Bracket from '../components/Bracket'
+import PredictionProvider from '../components/PredictionProvider'
 import EmptyState from '../components/EmptyState'
 import ErrorBanner from '../components/ErrorBanner'
 import LoadingBlock from '../components/LoadingBlock'
@@ -212,7 +213,9 @@ export default function TournamentPage({ id }: { id: string }) {
           )}
 
           {bracket ? (
-            <Bracket bracket={bracket} tournamentState={t.state} game={t.game} />
+            <PredictionProvider tournament={t} viewerIsOwner={view.viewerIsOwner} viewerIsRegistered={view.viewerIsRegistered} bracket={bracket}>
+              <Bracket bracket={bracket} tournamentState={t.state} game={t.game} />
+            </PredictionProvider>
           ) : (
             <EmptyState title="No bracket yet">
               The bracket appears here once the organizer generates it.
