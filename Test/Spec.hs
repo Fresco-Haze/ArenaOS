@@ -120,6 +120,7 @@ import Shell.Persistence.SQLite.NotificationRepository ()
 import Shell.Persistence.SQLite.AvatarRepository ()
 import Shell.Persistence.SQLite.LobbyRepository ()
 import Shell.Persistence.SQLite.IdentityRepository ()
+import qualified Database.SQLite.Simple as SQ
 import qualified Application.UseCases.Lobby as LobbyUC
 import qualified Domain.Tournament as LbDom
 import qualified Application.Internal.LifecycleTransition as LbLife
@@ -325,6 +326,7 @@ spec = before_ resetTestDb $ do
   googleSignInSpec
   identitySpec
   googleOAuthSpec
+  identityPurgeSpec
   describe "Tournament Lifecycle (4-participant golden scenario)" $
     it "runs the full pipeline from creation to completion" $ do
       result <- runSQLiteM testDbPath $ do
@@ -10561,3 +10563,18 @@ googleOAuthSpec = describe "Google OAuth helpers (pure)" $ do
     gofHas (GOA.clearStateCookieHeader True) ["Max-Age=0", "Secure"] `shouldBe` True
   it "each refusal has a fixed error code" $
     map GOA.refusalCode [EmailNotVerified, EmailAlreadyUsed, AccountNotActive Suspended, AccountNotActive Deactivated] `shouldBe` ["email_not_verified", "email_in_use", "account_not_active", "account_not_active"]
+
+identityPurgeSpec :: Spec
+identityPurgeSpec = describe "Identity storage: purging old handoffs" $ do
+  it "purging removes expired and used handoffs and keeps live ones" $ idnExpect (Nothing, [1], True) $ do
+    u <- createTestUser "idn-p1"
+    Repo.createHandoff "old" (Repo.HandoffSignUp "sub-1" "a@example.com" (Just "A")) 100
+    Repo.createHandoff "used" (Repo.HandoffLogin u) 5000
+    _ <- Repo.consumeHandoff "used" 10
+    Repo.createHandoff "live" (Repo.HandoffLogin u) 5000
+    Repo.purgeExpiredHandoffs 200
+    env <- ask
+    n <- liftIO (SQ.query_ (envConnection env) "SELECT COUNT(*) FROM google_handoffs" :: IO [SQ.Only Int])
+    a <- Repo.consumeHandoff "old" 50
+    c <- Repo.consumeHandoff "live" 300
+    pure (a, map SQ.fromOnly n, c == Just (Repo.HandoffLogin u))

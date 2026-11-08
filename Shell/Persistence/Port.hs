@@ -300,3 +300,4 @@ class Monad m => IdentityRepository m where
   linkIdentity     :: UserId -> Text -> Text -> m Bool
   createHandoff    :: Text -> HandoffPayload -> Int -> m ()
   consumeHandoff   :: Text -> Int -> m (Maybe HandoffPayload)
+  purgeExpiredHandoffs :: Int -> m ()

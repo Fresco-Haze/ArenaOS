@@ -1421,7 +1421,7 @@ issueHandoff lock secure isNew payload = do
   codeTxt <- liftIO newToken
   nowT <- liftIO getCurrentTime
   let nowS = floor (utcTimeToPOSIXSeconds nowT) :: Int
-  r <- runUseCase lock (Repo.createHandoff (GO.hashHandoffCode codeTxt) payload (nowS + 120))
+  r <- runUseCase lock (Repo.purgeExpiredHandoffs nowS >> Repo.createHandoff (GO.hashHandoffCode codeTxt) payload (nowS + 120))
   case r of
     Left _ -> googleFail secure "google_failed"
     Right () -> do
@@ -1459,7 +1459,7 @@ signUpRetry lock sub em nm (ApiError st code msg details) = do
   codeTxt <- liftIO newToken
   nowT <- liftIO getCurrentTime
   let nowS = floor (utcTimeToPOSIXSeconds nowT) :: Int
-  r <- runUseCase lock (Repo.createHandoff (GO.hashHandoffCode codeTxt) (Repo.HandoffSignUp sub em nm) (nowS + 120))
+  r <- runUseCase lock (Repo.purgeExpiredHandoffs nowS >> Repo.createHandoff (GO.hashHandoffCode codeTxt) (Repo.HandoffSignUp sub em nm) (nowS + 120))
   case r of
     Right () -> sendError (ApiError st code msg (object ["retryCode" .= codeTxt, "info" .= details]))
     Left e   -> sendError e

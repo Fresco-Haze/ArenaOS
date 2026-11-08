@@ -41,3 +41,7 @@ instance IdentityRepository SQLiteM where
               ((Just u, _, _, _) : _)             -> Just (HandoffLogin (UserId u))
               ((Nothing, Just s, Just e, nm) : _) -> Just (HandoffSignUp s e nm)
               _                                   -> Nothing)
+  purgeExpiredHandoffs :: Int -> SQLiteM ()
+  purgeExpiredHandoffs now = do
+    conn <- asks envConnection
+    liftIO $ execute conn "DELETE FROM google_handoffs WHERE expires_at <= ? OR used_at IS NOT NULL" (Only now)
