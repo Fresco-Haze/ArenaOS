@@ -225,3 +225,4 @@
 .predict-list { list-style: none; margin: var(--space-3, 12px) 0 0; padding: 0; display: grid; gap: var(--space-3, 12px); }
 .predict-match { margin: 0; font-weight: 600; }
 .predict-row .predict { margin-top: 4px; }
+.predict-more { margin-top: 12px; }
