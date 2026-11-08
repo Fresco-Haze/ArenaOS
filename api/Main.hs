@@ -86,6 +86,13 @@ import Domain.User (User(..), Username(..), Email(..), AccountStatus(..), Passwo
 import qualified Application.UseCases.RegisterUser as RU
 import Engine.User (UserError(..))
 import Data.Time.Clock.POSIX (utcTimeToPOSIXSeconds)
+import qualified Network.HTTP.Client as HC
+import qualified Network.HTTP.Types as HT
+import Network.HTTP.Client.TLS (getGlobalManager)
+import qualified Data.Text.Encoding as TEnc
+import qualified Engine.GoogleOAuth as GO
+import qualified Engine.GoogleSignIn as GS
+import Shell.Persistence.SQLite.IdentityRepository ()
 import qualified Engine.User as EU
 import qualified Application.UseCases.GetTournament as GetT
 import qualified Application.UseCases.ListMyTournaments as ListMine
@@ -1296,6 +1303,194 @@ data Env = Env
   , envFacts :: IORef (Maybe (UTCTime, [GRK.PublicFact]))  -- shared rankings and players facts
   }
 
+-- Google sign-in: configuration, the two HTTPS calls, and shared helpers.
+-- Config is read per request, so the Env record stays as it is. Empty means Google is off.
+googleConfig :: IO (Maybe GO.GoogleConfig)
+googleConfig = do
+  cid <- fromMaybe "" <$> lookupEnv "ARENAOS_GOOGLE_CLIENT_ID"
+  sec <- fromMaybe "" <$> lookupEnv "ARENAOS_GOOGLE_CLIENT_SECRET"
+  uri <- fromMaybe "" <$> lookupEnv "ARENAOS_GOOGLE_REDIRECT_URI"
+  pure (GO.googleConfigFrom (T.pack cid) (T.pack sec) (T.pack uri))
+
+googleHttpTimeout :: HC.ResponseTimeout
+googleHttpTimeout = HC.responseTimeoutMicro 10000000
+
+-- Never log response bodies here: the token response holds secrets.
+exchangeCode :: GO.GoogleConfig -> Text -> IO (Either Text Text)
+exchangeCode cfg code = do
+  r <- tryAny $ do
+    mgr <- getGlobalManager
+    req0 <- HC.parseRequest (T.unpack GO.googleTokenEndpoint)
+    let req = req0 { HC.method = "POST"
+                   , HC.requestHeaders = [("Content-Type", "application/x-www-form-urlencoded"), ("Accept", "application/json")]
+                   , HC.requestBody = HC.RequestBodyBS (GO.tokenRequestBody cfg code)
+                   , HC.responseTimeout = googleHttpTimeout }
+    resp <- HC.httpLbs req mgr
+    pure (HC.responseStatus resp, BL.toStrict (HC.responseBody resp))
+  pure $ case r of
+    Left _ -> Left "token request failed"
+    Right (st, bs)
+      | HT.statusCode st /= 200 -> Left ("token endpoint answered " <> T.pack (show (HT.statusCode st)))
+      | otherwise            -> GO.parseTokenResponse bs
+
+fetchIdentity :: Text -> IO (Either Text GS.GoogleIdentity)
+fetchIdentity accessToken = do
+  r <- tryAny $ do
+    mgr <- getGlobalManager
+    req0 <- HC.parseRequest (T.unpack GO.googleUserInfoEndpoint)
+    let req = req0 { HC.requestHeaders = [("Authorization", TEnc.encodeUtf8 ("Bearer " <> accessToken)), ("Accept", "application/json")]
+                   , HC.responseTimeout = googleHttpTimeout }
+    resp <- HC.httpLbs req mgr
+    pure (HC.responseStatus resp, BL.toStrict (HC.responseBody resp))
+  pure $ case r of
+    Left _ -> Left "userinfo request failed"
+    Right (st, bs)
+      | HT.statusCode st /= 200 -> Left ("userinfo endpoint answered " <> T.pack (show (HT.statusCode st)))
+      | otherwise            -> GO.parseUserInfo bs
+
+googleIpRule :: RateRule
+googleIpRule = RateRule "google-ip" 3600 30 Nothing
+
+googleRedirect :: Text -> ActionM ()
+googleRedirect target = do
+  status HT.status302
+  setHeader "Location" (TL.fromStrict target)
+  setHeader "Cache-Control" "no-store"
+
+googleFail :: Bool -> Text -> ActionM ()
+googleFail secure code = do
+  setHeader "Set-Cookie" (TL.fromStrict (GO.clearStateCookieHeader secure))
+  googleRedirect ("/login?error=" <> code)
+
+-- Same token and JSON as /login. /login itself is not touched.
+startSession :: Env -> User -> ActionM ()
+startSession lock user = do
+  tok <- liftIO newToken
+  nowT <- liftIO getCurrentTime
+  let expiresAt = addUTCTime (envTokenTtl lock) nowT
+  liftIO (atomicModifyIORef' (envTokens lock)
+            (\m -> (Map.insert tok (userId user, expiresAt) (Map.filter ((> nowT) . snd) m), ())))
+  let Username uname = username user
+  fullResult <- runUseCase lock (Repo.getFullName (userId user))
+  let fullName = either (const Nothing) id fullResult
+  avResult <- runUseCase lock (Repo.hasAvatar (userId user))
+  let hasAv = either (const False) id avResult
+  json (object [ "token" .= tok
+               , "user"  .= object [ "id"       .= unUserId (userId user)
+                                   , "username" .= uname
+                                   , "fullName" .= fullName
+                                   , "hasAvatar" .= hasAv ] ])
+
+data GoogleFinishReq = GoogleFinishReq Text (Maybe Text) Bool
+
+instance FromJSON GoogleFinishReq where
+  parseJSON = withObject "googleFinish" $ \o ->
+    GoogleFinishReq <$> o .: "code" <*> o .:? "username" <*> (fromMaybe False <$> o .:? "ageConfirmed")
+
+data GoogleFinishError = GFRegister RU.RegisterUserError | GFLinkFailed
+  deriving (Eq, Show)
+
+lookupForGoogle :: GS.GoogleIdentity -> SQLiteM (Maybe User, Maybe User)
+lookupForGoogle ident = do
+  mUid <- Repo.findIdentityUser "google" (GS.giSubject ident)
+  linked <- maybe (pure Nothing) Repo.findUserById mUid
+  byEmail <- Repo.findUserByEmail (Email (GS.giEmail ident))
+  pure (linked, byEmail)
+
+-- User row and identity link in one transaction: both or neither.
+createGoogleUser :: Username -> Email -> Text -> Text -> SQLiteM (Either GoogleFinishError User)
+createGoogleUser uname em placeholder subject = Repo.withTxEither $ do
+  byName <- Repo.findUserByUsername uname
+  case byName of
+    Just _ -> pure (Left (GFRegister RU.UsernameTaken))
+    Nothing -> do
+      byMail <- Repo.findUserByEmail em
+      case byMail of
+        Just _ -> pure (Left (GFRegister RU.EmailTaken))
+        Nothing -> do
+          uid <- Repo.createUser (Repo.NewUser uname em (PasswordHash placeholder))
+          linked <- Repo.linkIdentity uid "google" subject
+          if linked
+            then pure (Right User { userId = uid, username = uname, email = em
+                                  , passwordHash = PasswordHash placeholder, accountStatus = Active })
+            else pure (Left GFLinkFailed)
+
+-- A short-lived one-time code. Only its hash is stored.
+issueHandoff :: Env -> Bool -> Bool -> Repo.HandoffPayload -> ActionM ()
+issueHandoff lock secure isNew payload = do
+  codeTxt <- liftIO newToken
+  nowT <- liftIO getCurrentTime
+  let nowS = floor (utcTimeToPOSIXSeconds nowT) :: Int
+  r <- runUseCase lock (Repo.createHandoff (GO.hashHandoffCode codeTxt) payload (nowS + 120))
+  case r of
+    Left _ -> googleFail secure "google_failed"
+    Right () -> do
+      setHeader "Set-Cookie" (TL.fromStrict (GO.clearStateCookieHeader secure))
+      googleRedirect ("/login/google?code=" <> codeTxt <> (if isNew then "&new=1" else ""))
+
+googleComplete :: Env -> GO.GoogleConfig -> Bool -> Text -> ActionM ()
+googleComplete lock cfg secure code = do
+  tokenResult <- liftIO (exchangeCode cfg code)
+  case tokenResult of
+    Left why -> do
+      liftIO (hPutStrLn stderr ("[google] " ++ T.unpack why))
+      googleFail secure "google_failed"
+    Right accessToken -> do
+      idResult <- liftIO (fetchIdentity accessToken)
+      case idResult of
+        Left why -> do
+          liftIO (hPutStrLn stderr ("[google] " ++ T.unpack why))
+          googleFail secure "google_failed"
+        Right ident -> do
+          looked <- runUseCase lock (lookupForGoogle ident)
+          case looked of
+            Left _ -> googleFail secure "google_failed"
+            Right (linked, byEmail) ->
+              case GS.decideGoogleSignIn ident linked byEmail of
+                GS.Refuse r      -> googleFail secure (GO.refusalCode r)
+                GS.LogInAs uid   -> issueHandoff lock secure False (Repo.HandoffLogin uid)
+                GS.NeedsUsername -> issueHandoff lock secure True
+                                      (Repo.HandoffSignUp (GS.giSubject ident) (GS.giEmail ident) (GS.giName ident))
+
+-- The sign-up code is already used when a problem shows up, so the error
+-- carries a fresh code and the form can retry without going back to Google.
+signUpRetry :: Env -> Text -> Text -> Maybe Text -> ApiError -> ActionM ()
+signUpRetry lock sub em nm (ApiError st code msg details) = do
+  codeTxt <- liftIO newToken
+  nowT <- liftIO getCurrentTime
+  let nowS = floor (utcTimeToPOSIXSeconds nowT) :: Int
+  r <- runUseCase lock (Repo.createHandoff (GO.hashHandoffCode codeTxt) (Repo.HandoffSignUp sub em nm) (nowS + 120))
+  case r of
+    Right () -> sendError (ApiError st code msg (object ["retryCode" .= codeTxt, "info" .= details]))
+    Left e   -> sendError e
+
+finishGoogleSignUp :: Env -> Text -> Text -> Maybe Text -> Maybe Text -> Bool -> ActionM ()
+finishGoogleSignUp lock sub em nm mUname ageOk = do
+  ip <- clientIp lock
+  blocked <- liftIO (blockedFor lock registerIpRule ip)
+  let retry = signUpRetry lock sub em nm
+      uTxt = T.strip (fromMaybe "" mUname)
+  case blocked of
+    Just secs -> do
+      setHeader "Retry-After" (TL.pack (show secs))
+      retry (tooMany secs)
+    Nothing
+      | not ageOk -> retry (ApiError status400 "AGE_NOT_CONFIRMED" "You must confirm you are at least 16" (object []))
+      | T.null uTxt -> retry (ApiError status400 "VALIDATION_FAILED" "Choose a username" (object ["field" .= ("username" :: Text)]))
+      | otherwise -> case EU.validateUsername (Username uTxt) of
+          Left err -> retry (fromRegisterUser (RU.InvalidUser err))
+          Right _ -> do
+            liftIO (recordHit lock registerIpRule ip)
+            created <- runUseCase lock (createGoogleUser (Username uTxt) (Email em) "!google-sign-in-only" sub)
+            case created of
+              Left apiErr -> retry apiErr
+              Right (Left (GFRegister e)) -> retry (fromRegisterUser e)
+              Right (Left GFLinkFailed) -> retry (ApiError status409 "GOOGLE_ALREADY_LINKED" "This Google account is already linked" (object []))
+              Right (Right user) -> do
+                let fullToSave = either (const Nothing) id (maybe (Right Nothing) EU.validateFullName nm)
+                _ <- runUseCase lock (Repo.setFullName (userId user) fullToSave)
+                startSession lock user
+
 unauthenticated :: ApiError
 unauthenticated = ApiError status401 "UNAUTHENTICATED"
   "Missing, invalid or expired credentials" (object [])
@@ -2088,6 +2283,64 @@ main = do
                 Right _ -> do
                   ok <- redeemReset lock tok pw
                   if ok then status status204 else sendError badResetLink
+
+    get "/auth/providers" $ do
+      mcfg <- liftIO googleConfig
+      json (object ["google" .= isJust mcfg])
+
+    get "/auth/google/start" $ do
+      mcfg <- liftIO googleConfig
+      case mcfg of
+        Nothing -> sendError (ApiError status404 "NOT_FOUND" "Resource not found" (object []))
+        Just cfg -> do
+          st <- liftIO newToken
+          let secure = T.isPrefixOf "https://" (GO.gcRedirectUri cfg)
+          setHeader "Set-Cookie" (TL.fromStrict (GO.stateCookieHeader secure st))
+          googleRedirect (GO.authorizeUrl cfg st)
+
+    get "/auth/google/callback" $ do
+      mcfg <- liftIO googleConfig
+      case mcfg of
+        Nothing -> sendError (ApiError status404 "NOT_FOUND" "Resource not found" (object []))
+        Just cfg -> do
+          let secure = T.isPrefixOf "https://" (GO.gcRedirectUri cfg)
+          ip <- clientIp lock
+          blocked <- liftIO (blockedFor lock googleIpRule ip)
+          mState <- (queryParamMaybe "state" :: ActionM (Maybe Text))
+          mCode <- (queryParamMaybe "code" :: ActionM (Maybe Text))
+          mErr <- (queryParamMaybe "error" :: ActionM (Maybe Text))
+          mCookie <- header "Cookie"
+          let cookieSt = mCookie >>= GO.cookieValue GO.stateCookieName . TL.toStrict
+          liftIO (recordHit lock googleIpRule ip)
+          if isJust blocked
+            then googleFail secure "too_many"
+            else if not (GO.stateMatches mState cookieSt)
+              then googleFail secure "state"
+              else if isJust mErr
+                then googleFail secure "google_denied"
+                else case mCode of
+                  Nothing   -> googleFail secure "google_failed"
+                  Just code -> googleComplete lock cfg secure code
+
+    post "/auth/google/finish" $ do
+      raw <- body
+      case eitherDecode raw of
+        Left reason -> sendError (invalidBody reason)
+        Right (GoogleFinishReq code mUname ageOk) -> do
+          nowT <- liftIO getCurrentTime
+          let nowS = floor (utcTimeToPOSIXSeconds nowT) :: Int
+          consumed <- runUseCase lock (Repo.consumeHandoff (GO.hashHandoffCode code) nowS)
+          case consumed of
+            Left apiErr -> sendError apiErr
+            Right Nothing -> sendError (ApiError status400 "GOOGLE_CODE_INVALID" "This sign-in link has expired. Please try again." (object []))
+            Right (Just (Repo.HandoffLogin uid)) -> do
+              mu <- runUseCase lock (Repo.findUserById uid)
+              case mu of
+                Right (Just u)
+                  | accountStatus u == Active -> startSession lock u
+                  | otherwise -> sendError (fromLogin (LU.AccountNotActive (accountStatus u)))
+                _ -> sendError internalError
+            Right (Just (Repo.HandoffSignUp sub em nm)) -> finishGoogleSignUp lock sub em nm mUname ageOk
 
     post "/logout" $ do
       mTok <- bearerToken
