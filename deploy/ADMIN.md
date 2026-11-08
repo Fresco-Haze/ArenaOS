@@ -87,7 +87,7 @@ You need two values from step 1: the account id and its exact username. Below th
 
 2. Look first (read-only). The player row is found through the registration, not by name:
 
-    docker compose exec -T api sqlite3 -header /data/arenaos.db "SELECT pa.player_id, pl.name FROM registrations r JOIN participants pa ON pa.id = r.participant_id JOIN players pl ON pl.id = pa.player_id WHERE r.user_id = <id>; SELECT id, name FROM players WHERE lower(name) = lower('<username>'); SELECT id, name, organizer_name FROM tournaments WHERE owner_id = <id>; SELECT id, name FROM teams WHERE owner_user_id = <id>;"
+    docker compose exec -T api sqlite3 -header /data/arenaos.db "SELECT pa.player_id, pl.name FROM registrations r JOIN participants pa ON pa.id = r.participant_id JOIN players pl ON pl.id = pa.player_id WHERE r.user_id = <id>; SELECT id, name FROM players WHERE lower(name) = lower('<username>'); SELECT id, name, organizer_name FROM tournaments WHERE owner_id = <id>; SELECT id, name FROM teams WHERE owner_user_id = <id>; SELECT provider, user_id FROM user_identities WHERE user_id = <id>;"
 
 Stop and look by hand if the second query shows a player row that the first query did not. Teams they own, and the text of tournaments they ran (name, description, rules), are not changed by the steps below: read them and edit by hand if they hold personal details.
 
@@ -97,7 +97,7 @@ Stop and look by hand if the second query shows a player row that the first quer
 
 4. The change, as one transaction. The first two statements stop everything if the id and username do not match one account:
 
-    docker compose exec -T api sqlite3 -bail /data/arenaos.db "CREATE TEMP TABLE guard (ok INTEGER NOT NULL); INSERT INTO guard SELECT (SELECT 1 FROM users WHERE id = <id> AND username = '<username>'); BEGIN; UPDATE players SET name = 'Deleted player <id>' WHERE id IN (SELECT pa.player_id FROM registrations r JOIN participants pa ON pa.id = r.participant_id WHERE r.user_id = <id> AND pa.player_id IS NOT NULL); UPDATE tournaments SET organizer_name = 'Deleted player <id>' WHERE owner_id = <id>; UPDATE notifications SET detail = 'Deleted player <id>' WHERE kind = 'JoinRequested' AND lower(detail) = lower('<username>'); DELETE FROM notifications WHERE user_id = <id>; DELETE FROM user_avatars WHERE user_id = <id>; DELETE FROM password_resets WHERE user_id = <id>; DELETE FROM user_roles WHERE user_id = <id>; UPDATE users SET username = 'deleted-<id>', email = 'deleted-<id>@deleted.invalid', password_hash = 'deleted', full_name = NULL, bio = NULL, account_status = 'Deactivated' WHERE id = <id>; COMMIT;"
+    docker compose exec -T api sqlite3 -bail /data/arenaos.db "CREATE TEMP TABLE guard (ok INTEGER NOT NULL); INSERT INTO guard SELECT (SELECT 1 FROM users WHERE id = <id> AND username = '<username>'); BEGIN; UPDATE players SET name = 'Deleted player <id>' WHERE id IN (SELECT pa.player_id FROM registrations r JOIN participants pa ON pa.id = r.participant_id WHERE r.user_id = <id> AND pa.player_id IS NOT NULL); UPDATE tournaments SET organizer_name = 'Deleted player <id>' WHERE owner_id = <id>; UPDATE notifications SET detail = 'Deleted player <id>' WHERE kind = 'JoinRequested' AND lower(detail) = lower('<username>'); DELETE FROM notifications WHERE user_id = <id>; DELETE FROM user_avatars WHERE user_id = <id>; DELETE FROM password_resets WHERE user_id = <id>; DELETE FROM user_roles WHERE user_id = <id>; DELETE FROM user_identities WHERE user_id = <id>; DELETE FROM google_handoffs WHERE user_id = <id> OR expires_at <= CAST(strftime('%s','now') AS INTEGER) OR used_at IS NOT NULL; UPDATE users SET username = 'deleted-<id>', email = 'deleted-<id>@deleted.invalid', password_hash = 'deleted', full_name = NULL, bio = NULL, account_status = 'Deactivated' WHERE id = <id>; COMMIT;"
 
 If it prints an error mentioning guard.ok, the id and username do not match one account and nothing was changed. Silence means it worked.
 
@@ -108,14 +108,15 @@ If it prints an error mentioning guard.ok, the id and username do not match one 
 
 6. Check:
 
-    docker compose exec -T api sqlite3 -header /data/arenaos.db "SELECT id, username, account_status FROM users WHERE id = <id>; SELECT id, name FROM players; SELECT user_id, kind, detail FROM notifications;"
+    docker compose exec -T api sqlite3 -header /data/arenaos.db "SELECT id, username, account_status FROM users WHERE id = <id>; SELECT id, name FROM players; SELECT user_id, kind, detail FROM notifications; SELECT COUNT(*) AS identities_left FROM user_identities WHERE user_id = <id>;"
 
-The account should read deleted-<id> and Deactivated, the player row should read Deleted player <id>, and no notification should still show the old username. In the browser, /players should show no trace of the old name, and logging in as the old username should say wrong email, username or password.
+The account should read deleted-<id> and Deactivated, the player row should read Deleted player <id>, and no notification should still show the old username, and identities_left should read 0. In the browser, /players should show no trace of the old name, and logging in as the old username should say wrong email, username or password.
 
 Limits:
 
 - The old data stays in backups until they rotate: 14 days on the server, and the offsite Backblaze copy until its own retention removes it.
 - If the person was renamed after sending a join request, the old name may remain in that notification. Step 6 shows it.
+- A Google sign-up that was started and never finished leaves a short-lived row holding the Google ID, email and name. The step 4 command removes expired and used rows, and so does every new Google sign-in.
 - Tell the person it is done from your own mailbox, and never paste their email into chats or tickets.
 
 ## Audit log

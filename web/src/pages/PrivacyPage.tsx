@@ -4,7 +4,7 @@ export default function PrivacyPage() {
   return (
     <>
       <PageHeader title="Privacy Policy" />
-      <p className="muted">Last updated: 3 November 2026</p>
+      <p className="muted">Last updated: 8 November 2026</p>
 
       <section className="help-section">
         <h2>Who we are</h2>
@@ -18,10 +18,17 @@ export default function PrivacyPage() {
         <h2>What we collect</h2>
         <ul>
           <li>
-            Account details: your username, your email address, and your password. The password is
+            Account details: your username, your email address, and your password (not if you sign in only with Google). The password is
             stored only as a one-way scramble (a hash), so nobody, including us, can read it.
           </li>
           <li>Optional profile details: your full name, a short bio and a profile picture.</li>
+          <li>
+            If you use Continue with Google: the ID number Google gives your account, your Google email
+            address and your Google name. We ask Google only for your basic profile and email address,
+            never for your password, and we keep only those three things. We use them to sign you in and
+            to create your account. Your Google name is saved as your full name, which can appear on
+            public pages, and you can change it in Settings.
+          </li>
           <li>
             Tournament activity: tournaments you create or join, teams, results, scores, rankings and
             your notifications.
@@ -61,7 +68,10 @@ export default function PrivacyPage() {
       <section className="help-section">
         <h2>Cookies and browser storage</h2>
         <p>
-          We do not use cookies. Your browser stores a sign-in token and a small copy of your basic
+          We do not use advertising or tracking cookies. If you use Continue with Google, we set one
+          short-lived cookie (up to 10 minutes) that protects that sign-in from forgery, and your
+          browser briefly notes the page you were on. Your browser also stores a sign-in token and a
+          small copy of your basic
           profile so you stay signed in. Signing out removes the token.
         </p>
       </section>
@@ -77,6 +87,8 @@ export default function PrivacyPage() {
         <p>
           They handle data only to provide those services. We do not share your personal data with
           anyone else, unless the law requires us to.
+          If you choose Continue with Google, Google is involved in that sign-in, and Google&rsquo;s own
+          privacy policy covers your Google account.
         </p>
       </section>
 
@@ -95,7 +107,7 @@ export default function PrivacyPage() {
           You can change your name, bio, picture and password in Settings. You can also ask us for a
           copy of your data, ask us to correct it, or ask us to delete your account, by writing to{' '}
           <a href="mailto:privacy@sweatlobby.com">privacy@sweatlobby.com</a>. We will answer within 30
-          days. When we delete an account we remove or anonymise your personal details. Tournament
+          days. When we delete an account we remove or anonymise your personal details, including the link to your Google account. Tournament
           results may remain, without your identity. You can also complain to Kenya&rsquo;s Office of
           the Data Protection Commissioner.
         </p>
@@ -119,7 +131,7 @@ export default function PrivacyPage() {
         <h2>Changes</h2>
         <p>
           When we change this policy we update the date at the top, and for big changes we put a notice
-          on the site. If we add sign-in with Google, we will update this page before it goes live.
+          on the site.
         </p>
       </section>
     </>
