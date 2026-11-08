@@ -4,6 +4,7 @@ import type { Tournament } from '../model'
 export const PRIZE_MAX = 1000000000
 export const DESCRIPTION_MAX = 500
 export const RULES_MAX = 1000
+export const STREAM_MAX = 200
 
 export const PLATFORMS = [
   { value: 'PC', label: 'PC' },
@@ -22,6 +23,7 @@ export type DetailsValues = {
   platform: string
   description: string
   rules: string
+  streamUrl: string
 }
 export type DetailsPayload = {
   game: Game | null
@@ -32,10 +34,11 @@ export type DetailsPayload = {
   platform: string | null
   description: string | null
   rules: string | null
+  streamUrl: string | null
 }
 
 export const emptyDetails: DetailsValues = {
-  game: '', start: '', deadline: '', prize: '', entryFee: '', platform: '', description: '', rules: '',
+  game: '', start: '', deadline: '', prize: '', entryFee: '', platform: '', description: '', rules: '', streamUrl: '',
 }
 
 const pad = (n: number) => ('0' + n).slice(-2)
@@ -65,6 +68,19 @@ export function parseFee(raw: string): number | null | undefined {
 
 export function feeError(raw: string): string | null {
   return parseFee(raw) === undefined ? 'Enter a whole number of KSh, up to 1,000,000,000.' : null
+}
+
+// '' -> null (no link). Otherwise the same rule as the server: https://, up to 200 characters, no spaces or control characters.
+export function streamError(raw: string): string | null {
+  const s = raw.trim()
+  if (s === '') return null
+  const chars = [...s]
+  const ok =
+    s.startsWith('https://') &&
+    chars.length > 8 &&
+    chars.length <= STREAM_MAX &&
+    chars.every((c) => c.charCodeAt(0) > 32 && c.charCodeAt(0) !== 127)
+  return ok ? null : 'Enter a full https:// address, up to 200 characters, with no spaces.'
 }
 
 // Only checked when both the start and the deadline are filled in.
@@ -100,6 +116,7 @@ export function detailsFromTournament(t: Tournament): DetailsValues {
     platform: t.platform ?? '',
     description: t.description ?? '',
     rules: t.rules ?? '',
+    streamUrl: t.streamUrl ?? '',
   }
 }
 
@@ -115,6 +132,7 @@ export function toPayload(v: DetailsValues, original?: Tournament): DetailsPaylo
   }
   const description = v.description.trim()
   const rules = v.rules.trim()
+  const streamUrl = v.streamUrl.trim()
   return {
     game: game === '' ? null : game,
     startTime,
@@ -124,6 +142,7 @@ export function toPayload(v: DetailsValues, original?: Tournament): DetailsPaylo
     platform: v.platform === '' ? null : v.platform,
     description: description === '' ? null : description,
     rules: rules === '' ? null : rules,
+    streamUrl: streamUrl === '' ? null : streamUrl,
   }
 }
 
@@ -137,6 +156,7 @@ export function detailsChanged(v: DetailsValues, t: Tournament): boolean {
     p.entryFee !== (t.entryFee ?? null) ||
     p.platform !== (t.platform ?? null) ||
     p.description !== (t.description ?? null) ||
-    p.rules !== (t.rules ?? null)
+    p.rules !== (t.rules ?? null) ||
+    p.streamUrl !== (t.streamUrl ?? null)
   )
 }

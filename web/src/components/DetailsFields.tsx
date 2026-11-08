@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import GameField from './GameField'
-import { DESCRIPTION_MAX, PLATFORMS, RULES_MAX, deadlineError, feeError, prizeError } from '../lib/details'
+import { DESCRIPTION_MAX, PLATFORMS, RULES_MAX, STREAM_MAX, deadlineError, feeError, prizeError, streamError } from '../lib/details'
 import type { DetailsValues } from '../lib/details'
 
 // start is "YYYY-MM-DDTHH:mm" in the device's time zone ("" when unset).
@@ -37,6 +37,7 @@ export default function DetailsFields({
   }
   const prizeProblem = values.prize.trim() === '' ? null : prizeError(values.prize)
   const feeProblem = values.entryFee.trim() === '' ? null : feeError(values.entryFee)
+  const streamProblem = streamError(values.streamUrl)
 
   function setStart(nextDate: string, nextTime: string) {
     if (!nextDate && !nextTime) {
@@ -104,6 +105,19 @@ export default function DetailsFields({
             {feeProblem && <span role="alert" className="form-error">{feeProblem}</span>}
           </label>
           <p className="muted">Shown to players only. SweatLobby does not collect payments, so you collect the fee yourself.</p>
+          <label>
+            Stream link (optional)
+            <input
+              type="text"
+              inputMode="url"
+              autoComplete="off"
+              value={values.streamUrl}
+              placeholder="https://www.twitch.tv/yourchannel"
+              onChange={(e) => onChange({ ...values, streamUrl: e.target.value })}
+            />
+            {streamProblem && <span role="alert" className="form-error">{streamProblem}</span>}
+            <span className="muted">{values.streamUrl.trim().length}/{STREAM_MAX}. Twitch and YouTube links play on the tournament page; any other https link shows as a link.</span>
+          </label>
         </>
       )}
       {show('game') && (

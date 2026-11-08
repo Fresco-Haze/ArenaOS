@@ -38,6 +38,7 @@ export const Tournament = z.object({
   entryFee: z.number().nullish(),
   platform: z.string().nullish(),
   rules: z.string().nullish(),
+  streamUrl: z.string().nullish(),
   prize: z.number().nullish(),
   description: z.string().nullish(),
   registeredCount: z.number().nullish(),
