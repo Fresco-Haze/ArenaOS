@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { api, apiVoid, auth } from '../api'
 import { LoginResponse } from '../model'
@@ -38,17 +38,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     })
   }, [])
 
-  async function login(username: string, password: string, remember = true) {
-    const res = await api('/login', LoginResponse, {
-      method: 'POST',
-      body: JSON.stringify({ identifier: username, password }),
-    })
+  // Shared by password login and Google sign-in: store the session, then show the user.
+  const completeLogin = useCallback((res: LoginResponse, remember = true) => {
     auth.set(res.token, remember)
     clearStoredUser()
     if (remember) localStorage.setItem(USER_KEY, JSON.stringify(res.user))
     else sessionStorage.setItem(USER_KEY, JSON.stringify(res.user))
     setUser(res.user)
     setExpired(false)
+  }, [])
+
+  async function login(username: string, password: string, remember = true) {
+    const res = await api('/login', LoginResponse, {
+      method: 'POST',
+      body: JSON.stringify({ identifier: username, password }),
+    })
+    completeLogin(res, remember)
   }
 
   function updateFullName(name: SessionUser['fullName']) {
@@ -82,7 +87,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ user, expired, dismissExpired: () => setExpired(false), login, logout, updateFullName, setHasAvatar, avatarVersion }}
+      value={{ user, expired, dismissExpired: () => setExpired(false), login, completeLogin, logout, updateFullName, setHasAvatar, avatarVersion }}
     >
       {children}
     </AuthContext.Provider>

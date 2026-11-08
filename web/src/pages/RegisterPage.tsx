@@ -8,6 +8,7 @@ import { safeNext } from '../lib/safeNext'
 import { retrySeconds, useCooldown } from '../lib/rateLimit'
 import AuthBrand from '../components/AuthBrand'
 import AuthField from '../components/AuthField'
+import GoogleButton from '../components/GoogleButton'
 
 type Field = 'fullName' | 'username' | 'email' | 'password'
 
@@ -136,6 +137,7 @@ export default function RegisterPage() {
         <Link to="/terms">Terms</Link> and <Link to="/privacy">Privacy Policy</Link>.
       </p>
       </form>
+      <GoogleButton next={next} />
       <p className="auth-switch">
         Already have an account?{' '}
         <Link to={`/login?next=${encodeURIComponent(next)}`}>Sign In</Link>
