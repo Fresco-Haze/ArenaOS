@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, ApiError } from '../api'
-import { BracketView, TournamentView } from '../model'
+import { BracketView, CheckInView, TournamentView } from '../model'
 
 const POLL_MS = 20_000
 
 type Data = {
   view: TournamentView
   bracket: BracketView | null
+  checkIn: CheckInView | null
   lastUpdated: number
 }
 
@@ -17,7 +18,7 @@ export type TournamentLoad =
   | { kind: 'ready'; data: Data; refreshFailed: boolean; refreshing: boolean }
 
 async function fetchAll(id: string): Promise<Data> {
-  const [view, bracket] = await Promise.all([
+  const [view, bracket, checkIn] = await Promise.all([
     api(`/tournaments/${id}`, TournamentView, { retryAnonymously: true }),
     api(`/tournaments/${id}/bracket`, BracketView, { retryAnonymously: true }).catch(
       (e: unknown) => {
@@ -26,8 +27,10 @@ async function fetchAll(id: string): Promise<Data> {
         throw e
       },
     ),
+    // Check-in is optional: if this one request fails the page still loads without it.
+    api(`/tournaments/${id}/check-in`, CheckInView, { retryAnonymously: true }).catch(() => null),
   ])
-  return { view, bracket, lastUpdated: Date.now() }
+  return { view, bracket, checkIn, lastUpdated: Date.now() }
 }
 
 export function useTournament(id: string) {

@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Link } from 'react-router'
+import { ApiError } from '../api'
 
 import { statusClass } from '../badges'
 import { useAuth } from '../auth/context'
@@ -24,7 +25,7 @@ import JoinBar from '../components/JoinBar'
 import BannerImg from '../components/BannerImg'
 import BannerEditor from '../components/BannerEditor'
 import ConfirmDialog from '../components/ConfirmDialog'
-import { removeParticipant } from '../lib/tournamentActions'
+import { checkInSelf, removeParticipant, setCheckedIn } from '../lib/tournamentActions'
 
 type TabId = 'overview' | 'bracket' | 'players'
 
@@ -61,6 +62,8 @@ export default function TournamentPage({ id }: { id: string }) {
   const { state, reload } = useTournament(id)
   const [tab, setTab] = useState<TabId>('overview')
   const [removing, setRemoving] = useState<Participant | null>(null)
+  const [ckBusy, setCkBusy] = useState(false)
+  const [ckError, setCkError] = useState<string | null>(null)
 
   if (state.kind === 'loading') {
     return <LoadingBlock label="Loading tournament" rows={4} />
@@ -97,20 +100,38 @@ export default function TournamentPage({ id }: { id: string }) {
     )
   }
 
-  const { view, bracket, lastUpdated } = state.data
+  const { view, bracket, checkIn, lastUpdated } = state.data
   const t = view.tournament
   const squads = t.participantMode === 'SquadOnly'
   const unit = squads ? 'teams' : 'players'
   const mode = squads ? 'Squad' : '1v1'
   const gameName = t.game && t.game !== 'Other' ? gameLabel[t.game] : null
   const when = t.startTime ? formatCardDate(t.startTime) : ''
-  const canRemove = view.viewerIsOwner && t.state === 'RegistrationOpen'
+  const canRemove = view.viewerIsOwner && (t.state === 'RegistrationOpen' || t.state === 'RegistrationClosed')
   const platformName = PLATFORMS.find((p) => p.value === t.platform)?.label ?? null
   const feeText = t.entryFee == null ? null : t.entryFee === 0 ? 'Free' : formatKes(t.entryFee)
   const rulesList = (t.rules ?? '').split('\n').map((r) => r.trim()).filter((r) => r.length > 0)
   // Player profiles are built from public tournaments past Draft, so only link there.
   const profileLinks = t.visibility === 'Public' && t.state !== 'Draft' && t.state !== 'Cancelled'
   const stream = t.streamUrl ? parseStream(t.streamUrl, window.location.hostname) : null
+  // Check-in: only while registration is open or closed.
+  const checkInPhase = t.state === 'RegistrationOpen' || t.state === 'RegistrationClosed'
+  const ckKey = (p: Participant) => p.type + ':' + participantName(p).toLowerCase()
+  const checkedNames = new Set((checkIn?.checkedIn ?? []).map(ckKey))
+  const checkInInfo = checkIn !== null && (checkIn.open || checkIn.checkedIn.length > 0) ? checkIn : null
+
+  async function runCheckIn(action: () => Promise<void>) {
+    setCkBusy(true)
+    setCkError(null)
+    try {
+      await action()
+      await reload()
+    } catch (e) {
+      setCkError(e instanceof ApiError ? e.message : 'Could not reach the server')
+    } finally {
+      setCkBusy(false)
+    }
+  }
 
   return (
     <div className="tp">
@@ -153,6 +174,16 @@ export default function TournamentPage({ id }: { id: string }) {
         <div className="tp-info-side">
           <JoinBar tournament={t} signedIn={!!user} registered={view.viewerIsRegistered} requestStatus={view.viewerRequestStatus} onDone={reload} />
           <p className="muted tp-count">{view.participants.length}/{t.maxParticipants} registered</p>
+          {view.viewerIsRegistered && checkIn && checkInPhase && (checkIn.open || checkIn.viewerCheckedIn) && (
+            checkIn.viewerCheckedIn ? (
+              <p role="status" className="tp-checkin">You&rsquo;re checked in.</p>
+            ) : (
+              <button className="btn-primary" onClick={() => void runCheckIn(() => checkInSelf(t.tournamentId))} disabled={ckBusy}>
+                {ckBusy ? 'Checking in' : 'Check in'}
+              </button>
+            )
+          )}
+          {ckError && <p role="alert" className="form-error">{ckError}</p>}
         </div>
         </div>
       </section>
@@ -246,6 +277,9 @@ export default function TournamentPage({ id }: { id: string }) {
         <div role="tabpanel" id="panel-players" aria-labelledby="tab-players">
           <h2 className="tp-section-title">
             Registered {squads ? 'Teams' : 'Players'} ({view.participants.length}/{t.maxParticipants})
+            {checkInInfo && (
+              <span className="muted"> &middot; {checkInInfo.checkedIn.length} of {view.participants.length} checked in</span>
+            )}
           </h2>
           {view.participants.length === 0 ? (
             <EmptyState title={squads ? 'No teams registered yet' : 'No players registered yet'}>
@@ -269,6 +303,16 @@ export default function TournamentPage({ id }: { id: string }) {
                       <span className="prow-members">{p.team.members.join(', ')}</span>
                     )}
                   </span>
+                  {checkedNames.has(ckKey(p)) && <span className="badge badge-success prow-checkin">Checked in</span>}
+                  {view.viewerIsOwner && checkInPhase && checkIn && (
+                    <button
+                      className="prow-checkin-btn"
+                      onClick={() => void runCheckIn(() => setCheckedIn(t.tournamentId, p, !checkedNames.has(ckKey(p))))}
+                      disabled={ckBusy}
+                    >
+                      {checkedNames.has(ckKey(p)) ? 'Undo check-in' : 'Check in'}
+                    </button>
+                  )}
                   {canRemove && (
                     <button className="btn-danger prow-remove" onClick={() => setRemoving(p)}>
                       Remove
@@ -298,6 +342,8 @@ export default function TournamentPage({ id }: { id: string }) {
           Remove {removing ? participantName(removing) : ''} from this tournament?{' '}
           {t.requireApproval && removing?.type === 'Individual'
             ? 'If they joined themselves, they will not be able to request to join again unless you approve them.'
+            : t.state === 'RegistrationClosed'
+            ? 'Registration is closed, so they cannot register again.'
             : 'They can register again while registration is open.'}
         </p>
       </ConfirmDialog>
@@ -307,6 +353,7 @@ export default function TournamentPage({ id }: { id: string }) {
           tournament={t}
           bracket={bracket}
           participantCount={view.participants.length}
+          checkIn={checkIn}
           registered={view.participants.map(participantName)}
           refreshKey={String(lastUpdated)}
           reload={reload}

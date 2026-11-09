@@ -222,6 +222,29 @@ export function removeParticipant(id: number, p: Participant) {
   })
 }
 
+export function startCheckIn(id: number) {
+  return apiVoid(`/tournaments/${id}/check-in/open`, { method: 'POST' })
+}
+
+export function stopCheckIn(id: number) {
+  return apiVoid(`/tournaments/${id}/check-in/close`, { method: 'POST' })
+}
+
+export function checkInSelf(id: number) {
+  return apiVoid(`/tournaments/${id}/check-in`, { method: 'POST' })
+}
+
+// Organizer: check one participant in or out.
+export function setCheckedIn(id: number, p: Participant, checkedIn: boolean) {
+  const who = p.type === 'Squad'
+    ? { type: 'Squad', teamName: p.team.name }
+    : { type: 'Individual', player: p.player }
+  return apiVoid(`/tournaments/${id}/check-in/participant`, {
+    method: 'POST',
+    body: JSON.stringify({ ...who, checkedIn }),
+  })
+}
+
 export function cancelJoinRequest(id: number) {
   return apiVoid(`/tournaments/${id}/cancel-request`, { method: 'POST' })
 }

@@ -129,6 +129,13 @@ export const TournamentView = z.object({
 })
 export type TournamentView = z.infer<typeof TournamentView>
 
+export const CheckInView = z.object({
+  open: z.boolean(),
+  checkedIn: z.array(Participant),
+  viewerCheckedIn: z.boolean().default(false),
+})
+export type CheckInView = z.infer<typeof CheckInView>
+
 export const JoinRequestStatus = z.enum(['Pending', 'Approved', 'Declined'])
 export type JoinRequestStatus = z.infer<typeof JoinRequestStatus>
 export const JoinRequestRow = z.object({

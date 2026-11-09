@@ -19,9 +19,10 @@ import {
   pauseTournament, resumeTournament, reopenTournament, updateDetails, updateFormat,
   setRequireApproval, listJoinRequests, approveJoinRequest, declineJoinRequest,
   startLobby, completeLobby, recordLobbyRound, correctLobbyRound,
+  startCheckIn, stopCheckIn,
 } from '../lib/tournamentActions'
 import { formatLabel, stateLabel } from '../model'
-import type { BracketView, JoinRequestRow, Team, Tournament, TournamentFormat } from '../model'
+import type { BracketView, CheckInView, JoinRequestRow, Team, Tournament, TournamentFormat } from '../model'
 
 function ActionButton({ label, busyLabel, onRun, primary }: { label: string; busyLabel?: string; primary?: boolean; onRun: () => Promise<void> }) {
   const [busy, setBusy] = useState(false)
@@ -290,6 +291,30 @@ function CloseRegistrationAction({ tournamentId, participantCount, unit, onDone 
         <p>Close registration with {participantCount} {unit}? This can't be reopened.</p>
       </ConfirmDialog>
     </>
+  )
+}
+
+function CheckInControls({ tournament, checkIn, participantCount, onDone }:
+  { tournament: Tournament; checkIn: CheckInView | null; participantCount: number; onDone: () => Promise<void> }) {
+  const id = tournament.tournamentId
+  if (checkIn === null) return null
+  return (
+    <div className="checkin-box">
+      <h3>Check-in</h3>
+      <p>
+        {checkIn.open ? 'Check-in is open.' : 'Check-in is closed.'} {checkIn.checkedIn.length} of {participantCount} checked in.
+      </p>
+      <div className="action-row">
+        {checkIn.open ? (
+          <ActionButton label="Close check-in" onRun={async () => { await stopCheckIn(id); await onDone() }} />
+        ) : (
+          <ActionButton primary label="Open check-in" onRun={async () => { await startCheckIn(id); await onDone() }} />
+        )}
+      </div>
+      <p className="muted">
+        Players check themselves in on this page. You can also check people in on the Players tab, and remove no-shows there.
+      </p>
+    </div>
   )
 }
 
@@ -582,6 +607,7 @@ type Props = {
   participantCount: number
   registered: string[]
   refreshKey: string
+  checkIn: CheckInView | null
   reload: () => Promise<void>
 }
 
@@ -757,7 +783,7 @@ function LobbyControls({ tournament, onDone }: { tournament: Tournament; onDone:
   )
 }
 
-export default function OrganizerPanel({ tournament, bracket, participantCount, registered, refreshKey, reload }: Props) {
+export default function OrganizerPanel({ tournament, bracket, participantCount, registered, refreshKey, checkIn, reload }: Props) {
   const id = tournament.tournamentId
   const navigate = useNavigate()
 
@@ -814,6 +840,10 @@ export default function OrganizerPanel({ tournament, bracket, participantCount, 
             <CloseRegistrationAction tournamentId={id} participantCount={participantCount} unit={tournament.participantMode === 'SquadOnly' ? 'teams' : 'players'} onDone={reload} />
           </div>
         </>
+      )}
+
+      {['RegistrationOpen', 'RegistrationClosed'].includes(tournament.state) && (
+        <CheckInControls tournament={tournament} checkIn={checkIn} participantCount={participantCount} onDone={reload} />
       )}
 
       {tournament.state === 'RegistrationClosed' && tournament.kind !== 'Lobby' && (
