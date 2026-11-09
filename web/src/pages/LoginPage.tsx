@@ -7,6 +7,8 @@ import { safeNext } from '../lib/safeNext'
 import { retrySeconds, useCooldown } from '../lib/rateLimit'
 import AuthBrand from '../components/AuthBrand'
 import AuthField from '../components/AuthField'
+import GoogleButton from '../components/GoogleButton'
+import { googleErrorMessage } from '../lib/googleSignIn'
 
 export default function LoginPage() {
   const { user, login } = useAuth()
@@ -14,6 +16,7 @@ export default function LoginPage() {
   const location = useLocation()
   const next = safeNext(params.get('next'))
   const notice = (location.state as { notice?: string } | null)?.notice ?? null
+  const googleError = googleErrorMessage(params.get('error'))
 
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -45,6 +48,7 @@ export default function LoginPage() {
       <h1 className="auth-title">Welcome Back</h1>
       <p className="muted auth-sub">Sign in to continue to your account</p>
       {notice && <p role="status" className="form-notice">{notice}</p>}
+      {googleError && <p role="alert" className="form-error">{googleError}</p>}
       <form onSubmit={onSubmit} className="auth-form">
         <AuthField
           label="Email or username"
@@ -81,6 +85,7 @@ export default function LoginPage() {
           {busy ? 'Signing in' : 'Sign In'}
         </button>
       </form>
+      <GoogleButton next={next} />
       <p className="auth-switch">
         Don't have an account?{' '}
         <Link to={`/register?next=${encodeURIComponent(next)}`}>Register</Link>

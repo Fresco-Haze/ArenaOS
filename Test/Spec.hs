@@ -68,6 +68,10 @@ import Application.UseCases.StartTournament (startTournament, StartTournamentErr
 import Application.UseCases.CancelTournament (cancelTournament, CancelTournamentError(..))
 import Application.Internal.Authorization (AuthorizationError(..))
 import Application.Internal.LifecycleTransition (LifecycleError(..))
+import Engine.GoogleSignIn
+import qualified Engine.GoogleOAuth as GOA
+import qualified Data.Text as GoT
+import qualified Data.ByteString as GoB
 import Application.UseCases.LogoutUser (logoutUser)
 import Shell.Auth.Session (saveSession)
 import Data.Either (isLeft)
@@ -115,6 +119,8 @@ import Shell.Persistence.SQLite.JoinRequestRepository ()
 import Shell.Persistence.SQLite.NotificationRepository ()
 import Shell.Persistence.SQLite.AvatarRepository ()
 import Shell.Persistence.SQLite.LobbyRepository ()
+import Shell.Persistence.SQLite.IdentityRepository ()
+import qualified Database.SQLite.Simple as SQ
 import qualified Application.UseCases.Lobby as LobbyUC
 import qualified Domain.Tournament as LbDom
 import qualified Application.Internal.LifecycleTransition as LbLife
@@ -317,6 +323,10 @@ spec = before_ resetTestDb $ do
   prizePoolSpec
   descriptionSpec
   formatChangeSpec
+  googleSignInSpec
+  identitySpec
+  googleOAuthSpec
+  identityPurgeSpec
   describe "Tournament Lifecycle (4-participant golden scenario)" $
     it "runs the full pipeline from creation to completion" $ do
       result <- runSQLiteM testDbPath $ do
@@ -10400,3 +10410,171 @@ gamesSpec = describe "Games (v0.13)" $ do
     fmap gameName (mkGame "   ") `shouldBe` Left "game name is required"
     fmap gameName (mkGame (replicate 41 'a')) `shouldBe` Left "game name must be 40 characters or fewer"
     fmap gameName (mkGame "  Tom   Clancy's  ") `shouldBe` Right "Tom Clancy's"
+
+googleSignInSpec :: Spec
+googleSignInSpec = describe "Google sign-in decisions" $ do
+  it "linked and active: logs in as that user" $
+    decideGoogleSignIn (gsIdent True) (Just (gsUser 7 Active)) Nothing `shouldBe` LogInAs (UserId 7)
+  it "linked and suspended: refused, naming the status" $
+    decideGoogleSignIn (gsIdent True) (Just (gsUser 7 Suspended)) Nothing `shouldBe` Refuse (AccountNotActive Suspended)
+  it "linked and deactivated: refused, naming the status" $
+    decideGoogleSignIn (gsIdent True) (Just (gsUser 7 Deactivated)) Nothing `shouldBe` Refuse (AccountNotActive Deactivated)
+  it "linked with an unverified email: still logs in" $
+    decideGoogleSignIn (gsIdent False) (Just (gsUser 7 Active)) Nothing `shouldBe` LogInAs (UserId 7)
+  it "not linked, unverified email: refused" $
+    decideGoogleSignIn (gsIdent False) Nothing Nothing `shouldBe` Refuse EmailNotVerified
+  it "not linked, email owned by an active account: refused, no linking" $
+    decideGoogleSignIn (gsIdent True) Nothing (Just (gsUser 8 Active)) `shouldBe` Refuse EmailAlreadyUsed
+  it "not linked, email owned by a deactivated account: refused" $
+    decideGoogleSignIn (gsIdent True) Nothing (Just (gsUser 8 Deactivated)) `shouldBe` Refuse EmailAlreadyUsed
+  it "not linked, verified, no owner: needs a username" $
+    decideGoogleSignIn (gsIdent True) Nothing Nothing `shouldBe` NeedsUsername
+gsIdent :: Bool -> GoogleIdentity
+gsIdent verified = GoogleIdentity { giSubject = "gs-subject-1", giEmail = "person@example.com", giEmailVerified = verified, giName = Just "Pat Example" }
+gsUser :: Int -> AccountStatus -> User
+gsUser n st = User { userId = UserId n, username = Username "gs_user", email = Email "person@example.com", passwordHash = PasswordHash "x", accountStatus = st }
+
+idnExpect :: (Show a, Eq a) => a -> SQLiteM a -> IO ()
+idnExpect expected action = do
+  result <- runSQLiteM testDbPath (setupSchema >> action)
+  case result of
+    Right v -> v `shouldBe` expected
+    Left e  -> expectationFailure (show e)
+identitySpec :: Spec
+identitySpec = describe "Identity storage (Google sign-in)" $ do
+  it "a linked Google id is found, an unknown one is not" $ idnExpect (True, True, Nothing) $ do
+    u <- createTestUser "idn-u1"
+    ok <- Repo.linkIdentity u "google" "sub-1"
+    found <- Repo.findIdentityUser "google" "sub-1"
+    missing <- Repo.findIdentityUser "google" "sub-2"
+    pure (ok, found == Just u, missing)
+  it "the same Google id cannot be linked to a second user" $ idnExpect (True, False, True) $ do
+    u1 <- createTestUser "idn-u1"
+    u2 <- createTestUser "idn-u2"
+    a <- Repo.linkIdentity u1 "google" "sub-1"
+    b <- Repo.linkIdentity u2 "google" "sub-1"
+    owner <- Repo.findIdentityUser "google" "sub-1"
+    pure (a, b, owner == Just u1)
+  it "the same subject under another provider is allowed" $ idnExpect (True, True) $ do
+    u <- createTestUser "idn-u1"
+    a <- Repo.linkIdentity u "google" "sub-1"
+    b <- Repo.linkIdentity u "other" "sub-1"
+    pure (a, b)
+  it "a user cannot link a second Google id" $ idnExpect (True, False) $ do
+    u <- createTestUser "idn-u1"
+    a <- Repo.linkIdentity u "google" "sub-1"
+    b <- Repo.linkIdentity u "google" "sub-2"
+    pure (a, b)
+  it "a login handoff is consumed once, the second try gives nothing" $ idnExpect (True, Nothing) $ do
+    u <- createTestUser "idn-u1"
+    Repo.createHandoff "h1" (Repo.HandoffLogin u) 1000
+    a <- Repo.consumeHandoff "h1" 500
+    b <- Repo.consumeHandoff "h1" 501
+    pure (a == Just (Repo.HandoffLogin u), b)
+  it "an expired handoff gives nothing, also exactly at its expiry second" $ idnExpect (Nothing, Nothing) $ do
+    u <- createTestUser "idn-u1"
+    Repo.createHandoff "h2" (Repo.HandoffLogin u) 1000
+    a <- Repo.consumeHandoff "h2" 1000
+    b <- Repo.consumeHandoff "h2" 1001
+    pure (a, b)
+  it "a wrong code gives nothing and does not use up the real handoff" $ idnExpect (Nothing, True) $ do
+    u <- createTestUser "idn-u1"
+    Repo.createHandoff "h3" (Repo.HandoffLogin u) 1000
+    a <- Repo.consumeHandoff "wrong" 500
+    b <- Repo.consumeHandoff "h3" 500
+    pure (a, b == Just (Repo.HandoffLogin u))
+  it "a sign-up handoff carries subject, email and optional name" $ idnExpect (Just (Repo.HandoffSignUp "sub-9" "p@example.com" (Just "Pat")), Just (Repo.HandoffSignUp "sub-10" "q@example.com" Nothing)) $ do
+    Repo.createHandoff "h4" (Repo.HandoffSignUp "sub-9" "p@example.com" (Just "Pat")) 1000
+    Repo.createHandoff "h5" (Repo.HandoffSignUp "sub-10" "q@example.com" Nothing) 1000
+    a <- Repo.consumeHandoff "h4" 10
+    b <- Repo.consumeHandoff "h5" 10
+    pure (a, b)
+
+gofCfg :: GOA.GoogleConfig
+gofCfg = GOA.GoogleConfig { GOA.gcClientId = "cid.apps", GOA.gcClientSecret = "s3cr&t", GOA.gcRedirectUri = "http://localhost:5173/api/auth/google/callback" }
+gofHas :: GoT.Text -> [GoT.Text] -> Bool
+gofHas whole parts = all (\p -> GoT.isInfixOf p whole) parts
+gofIsLeft :: Either a b -> Bool
+gofIsLeft = either (const True) (const False)
+gofVerified :: GoB.ByteString -> Either GoT.Text Bool
+gofVerified = fmap giEmailVerified . GOA.parseUserInfo
+googleOAuthSpec :: Spec
+googleOAuthSpec = describe "Google OAuth helpers (pure)" $ do
+  it "a config is made when all three values are present" $
+    fmap GOA.gcClientId (GOA.googleConfigFrom " cid " "sec" "https://x.test/cb") `shouldBe` Just "cid"
+  it "a blank value in the config switches Google off" $
+    map (fmap GOA.gcClientId) [GOA.googleConfigFrom "" "sec" "u", GOA.googleConfigFrom "cid" "  " "u", GOA.googleConfigFrom "cid" "sec" ""] `shouldBe` [Nothing, Nothing, Nothing]
+  it "the authorize URL carries the expected parameters" $ do
+    let url = GOA.authorizeUrl gofCfg "state123"
+    GoT.isPrefixOf "https://accounts.google.com/o/oauth2/v2/auth?" url `shouldBe` True
+    gofHas url [ "response_type=code", "client_id=cid.apps", "state=state123"
+               , "redirect_uri=http%3A%2F%2Flocalhost%3A5173%2Fapi%2Fauth%2Fgoogle%2Fcallback"
+               , "scope=openid%20email%20profile" ] `shouldBe` True
+  it "the authorize URL encodes special characters and never contains the secret" $ do
+    let url = GOA.authorizeUrl gofCfg "a b&c=d"
+    GoT.isInfixOf "state=a%20b%26c%3Dd" url `shouldBe` True
+    GoT.isInfixOf "s3cr" url `shouldBe` False
+  it "the token request body is a form with the encoded code and secret" $ do
+    let body = GOA.tokenRequestBody gofCfg "4/0AbC"
+    map (\p -> GoB.isInfixOf p body) ["grant_type=authorization_code", "code=4%2F0AbC", "client_secret=s3cr%26t", "client_id=cid.apps"] `shouldBe` [True, True, True, True]
+  it "an access token is read from the token response" $
+    GOA.parseTokenResponse "{\"access_token\":\"ya29.abc\",\"expires_in\":3599,\"token_type\":\"Bearer\"}" `shouldBe` Right "ya29.abc"
+  it "error, empty and non-JSON token responses are refused" $
+    map (gofIsLeft . GOA.parseTokenResponse) ["{\"error\":\"invalid_grant\"}", "{\"access_token\":\"\"}", "not json"] `shouldBe` [True, True, True]
+  it "a full userinfo response becomes an identity with a lowercase email" $
+    GOA.parseUserInfo "{\"sub\":\"1234\",\"email\":\"Pat@Example.com\",\"email_verified\":true,\"name\":\"Pat Example\"}" `shouldBe` Right (GoogleIdentity "1234" "pat@example.com" True (Just "Pat Example"))
+  it "email_verified is true only for the boolean true or the string true" $
+    map gofVerified
+      [ "{\"sub\":\"1\",\"email\":\"a@b.c\",\"email_verified\":true}"
+      , "{\"sub\":\"1\",\"email\":\"a@b.c\",\"email_verified\":\"true\"}"
+      , "{\"sub\":\"1\",\"email\":\"a@b.c\",\"email_verified\":false}"
+      , "{\"sub\":\"1\",\"email\":\"a@b.c\"}"
+      , "{\"sub\":\"1\",\"email\":\"a@b.c\",\"email_verified\":1}"
+      , "{\"sub\":\"1\",\"email\":\"a@b.c\",\"email_verified\":\"yes\"}"
+      ] `shouldBe` [Right True, Right True, Right False, Right False, Right False, Right False]
+  it "a missing or blank subject or email is refused" $
+    map (gofIsLeft . GOA.parseUserInfo)
+      [ "{\"email\":\"a@b.c\"}"
+      , "{\"sub\":\"\",\"email\":\"a@b.c\"}"
+      , "{\"sub\":\"1\"}"
+      , "{\"sub\":\"1\",\"email\":\"  \"}"
+      , "{\"sub\":42,\"email\":\"a@b.c\"}"
+      , "not json"
+      ] `shouldBe` replicate 6 True
+  it "a blank or missing name becomes Nothing and a name is trimmed" $
+    map (fmap giName . GOA.parseUserInfo)
+      [ "{\"sub\":\"1\",\"email\":\"a@b.c\",\"name\":\"  \"}"
+      , "{\"sub\":\"1\",\"email\":\"a@b.c\"}"
+      , "{\"sub\":\"1\",\"email\":\"a@b.c\",\"name\":\" Pat \"}"
+      ] `shouldBe` [Right Nothing, Right Nothing, Right (Just "Pat")]
+  it "the handoff code hash is SHA-256 in hex" $ do
+    GOA.hashHandoffCode "abc" `shouldBe` "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    (GOA.hashHandoffCode "abc" == GOA.hashHandoffCode "abd") `shouldBe` False
+  it "cookieValue finds a named cookie and ignores look-alikes and empty values" $
+    map (GOA.cookieValue "sl_google_state") ["a=1; sl_google_state=xyz; b=2", "xsl_google_state=1", "sl_google_state=", "other=1", ""] `shouldBe` [Just "xyz", Nothing, Nothing, Nothing, Nothing]
+  it "stateMatches needs two equal, non-empty values" $
+    map (uncurry GOA.stateMatches) [(Just "a", Just "a"), (Just "a", Just "b"), (Nothing, Nothing), (Just "", Just ""), (Just "a", Nothing)] `shouldBe` [True, False, False, False, False]
+  it "the state cookie is HttpOnly, SameSite=Lax and Secure only over https" $ do
+    let sec = GOA.stateCookieHeader True "tok"
+        plain = GOA.stateCookieHeader False "tok"
+    GoT.isPrefixOf "sl_google_state=tok" sec `shouldBe` True
+    gofHas sec ["HttpOnly", "SameSite=Lax", "Path=/api/auth/google", "Secure"] `shouldBe` True
+    GoT.isInfixOf "Secure" plain `shouldBe` False
+    gofHas (GOA.clearStateCookieHeader True) ["Max-Age=0", "Secure"] `shouldBe` True
+  it "each refusal has a fixed error code" $
+    map GOA.refusalCode [EmailNotVerified, EmailAlreadyUsed, AccountNotActive Suspended, AccountNotActive Deactivated] `shouldBe` ["email_not_verified", "email_in_use", "account_not_active", "account_not_active"]
+
+identityPurgeSpec :: Spec
+identityPurgeSpec = describe "Identity storage: purging old handoffs" $ do
+  it "purging removes expired and used handoffs and keeps live ones" $ idnExpect (Nothing, [1], True) $ do
+    u <- createTestUser "idn-p1"
+    Repo.createHandoff "old" (Repo.HandoffSignUp "sub-1" "a@example.com" (Just "A")) 100
+    Repo.createHandoff "used" (Repo.HandoffLogin u) 5000
+    _ <- Repo.consumeHandoff "used" 10
+    Repo.createHandoff "live" (Repo.HandoffLogin u) 5000
+    Repo.purgeExpiredHandoffs 200
+    env <- ask
+    n <- liftIO (SQ.query_ (envConnection env) "SELECT COUNT(*) FROM google_handoffs" :: IO [SQ.Only Int])
+    a <- Repo.consumeHandoff "old" 50
+    c <- Repo.consumeHandoff "live" 300
+    pure (a, map SQ.fromOnly n, c == Just (Repo.HandoffLogin u))

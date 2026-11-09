@@ -38,6 +38,7 @@ initializeSchema conn = do
   migrateUsernameIndex conn
   migrateGames conn
   migrateLobby conn
+  migrateIdentities conn
 
 -- v0.12: CREATE TABLE IF NOT EXISTS never adds columns to an existing
 -- database, so add any missing tournament columns here. Safe on every start.
@@ -378,3 +379,8 @@ migrateLobby conn = do
   execute_ conn "CREATE TABLE IF NOT EXISTS lobby_settings (tournament_id INTEGER PRIMARY KEY REFERENCES tournaments(id), kill_points INTEGER NOT NULL DEFAULT 1 CHECK (kill_points >= 0), placement_points TEXT NOT NULL DEFAULT '10,6,5,4,3,2,1,1')"
   execute_ conn "CREATE TABLE IF NOT EXISTS lobby_games (id INTEGER PRIMARY KEY, tournament_id INTEGER NOT NULL REFERENCES tournaments(id), game_number INTEGER NOT NULL CHECK (game_number >= 1), UNIQUE (tournament_id, game_number))"
   execute_ conn "CREATE TABLE IF NOT EXISTS lobby_results (lobby_game_id INTEGER NOT NULL REFERENCES lobby_games(id), participant_id INTEGER NOT NULL REFERENCES participants(id), placement INTEGER NOT NULL CHECK (placement >= 1), kills INTEGER NOT NULL DEFAULT 0 CHECK (kills >= 0), PRIMARY KEY (lobby_game_id, participant_id), UNIQUE (lobby_game_id, placement))"
+
+migrateIdentities :: Connection -> IO ()
+migrateIdentities conn = do
+  execute_ conn "CREATE TABLE IF NOT EXISTS user_identities (id INTEGER PRIMARY KEY, provider TEXT NOT NULL, subject TEXT NOT NULL, user_id INTEGER NOT NULL REFERENCES users(id), created_at TEXT NOT NULL, UNIQUE (provider, subject), UNIQUE (user_id, provider))"
+  execute_ conn "CREATE TABLE IF NOT EXISTS google_handoffs (id INTEGER PRIMARY KEY, code_hash TEXT NOT NULL UNIQUE, user_id INTEGER REFERENCES users(id), subject TEXT, email TEXT, name TEXT, expires_at INTEGER NOT NULL, used_at INTEGER)"

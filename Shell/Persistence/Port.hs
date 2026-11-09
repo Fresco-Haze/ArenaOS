@@ -41,6 +41,8 @@ module Shell.Persistence.Port
   ,AvatarRepository(..)
   ,BannerRepository(..)
   ,LobbyRepository(..)
+  ,IdentityRepository(..)
+  ,HandoffPayload(..)
   
   ) where
 
@@ -289,3 +291,13 @@ class Monad m => BannerRepository m where
   hasBanner    :: TournamentId -> m Bool
   deleteBanner :: TournamentId -> m ()
 
+data HandoffPayload
+  = HandoffLogin UserId
+  | HandoffSignUp Text Text (Maybe Text)
+  deriving (Eq, Show)
+class Monad m => IdentityRepository m where
+  findIdentityUser :: Text -> Text -> m (Maybe UserId)
+  linkIdentity     :: UserId -> Text -> Text -> m Bool
+  createHandoff    :: Text -> HandoffPayload -> Int -> m ()
+  consumeHandoff   :: Text -> Int -> m (Maybe HandoffPayload)
+  purgeExpiredHandoffs :: Int -> m ()

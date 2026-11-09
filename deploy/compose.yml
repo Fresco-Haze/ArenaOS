@@ -5,6 +5,11 @@ services:
     image: ghcr.io/fresco-haze/arenaos-api:${ARENAOS_TAG:-latest}
     restart: unless-stopped
     # No published ports: only the web service can reach this over the compose network.
+    # Google sign-in. Empty (the default) means the button is hidden and the routes answer 404.
+    environment:
+      ARENAOS_GOOGLE_CLIENT_ID: ${ARENAOS_GOOGLE_CLIENT_ID:-}
+      ARENAOS_GOOGLE_CLIENT_SECRET: ${ARENAOS_GOOGLE_CLIENT_SECRET:-}
+      ARENAOS_GOOGLE_REDIRECT_URI: ${ARENAOS_GOOGLE_REDIRECT_URI:-}
     volumes:
       - arenaos-data:/data
     read_only: true
