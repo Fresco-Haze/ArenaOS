@@ -29,7 +29,7 @@ RUN mkdir -p /out/lib \
 # ---- runtime ----
 FROM debian:trixie-slim
 RUN apt-get update \
- && apt-get install -y --no-install-recommends sqlite3 \
+ && apt-get install -y --no-install-recommends sqlite3 ca-certificates \
  && rm -rf /var/lib/apt/lists/* \
  && useradd --system --uid 10001 --home-dir /data --shell /usr/sbin/nologin arenaos \
  && mkdir -p /data \
