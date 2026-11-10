@@ -8,6 +8,7 @@ export type AuthValue = {
   expired: boolean
   dismissExpired: () => void
   login: (username: string, password: string, remember?: boolean) => Promise<void>
+  completeLogin: (res: LoginResponse, remember?: boolean) => void
   logout: () => Promise<void>
   updateFullName: (name: SessionUser['fullName']) => void
   setHasAvatar: (has: boolean) => void

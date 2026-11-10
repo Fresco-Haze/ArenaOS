@@ -4,7 +4,7 @@ export default function TermsPage() {
   return (
     <>
       <PageHeader title="Terms of Use" />
-      <p className="muted">Last updated: 1 November 2026</p>
+      <p className="muted">Last updated: 8 November 2026</p>
 
       <section className="help-section">
         <h2>Using SweatLobby</h2>
@@ -22,6 +22,7 @@ export default function TermsPage() {
           <li>You are responsible for what happens under your account.</li>
           <li>Use one account per person.</li>
           <li>Tell us straight away if you think someone else has got into your account.</li>
+          <li>If you sign in with Google, keep your Google account secure too. Google&rsquo;s own terms apply to it.</li>
         </ul>
       </section>
 

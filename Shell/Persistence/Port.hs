@@ -42,12 +42,16 @@ module Shell.Persistence.Port
   ,BannerRepository(..)
   ,LobbyRepository(..)
   ,CheckInRepository(..)
+  ,IdentityRepository(..)
+  ,HandoffPayload(..)
+  ,PredictionRepository(..)
   
   ) where
 
 import Domain.Tournament (Game)
 import Domain.Tournament (TournamentKind)
 import Domain.Lobby (LobbySettings, GameEntry)
+import Domain.Prediction (Pick)
 import Domain.Participant (Player, PlayerName, Team, TeamName, Participant, ParticipantId)
 import Domain.Tournament (Tournament, TournamentId, TournamentName, OrganizerName, TournamentFormat, Visibility, TournamentState
  , ParticipantMode, TournamentDetails, PublicStats)
@@ -266,6 +270,13 @@ class Monad m => EFootballScoreRepository m where
   getEFootballScore   :: MatchId -> m (Maybe (EFootballScore, EFootballScore))
   deleteEFootballScore :: MatchId -> m ()
 
+-- Predictions (free points). One pick per user per match; saving again replaces it.
+-- Scores are computed on read from the match results, never stored.
+class Monad m => PredictionRepository m where
+  savePrediction :: MatchId -> UserId -> Pick -> m ()
+  listUserPredictions :: TournamentId -> UserId -> m [(MatchId, Pick)]
+  listTournamentPredictions :: TournamentId -> m [(MatchId, UserId, Pick)]
+
 class Monad m => JoinRequestRepository m where
   getJoinRequest    :: TournamentId -> UserId -> m (Maybe JoinRequestStatus)
   saveJoinRequest   :: TournamentId -> UserId -> JoinRequestStatus -> m ()
@@ -299,3 +310,14 @@ class Monad m => CheckInRepository m where
   setCheckedIn   :: RegistrationId -> Bool -> m ()
   listCheckedIn  :: TournamentId -> m [RegistrationId]
 
+
+data HandoffPayload
+  = HandoffLogin UserId
+  | HandoffSignUp Text Text (Maybe Text)
+  deriving (Eq, Show)
+class Monad m => IdentityRepository m where
+  findIdentityUser :: Text -> Text -> m (Maybe UserId)
+  linkIdentity     :: UserId -> Text -> Text -> m Bool
+  createHandoff    :: Text -> HandoffPayload -> Int -> m ()
+  consumeHandoff   :: Text -> Int -> m (Maybe HandoffPayload)
+  purgeExpiredHandoffs :: Int -> m ()

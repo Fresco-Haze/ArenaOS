@@ -35,6 +35,7 @@ import Shell.Persistence.SQLite.UserRepository ()
 import Shell.Persistence.SQLite.TournamentHistoryRepository ()
 import Shell.Persistence.SQLite.RoleRepository ()
 import Shell.Persistence.SQLite.AuditLogRepository ()
+import Shell.Persistence.SQLite.PredictionRepository ()
 import Shell.Persistence.SQLite.Error (PersistenceError(..))
 
 import Domain.Participant (Participant(..), Player(..), PlayerName(..), Team(..), TeamName(..), TeamCaptain(..))
@@ -53,6 +54,9 @@ import Domain.Match (Match(..),MatchId(..), MatchStatus(Scheduled), MatchOutcome
 import Domain.User (User(..),Email(..), PasswordHash(..), Username(..), AccountStatus(..))
 import Domain.MatchError (MatchError(..))
 import qualified Domain.Match as Match
+import qualified Domain.Ids as PredIds
+import qualified Engine.Predictions as Pred
+import qualified Application.UseCases.Predictions as PredUC
 import Domain.TournamentError (TournamentError(..))
 
 import Application.UseCases.CreateTournament (createTournament)
@@ -68,6 +72,10 @@ import Application.UseCases.StartTournament (startTournament, StartTournamentErr
 import Application.UseCases.CancelTournament (cancelTournament, CancelTournamentError(..))
 import Application.Internal.Authorization (AuthorizationError(..))
 import Application.Internal.LifecycleTransition (LifecycleError(..))
+import Engine.GoogleSignIn
+import qualified Engine.GoogleOAuth as GOA
+import qualified Data.Text as GoT
+import qualified Data.ByteString as GoB
 import Application.UseCases.LogoutUser (logoutUser)
 import Shell.Auth.Session (saveSession)
 import Data.Either (isLeft)
@@ -117,6 +125,8 @@ import Shell.Persistence.SQLite.AvatarRepository ()
 import Shell.Persistence.SQLite.LobbyRepository ()
 import Shell.Persistence.SQLite.CheckInRepository ()
 import qualified Application.UseCases.CheckIn as CkIn
+import Shell.Persistence.SQLite.IdentityRepository ()
+import qualified Database.SQLite.Simple as SQ
 import qualified Application.UseCases.Lobby as LobbyUC
 import qualified Domain.Tournament as LbDom
 import qualified Application.Internal.LifecycleTransition as LbLife
@@ -321,6 +331,10 @@ spec = before_ resetTestDb $ do
   prizePoolSpec
   descriptionSpec
   formatChangeSpec
+  googleSignInSpec
+  identitySpec
+  googleOAuthSpec
+  identityPurgeSpec
   describe "Tournament Lifecycle (4-participant golden scenario)" $
     it "runs the full pipeline from creation to completion" $ do
       result <- runSQLiteM testDbPath $ do
@@ -7643,6 +7657,180 @@ spec = before_ resetTestDb $ do
         bad <- CTD.createTournamentWithDetails (dtNew owner "Stream E") (noDetails { detailsStreamUrl = Just "ftp://kick.com/x" })
         pure (tournamentStreamUrl t, isBad bad)
       result `shouldBe` Right (Just "https://kick.com/sweatlobby", True)
+  describe "Engine.Predictions (pure)" $ do
+    let ann = Individual (Player (PlayerName "ann"))
+        bob = Individual (Player (PlayerName "bob"))
+        cat = Individual (Player (PlayerName "cat"))
+        mk :: Match.MatchStatus -> Maybe MatchOutcome -> Match
+        mk st out = Match
+          { matchId = MatchId 1
+          , matchTournament = TournamentId 1
+          , matchBracket = PredIds.BracketId 1
+          , matchBracketNode = PredIds.BracketNodeId 1
+          , matchCompetitorA = ann
+          , matchCompetitorB = bob
+          , matchStatus = st
+          , matchOutcome = out
+          , matchScheduledStart = Nothing
+          }
+        done = mk Match.Completed . Just
+        uid = PredIds.UserId
+
+    it "is open only while the match is Scheduled" $ do
+      map Pred.predictionOpen [mk Match.Scheduled Nothing, mk Match.InProgress Nothing, done (Winner ann), mk Match.Cancelled Nothing]
+        `shouldBe` [True, False, False, False]
+
+    it "allows a draw pick only in round robin" $ do
+      map (`Pred.pickAllowed` Pred.PickDraw) [RoundRobin, SingleElimination, DoubleElimination]
+        `shouldBe` [True, False, False]
+      map (`Pred.pickAllowed` Pred.PickA) [RoundRobin, SingleElimination, DoubleElimination]
+        `shouldBe` [True, True, True]
+
+    it "scores a winner, forfeit and disqualification for the side that advances" $ do
+      let sc o = map (Pred.scorePrediction (done o)) [Pred.PickA, Pred.PickB, Pred.PickDraw]
+      sc (Winner ann) `shouldBe` [Pred.Correct, Pred.Wrong, Pred.Wrong]
+      sc (Winner bob) `shouldBe` [Pred.Wrong, Pred.Correct, Pred.Wrong]
+      sc (Forfeit ann) `shouldBe` [Pred.Correct, Pred.Wrong, Pred.Wrong]
+      sc (Disqualification bob) `shouldBe` [Pred.Wrong, Pred.Correct, Pred.Wrong]
+
+    it "scores a draw only for a draw pick, and a no contest is void" $ do
+      let sc o = map (Pred.scorePrediction (done o)) [Pred.PickA, Pred.PickB, Pred.PickDraw]
+      sc Draw `shouldBe` [Pred.Wrong, Pred.Wrong, Pred.Correct]
+      sc NoContest `shouldBe` [Pred.Void, Pred.Void, Pred.Void]
+
+    it "is pending until a result exists, and void when cancelled" $ do
+      Pred.scorePrediction (mk Match.Scheduled Nothing) Pred.PickA `shouldBe` Pred.Pending
+      Pred.scorePrediction (mk Match.InProgress Nothing) Pred.PickB `shouldBe` Pred.Pending
+      Pred.scorePrediction (mk Match.Completed Nothing) Pred.PickA `shouldBe` Pred.Pending
+      Pred.scorePrediction (mk Match.Cancelled Nothing) Pred.PickA `shouldBe` Pred.Void
+
+    it "treats an outcome naming someone outside the match as void" $ do
+      Pred.scorePrediction (done (Winner cat)) Pred.PickA `shouldBe` Pred.Void
+
+    it "counts one point per correct pick and skips void and pending" $ do
+      let entries = [ (uid 2, Pred.Correct), (uid 1, Pred.Correct), (uid 1, Pred.Correct)
+                    , (uid 2, Pred.Wrong), (uid 3, Pred.Void), (uid 3, Pred.Pending), (uid 4, Pred.Wrong) ]
+      Pred.buildLeaderboard entries
+        `shouldBe` [ Pred.LeaderboardRow (uid 1) 2 0, Pred.LeaderboardRow (uid 2) 1 1, Pred.LeaderboardRow (uid 4) 0 1 ]
+
+    it "breaks ties by fewest wrong picks, then lowest user id" $ do
+      let entries = [ (uid 5, Pred.Correct), (uid 5, Pred.Wrong), (uid 3, Pred.Correct)
+                    , (uid 2, Pred.Correct), (uid 2, Pred.Wrong) ]
+          table = Pred.buildLeaderboard entries
+      map Pred.lbUser table `shouldBe` [uid 3, uid 2, uid 5]
+      map Pred.leaderboardPoints table `shouldBe` [1, 1, 1]
+
+    it "has an empty leaderboard when nobody has a settled pick" $ do
+      Pred.buildLeaderboard [] `shouldBe` []
+      Pred.buildLeaderboard [(uid 1, Pred.Pending), (uid 2, Pred.Void)] `shouldBe` []
+  describe "Predictions use cases (slice 2b)" $ do
+
+    it "saves a pick, and a changed pick replaces the earlier one" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "pr-owner-1"
+        a <- createTestUser "pr-a-1"
+        b <- createTestUser "pr-b-1"
+        fan <- createTestUser "pr-fan-1"
+        tid <- msTwo owner a b "Predict Cup 1"
+        t <- Repo.getTournament tid
+        let Just bid = tournamentBracket t
+        ms <- Repo.listMatchesForBracket bid
+        let m = head ms
+        r1 <- PredUC.submitPrediction fan (matchId m) Pred.PickA
+        r2 <- PredUC.submitPrediction fan (matchId m) Pred.PickB
+        mine <- Repo.listUserPredictions tid fan
+        pure (r1, r2, mine, matchId m)
+      case result of
+        Left err -> expectationFailure (show err)
+        Right (r1, r2, mine, mid) -> do
+          r1 `shouldBe` Right ()
+          r2 `shouldBe` Right ()
+          mine `shouldBe` [(mid, Pred.PickB)]
+
+    it "refuses the organizer and registered players" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "pr-owner-2"
+        a <- createTestUser "pr-a-2"
+        b <- createTestUser "pr-b-2"
+        tid <- msTwo owner a b "Predict Cup 2"
+        t <- Repo.getTournament tid
+        let Just bid = tournamentBracket t
+        ms <- Repo.listMatchesForBracket bid
+        let m = head ms
+        ro <- PredUC.submitPrediction owner (matchId m) Pred.PickA
+        ra <- PredUC.submitPrediction a (matchId m) Pred.PickA
+        pure (ro, ra)
+      case result of
+        Left err -> expectationFailure (show err)
+        Right r  -> r `shouldBe` (Left PredUC.NotAllowedToPredict, Left PredUC.NotAllowedToPredict)
+
+    it "refuses a pick once the match has started" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "pr-owner-3"
+        a <- createTestUser "pr-a-3"
+        b <- createTestUser "pr-b-3"
+        fan <- createTestUser "pr-fan-3"
+        tid <- msTwo owner a b "Predict Cup 3"
+        t <- Repo.getTournament tid
+        let Just bid = tournamentBracket t
+        ms <- Repo.listMatchesForBracket bid
+        let m = head ms
+        _ <- unwrap =<< startMatch owner (matchId m)
+        PredUC.submitPrediction fan (matchId m) Pred.PickA
+      case result of
+        Left err -> expectationFailure (show err)
+        Right r  -> r `shouldBe` Left PredUC.PredictionsClosed
+
+    it "refuses a draw pick outside round robin" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "pr-owner-4"
+        a <- createTestUser "pr-a-4"
+        b <- createTestUser "pr-b-4"
+        fan <- createTestUser "pr-fan-4"
+        tid <- msTwo owner a b "Predict Cup 4"
+        t <- Repo.getTournament tid
+        let Just bid = tournamentBracket t
+        ms <- Repo.listMatchesForBracket bid
+        let m = head ms
+        PredUC.submitPrediction fan (matchId m) Pred.PickDraw
+      case result of
+        Left err -> expectationFailure (show err)
+        Right r  -> r `shouldBe` Left PredUC.PickNotAllowed
+
+    it "scores picks once the match is decided and orders the leaderboard" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "pr-owner-5"
+        a <- createTestUser "pr-a-5"
+        b <- createTestUser "pr-b-5"
+        fan1 <- createTestUser "pr-fan1-5"
+        fan2 <- createTestUser "pr-fan2-5"
+        tid <- msTwo owner a b "Predict Cup 5"
+        t <- Repo.getTournament tid
+        let Just bid = tournamentBracket t
+        ms <- Repo.listMatchesForBracket bid
+        let m = head ms
+            champ = Individual (Player (PlayerName "pr-a-5"))
+            other = Individual (Player (PlayerName "pr-b-5"))
+            sideOf p = if matchCompetitorA m == p then Pred.PickA else Pred.PickB
+        _ <- unwrap =<< PredUC.submitPrediction fan1 (matchId m) (sideOf champ)
+        _ <- unwrap =<< PredUC.submitPrediction fan2 (matchId m) (sideOf other)
+        _ <- unwrap =<< startMatch owner (matchId m)
+        _ <- unwrap =<< recordMatchResult owner (matchId m) (Winner champ)
+        mine1 <- unwrap =<< PredUC.myPredictions fan1 tid
+        mine2 <- unwrap =<< PredUC.myPredictions fan2 tid
+        board <- unwrap =<< PredUC.leaderboard Nothing tid
+        pure (map PredUC.pvResult mine1, map PredUC.pvResult mine2, board, fan1, fan2)
+      case result of
+        Left err -> expectationFailure (show err)
+        Right (r1, r2, board, fan1, fan2) -> do
+          r1 `shouldBe` [Pred.Correct]
+          r2 `shouldBe` [Pred.Wrong]
+          board `shouldBe` [Pred.LeaderboardRow fan1 1 0, Pred.LeaderboardRow fan2 0 1]
   describe "Engine.User.validateRawPassword (pure)" $ do
 
     it "rejects a password shorter than 8 characters" $
@@ -10566,3 +10754,171 @@ checkInUseCaseSpec = describe "Check-in use cases" $ do
       v <- unwrap =<< CkIn.loadCheckIn Nothing tid
       pure (length (CkIn.checkedInParticipants v))
     result `shouldBe` Right 0
+
+googleSignInSpec :: Spec
+googleSignInSpec = describe "Google sign-in decisions" $ do
+  it "linked and active: logs in as that user" $
+    decideGoogleSignIn (gsIdent True) (Just (gsUser 7 Active)) Nothing `shouldBe` LogInAs (UserId 7)
+  it "linked and suspended: refused, naming the status" $
+    decideGoogleSignIn (gsIdent True) (Just (gsUser 7 Suspended)) Nothing `shouldBe` Refuse (AccountNotActive Suspended)
+  it "linked and deactivated: refused, naming the status" $
+    decideGoogleSignIn (gsIdent True) (Just (gsUser 7 Deactivated)) Nothing `shouldBe` Refuse (AccountNotActive Deactivated)
+  it "linked with an unverified email: still logs in" $
+    decideGoogleSignIn (gsIdent False) (Just (gsUser 7 Active)) Nothing `shouldBe` LogInAs (UserId 7)
+  it "not linked, unverified email: refused" $
+    decideGoogleSignIn (gsIdent False) Nothing Nothing `shouldBe` Refuse EmailNotVerified
+  it "not linked, email owned by an active account: refused, no linking" $
+    decideGoogleSignIn (gsIdent True) Nothing (Just (gsUser 8 Active)) `shouldBe` Refuse EmailAlreadyUsed
+  it "not linked, email owned by a deactivated account: refused" $
+    decideGoogleSignIn (gsIdent True) Nothing (Just (gsUser 8 Deactivated)) `shouldBe` Refuse EmailAlreadyUsed
+  it "not linked, verified, no owner: needs a username" $
+    decideGoogleSignIn (gsIdent True) Nothing Nothing `shouldBe` NeedsUsername
+gsIdent :: Bool -> GoogleIdentity
+gsIdent verified = GoogleIdentity { giSubject = "gs-subject-1", giEmail = "person@example.com", giEmailVerified = verified, giName = Just "Pat Example" }
+gsUser :: Int -> AccountStatus -> User
+gsUser n st = User { userId = UserId n, username = Username "gs_user", email = Email "person@example.com", passwordHash = PasswordHash "x", accountStatus = st }
+
+idnExpect :: (Show a, Eq a) => a -> SQLiteM a -> IO ()
+idnExpect expected action = do
+  result <- runSQLiteM testDbPath (setupSchema >> action)
+  case result of
+    Right v -> v `shouldBe` expected
+    Left e  -> expectationFailure (show e)
+identitySpec :: Spec
+identitySpec = describe "Identity storage (Google sign-in)" $ do
+  it "a linked Google id is found, an unknown one is not" $ idnExpect (True, True, Nothing) $ do
+    u <- createTestUser "idn-u1"
+    ok <- Repo.linkIdentity u "google" "sub-1"
+    found <- Repo.findIdentityUser "google" "sub-1"
+    missing <- Repo.findIdentityUser "google" "sub-2"
+    pure (ok, found == Just u, missing)
+  it "the same Google id cannot be linked to a second user" $ idnExpect (True, False, True) $ do
+    u1 <- createTestUser "idn-u1"
+    u2 <- createTestUser "idn-u2"
+    a <- Repo.linkIdentity u1 "google" "sub-1"
+    b <- Repo.linkIdentity u2 "google" "sub-1"
+    owner <- Repo.findIdentityUser "google" "sub-1"
+    pure (a, b, owner == Just u1)
+  it "the same subject under another provider is allowed" $ idnExpect (True, True) $ do
+    u <- createTestUser "idn-u1"
+    a <- Repo.linkIdentity u "google" "sub-1"
+    b <- Repo.linkIdentity u "other" "sub-1"
+    pure (a, b)
+  it "a user cannot link a second Google id" $ idnExpect (True, False) $ do
+    u <- createTestUser "idn-u1"
+    a <- Repo.linkIdentity u "google" "sub-1"
+    b <- Repo.linkIdentity u "google" "sub-2"
+    pure (a, b)
+  it "a login handoff is consumed once, the second try gives nothing" $ idnExpect (True, Nothing) $ do
+    u <- createTestUser "idn-u1"
+    Repo.createHandoff "h1" (Repo.HandoffLogin u) 1000
+    a <- Repo.consumeHandoff "h1" 500
+    b <- Repo.consumeHandoff "h1" 501
+    pure (a == Just (Repo.HandoffLogin u), b)
+  it "an expired handoff gives nothing, also exactly at its expiry second" $ idnExpect (Nothing, Nothing) $ do
+    u <- createTestUser "idn-u1"
+    Repo.createHandoff "h2" (Repo.HandoffLogin u) 1000
+    a <- Repo.consumeHandoff "h2" 1000
+    b <- Repo.consumeHandoff "h2" 1001
+    pure (a, b)
+  it "a wrong code gives nothing and does not use up the real handoff" $ idnExpect (Nothing, True) $ do
+    u <- createTestUser "idn-u1"
+    Repo.createHandoff "h3" (Repo.HandoffLogin u) 1000
+    a <- Repo.consumeHandoff "wrong" 500
+    b <- Repo.consumeHandoff "h3" 500
+    pure (a, b == Just (Repo.HandoffLogin u))
+  it "a sign-up handoff carries subject, email and optional name" $ idnExpect (Just (Repo.HandoffSignUp "sub-9" "p@example.com" (Just "Pat")), Just (Repo.HandoffSignUp "sub-10" "q@example.com" Nothing)) $ do
+    Repo.createHandoff "h4" (Repo.HandoffSignUp "sub-9" "p@example.com" (Just "Pat")) 1000
+    Repo.createHandoff "h5" (Repo.HandoffSignUp "sub-10" "q@example.com" Nothing) 1000
+    a <- Repo.consumeHandoff "h4" 10
+    b <- Repo.consumeHandoff "h5" 10
+    pure (a, b)
+
+gofCfg :: GOA.GoogleConfig
+gofCfg = GOA.GoogleConfig { GOA.gcClientId = "cid.apps", GOA.gcClientSecret = "s3cr&t", GOA.gcRedirectUri = "http://localhost:5173/api/auth/google/callback" }
+gofHas :: GoT.Text -> [GoT.Text] -> Bool
+gofHas whole parts = all (\p -> GoT.isInfixOf p whole) parts
+gofIsLeft :: Either a b -> Bool
+gofIsLeft = either (const True) (const False)
+gofVerified :: GoB.ByteString -> Either GoT.Text Bool
+gofVerified = fmap giEmailVerified . GOA.parseUserInfo
+googleOAuthSpec :: Spec
+googleOAuthSpec = describe "Google OAuth helpers (pure)" $ do
+  it "a config is made when all three values are present" $
+    fmap GOA.gcClientId (GOA.googleConfigFrom " cid " "sec" "https://x.test/cb") `shouldBe` Just "cid"
+  it "a blank value in the config switches Google off" $
+    map (fmap GOA.gcClientId) [GOA.googleConfigFrom "" "sec" "u", GOA.googleConfigFrom "cid" "  " "u", GOA.googleConfigFrom "cid" "sec" ""] `shouldBe` [Nothing, Nothing, Nothing]
+  it "the authorize URL carries the expected parameters" $ do
+    let url = GOA.authorizeUrl gofCfg "state123"
+    GoT.isPrefixOf "https://accounts.google.com/o/oauth2/v2/auth?" url `shouldBe` True
+    gofHas url [ "response_type=code", "client_id=cid.apps", "state=state123"
+               , "redirect_uri=http%3A%2F%2Flocalhost%3A5173%2Fapi%2Fauth%2Fgoogle%2Fcallback"
+               , "scope=openid%20email%20profile" ] `shouldBe` True
+  it "the authorize URL encodes special characters and never contains the secret" $ do
+    let url = GOA.authorizeUrl gofCfg "a b&c=d"
+    GoT.isInfixOf "state=a%20b%26c%3Dd" url `shouldBe` True
+    GoT.isInfixOf "s3cr" url `shouldBe` False
+  it "the token request body is a form with the encoded code and secret" $ do
+    let body = GOA.tokenRequestBody gofCfg "4/0AbC"
+    map (\p -> GoB.isInfixOf p body) ["grant_type=authorization_code", "code=4%2F0AbC", "client_secret=s3cr%26t", "client_id=cid.apps"] `shouldBe` [True, True, True, True]
+  it "an access token is read from the token response" $
+    GOA.parseTokenResponse "{\"access_token\":\"ya29.abc\",\"expires_in\":3599,\"token_type\":\"Bearer\"}" `shouldBe` Right "ya29.abc"
+  it "error, empty and non-JSON token responses are refused" $
+    map (gofIsLeft . GOA.parseTokenResponse) ["{\"error\":\"invalid_grant\"}", "{\"access_token\":\"\"}", "not json"] `shouldBe` [True, True, True]
+  it "a full userinfo response becomes an identity with a lowercase email" $
+    GOA.parseUserInfo "{\"sub\":\"1234\",\"email\":\"Pat@Example.com\",\"email_verified\":true,\"name\":\"Pat Example\"}" `shouldBe` Right (GoogleIdentity "1234" "pat@example.com" True (Just "Pat Example"))
+  it "email_verified is true only for the boolean true or the string true" $
+    map gofVerified
+      [ "{\"sub\":\"1\",\"email\":\"a@b.c\",\"email_verified\":true}"
+      , "{\"sub\":\"1\",\"email\":\"a@b.c\",\"email_verified\":\"true\"}"
+      , "{\"sub\":\"1\",\"email\":\"a@b.c\",\"email_verified\":false}"
+      , "{\"sub\":\"1\",\"email\":\"a@b.c\"}"
+      , "{\"sub\":\"1\",\"email\":\"a@b.c\",\"email_verified\":1}"
+      , "{\"sub\":\"1\",\"email\":\"a@b.c\",\"email_verified\":\"yes\"}"
+      ] `shouldBe` [Right True, Right True, Right False, Right False, Right False, Right False]
+  it "a missing or blank subject or email is refused" $
+    map (gofIsLeft . GOA.parseUserInfo)
+      [ "{\"email\":\"a@b.c\"}"
+      , "{\"sub\":\"\",\"email\":\"a@b.c\"}"
+      , "{\"sub\":\"1\"}"
+      , "{\"sub\":\"1\",\"email\":\"  \"}"
+      , "{\"sub\":42,\"email\":\"a@b.c\"}"
+      , "not json"
+      ] `shouldBe` replicate 6 True
+  it "a blank or missing name becomes Nothing and a name is trimmed" $
+    map (fmap giName . GOA.parseUserInfo)
+      [ "{\"sub\":\"1\",\"email\":\"a@b.c\",\"name\":\"  \"}"
+      , "{\"sub\":\"1\",\"email\":\"a@b.c\"}"
+      , "{\"sub\":\"1\",\"email\":\"a@b.c\",\"name\":\" Pat \"}"
+      ] `shouldBe` [Right Nothing, Right Nothing, Right (Just "Pat")]
+  it "the handoff code hash is SHA-256 in hex" $ do
+    GOA.hashHandoffCode "abc" `shouldBe` "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    (GOA.hashHandoffCode "abc" == GOA.hashHandoffCode "abd") `shouldBe` False
+  it "cookieValue finds a named cookie and ignores look-alikes and empty values" $
+    map (GOA.cookieValue "sl_google_state") ["a=1; sl_google_state=xyz; b=2", "xsl_google_state=1", "sl_google_state=", "other=1", ""] `shouldBe` [Just "xyz", Nothing, Nothing, Nothing, Nothing]
+  it "stateMatches needs two equal, non-empty values" $
+    map (uncurry GOA.stateMatches) [(Just "a", Just "a"), (Just "a", Just "b"), (Nothing, Nothing), (Just "", Just ""), (Just "a", Nothing)] `shouldBe` [True, False, False, False, False]
+  it "the state cookie is HttpOnly, SameSite=Lax and Secure only over https" $ do
+    let sec = GOA.stateCookieHeader True "tok"
+        plain = GOA.stateCookieHeader False "tok"
+    GoT.isPrefixOf "sl_google_state=tok" sec `shouldBe` True
+    gofHas sec ["HttpOnly", "SameSite=Lax", "Path=/api/auth/google", "Secure"] `shouldBe` True
+    GoT.isInfixOf "Secure" plain `shouldBe` False
+    gofHas (GOA.clearStateCookieHeader True) ["Max-Age=0", "Secure"] `shouldBe` True
+  it "each refusal has a fixed error code" $
+    map GOA.refusalCode [EmailNotVerified, EmailAlreadyUsed, AccountNotActive Suspended, AccountNotActive Deactivated] `shouldBe` ["email_not_verified", "email_in_use", "account_not_active", "account_not_active"]
+
+identityPurgeSpec :: Spec
+identityPurgeSpec = describe "Identity storage: purging old handoffs" $ do
+  it "purging removes expired and used handoffs and keeps live ones" $ idnExpect (Nothing, [1], True) $ do
+    u <- createTestUser "idn-p1"
+    Repo.createHandoff "old" (Repo.HandoffSignUp "sub-1" "a@example.com" (Just "A")) 100
+    Repo.createHandoff "used" (Repo.HandoffLogin u) 5000
+    _ <- Repo.consumeHandoff "used" 10
+    Repo.createHandoff "live" (Repo.HandoffLogin u) 5000
+    Repo.purgeExpiredHandoffs 200
+    env <- ask
+    n <- liftIO (SQ.query_ (envConnection env) "SELECT COUNT(*) FROM google_handoffs" :: IO [SQ.Only Int])
+    a <- Repo.consumeHandoff "old" 50
+    c <- Repo.consumeHandoff "live" 300
+    pure (a, map SQ.fromOnly n, c == Just (Repo.HandoffLogin u))

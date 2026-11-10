@@ -14,6 +14,8 @@ import { parseStream } from '../lib/stream'
 import { formatLabel, gameLabel, stateLabel, type Participant } from '../model'
 
 import Bracket from '../components/Bracket'
+import PredictionProvider from '../components/PredictionProvider'
+import PredictionLeaderboard from '../components/PredictionLeaderboard'
 import EmptyState from '../components/EmptyState'
 import ErrorBanner from '../components/ErrorBanner'
 import LoadingBlock from '../components/LoadingBlock'
@@ -27,7 +29,7 @@ import BannerEditor from '../components/BannerEditor'
 import ConfirmDialog from '../components/ConfirmDialog'
 import { checkInSelf, removeParticipant, setCheckedIn } from '../lib/tournamentActions'
 
-type TabId = 'overview' | 'bracket' | 'players'
+type TabId = 'overview' | 'bracket' | 'predictions' | 'players'
 
 function PeopleIcon() {
   return (
@@ -132,6 +134,8 @@ export default function TournamentPage({ id }: { id: string }) {
       setCkBusy(false)
     }
   }
+  // Predictions exist for bracket tournaments once the bracket is generated (matches exist).
+  const hasPredictions = t.kind === 'Bracket' && ['RegistrationClosed', 'InProgress', 'Paused', 'Completed'].includes(t.state)
 
   return (
     <div className="tp">
@@ -195,6 +199,7 @@ export default function TournamentPage({ id }: { id: string }) {
         tabs={[
           { id: 'overview', label: 'Overview' },
           { id: 'bracket', label: t.kind === 'Lobby' ? 'Standings' : 'Bracket' },
+          ...(hasPredictions ? [{ id: 'predictions' as const, label: 'Predictions' }] : []),
           { id: 'players', label: squads ? 'Teams' : 'Players', count: view.participants.length },
         ]}
       />
@@ -266,12 +271,18 @@ export default function TournamentPage({ id }: { id: string }) {
           )}
 
           {bracket ? (
-            <Bracket bracket={bracket} tournamentState={t.state} game={t.game} />
+            <PredictionProvider tournament={t} viewerIsOwner={view.viewerIsOwner} viewerIsRegistered={view.viewerIsRegistered} bracket={bracket}>
+              <Bracket bracket={bracket} tournamentState={t.state} game={t.game} />
+            </PredictionProvider>
           ) : (
             <EmptyState title="No bracket yet">
               The bracket appears here once the organizer generates it.
             </EmptyState>
           )}
+        </div>
+      ) : tab === 'predictions' && hasPredictions ? (
+        <div role="tabpanel" id="panel-predictions" aria-labelledby="tab-predictions">
+          <PredictionLeaderboard tournament={t} />
         </div>
       ) : (
         <div role="tabpanel" id="panel-players" aria-labelledby="tab-players">

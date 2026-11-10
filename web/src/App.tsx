@@ -14,6 +14,7 @@ import ProfilePage from './pages/ProfilePage'
 import LoginPage from './pages/LoginPage'
 import TournamentPage from './pages/TournamentPage'
 import RegisterPage from './pages/RegisterPage'
+import GoogleFinishPage from './pages/GoogleFinishPage'
 import ForgotPasswordPage from './pages/ForgotPasswordPage'
 import ResetPasswordPage from './pages/ResetPasswordPage'
 import ProtectedRoute from './components/ProtectedRoute'
@@ -84,6 +85,7 @@ export default function App() {
             }
           />
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/login/google" element={<GoogleFinishPage />} />
           <Route path="/register" element={<RegisterPage />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
           <Route path="/reset-password" element={<ResetPasswordPage />} />

@@ -103,16 +103,23 @@ library
                       Shell.Persistence.SQLite.AvatarRepository
                       Shell.Persistence.SQLite.LobbyRepository
                       Shell.Persistence.SQLite.CheckInRepository
+                      Shell.Persistence.SQLite.IdentityRepository
                       Application.UseCases.Lobby
                       Application.UseCases.CheckIn
                       Engine.Champion
                       Engine.Rankings
+                      Engine.GoogleSignIn
+                      Engine.GoogleOAuth
                       Engine.Lobby
                       Domain.Lobby
                       Application.UseCases.GetRankings
                       Engine.Players
                       Application.UseCases.GetPlayers
                       Domain.Notification
+                      Engine.Predictions
+                      Domain.Prediction
+                      Shell.Persistence.SQLite.PredictionRepository
+                      Application.UseCases.Predictions
 
 
     hs-source-dirs:   .
@@ -126,6 +133,8 @@ library
                     , directory
                     , filepath
                     , text-short
+                    , aeson
+                    , crypton
                     , bytestring
                     , time
     default-language: Haskell2010
@@ -171,6 +180,8 @@ executable arenaos-api
                     , aeson
                     , text
                     , http-types
+                    , http-client
+                    , http-client-tls
                     , containers
                     , bytestring
                     , entropy
