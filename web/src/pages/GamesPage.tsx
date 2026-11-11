@@ -9,12 +9,20 @@ import { gameBannerStyle } from '../lib/gameBanners'
 
 const filterHref = (name: string) => `/tournaments?game=${encodeURIComponent(name)}`
 
-// Every game that has public tournaments gets a tile, most active first (the API
-// already sorts the counts). The rest of the list is below, as plain links.
+// Every game gets a tile. Games with public tournaments come first (the API sorts
+// the counts), then the rest alphabetically with "No tournaments yet".
 export default function GamesPage() {
   const stats = useApi('/stats', PublicStatsView, true)
   const allGames = useGames()
   const s = stats.data
+  const counted = s ? s.byGame : []
+  const others = [...allGames]
+    .filter((g) => !counted.some((x) => x.game.toLowerCase() === g.toLowerCase()))
+    .sort((a, b) => a.localeCompare(b))
+  const tiles = [
+    ...counted.map(({ game, count }) => ({ game, count })),
+    ...others.map((g) => ({ game: g, count: 0 })),
+  ]
 
   return (
     <div>
@@ -25,35 +33,23 @@ export default function GamesPage() {
         <LoadingBlock label="Loading games" />
       ) : (
         <>
-          {s.byGame.length === 0 ? (
-            <p className="muted">No public tournaments have a game yet.</p>
+          {tiles.length === 0 ? (
+            <p className="muted">No games yet.</p>
           ) : (
             <ul className="gtiles">
-              {s.byGame.map(({ game, count }) => (
+              {tiles.map(({ game, count }) => (
                 <li key={game} className="gtile">
                   <div className="gtile-art" data-game={game} style={gameBannerStyle(game)} />
                   <div className="gtile-body">
                     <h2 className="gtile-name">{game}</h2>
-                    <p className="gtile-count">{count} {count === 1 ? 'tournament' : 'tournaments'}</p>
+                    <p className="gtile-count">
+                      {count === 0 ? 'No tournaments yet' : `${count} ${count === 1 ? 'tournament' : 'tournaments'}`}
+                    </p>
                     <Link to={filterHref(game)} className="gtile-cta">Explore &rarr;</Link>
                   </div>
                 </li>
               ))}
             </ul>
-          )}
-          {allGames.length > 0 && (
-            <>
-              <h2 className="panel-title">All games</h2>
-              <ul className="games-all">
-                {allGames
-                  .filter((g) => !s.byGame.some((x) => x.game.toLowerCase() === g.toLowerCase()))
-                  .map((g) => (
-                    <li key={g}>
-                      <Link to={filterHref(g)}>{g}</Link>
-                    </li>
-                  ))}
-              </ul>
-            </>
           )}
         </>
       )}
