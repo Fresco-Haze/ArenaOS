@@ -5,6 +5,7 @@ import { PublicStatsView } from '../model'
 import ErrorBanner from '../components/ErrorBanner'
 import LoadingBlock from '../components/LoadingBlock'
 import PageHeader from '../components/PageHeader'
+import { gameBannerStyle } from '../lib/gameBanners'
 
 const filterHref = (name: string) => `/tournaments?game=${encodeURIComponent(name)}`
 
@@ -30,7 +31,7 @@ export default function GamesPage() {
             <ul className="gtiles">
               {s.byGame.map(({ game, count }) => (
                 <li key={game} className="gtile">
-                  <div className="gtile-art" data-game={game} />
+                  <div className="gtile-art" data-game={game} style={gameBannerStyle(game)} />
                   <div className="gtile-body">
                     <h2 className="gtile-name">{game}</h2>
                     <p className="gtile-count">{count} {count === 1 ? 'tournament' : 'tournaments'}</p>

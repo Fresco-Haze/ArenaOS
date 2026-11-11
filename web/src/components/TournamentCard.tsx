@@ -5,6 +5,7 @@ import { formatLabel, gameLabel, stateLabel } from '../model'
 import type { Tournament } from '../model'
 import { statusClass } from '../badges'
 import BannerImg from './BannerImg'
+import { gameBannerStyle } from '../lib/gameBanners'
 
 function FormatIcon() {
   return (
@@ -48,7 +49,7 @@ export default function TournamentCard({ tournament: t, showOrganizer = false }:
   const when = t.startTime ? formatCardDate(t.startTime) : ''
   return (
     <li className="tcard">
-      <div className="tcard-art" data-game={t.game ?? 'none'}>
+      <div className="tcard-art" data-game={t.game ?? 'none'} style={gameBannerStyle(t.game, t.tournamentId)}>
         {t.hasBanner && <BannerImg tournamentId={t.tournamentId} />}
         {gameName && <span className="tcard-chip">{gameName}</span>}
         <span className={'badge tcard-status ' + statusClass[t.state]}>{stateLabel[t.state]}</span>

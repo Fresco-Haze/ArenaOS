@@ -13,6 +13,7 @@ import ErrorBanner from '../components/ErrorBanner'
 import LoadingBlock from '../components/LoadingBlock'
 import TournamentCard from '../components/TournamentCard'
 import BannerImg from '../components/BannerImg'
+import { gameBannerStyle } from '../lib/gameBanners'
 
 // The backend has no "featured" concept: the four newest public
 // tournaments that are open for registration or running.
@@ -113,7 +114,7 @@ function UpcomingPanel() {
             const game = t.game && t.game !== 'Other' ? gameLabel[t.game] : null
             return (
               <li key={t.tournamentId} className="urow">
-                <div className="urow-art" data-game={t.game ?? 'none'} aria-hidden="true">
+                <div className="urow-art" data-game={t.game ?? 'none'} style={gameBannerStyle(t.game, t.tournamentId)} aria-hidden="true">
                   {t.hasBanner && <BannerImg tournamentId={t.tournamentId} />}
                 </div>
                 <div className="urow-main">
@@ -280,7 +281,7 @@ export default function HomePage() {
               {s.byGame.slice(0, POPULAR_COUNT).map(({ game: g, count: n }) => {
                 return (
                   <li key={g} className="gtile">
-                    <div className="gtile-art" data-game={g} />
+                    <div className="gtile-art" data-game={g} style={gameBannerStyle(g)} />
                     <div className="gtile-body">
                       <h3 className="gtile-name">{g}</h3>
                       <p className="gtile-count">{n} {n === 1 ? 'tournament' : 'tournaments'}</p>

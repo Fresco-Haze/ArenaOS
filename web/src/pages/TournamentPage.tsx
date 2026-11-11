@@ -14,6 +14,7 @@ import { parseStream } from '../lib/stream'
 import { formatLabel, gameLabel, stateLabel, type Participant } from '../model'
 
 import Bracket from '../components/Bracket'
+import { gameBannerStyle } from '../lib/gameBanners'
 import PredictionProvider from '../components/PredictionProvider'
 import PredictionLeaderboard from '../components/PredictionLeaderboard'
 import EmptyState from '../components/EmptyState'
@@ -146,7 +147,7 @@ export default function TournamentPage({ id }: { id: string }) {
       </nav>
 
       <section className="tp-head" aria-labelledby="tp-title">
-        <div className="tp-art" data-game={t.game ?? 'none'}>
+        <div className="tp-art" data-game={t.game ?? 'none'} style={gameBannerStyle(t.game, t.tournamentId)}>
           <BannerImg tournamentId={t.tournamentId} />
           {view.viewerIsOwner && t.state !== 'Completed' && t.state !== 'Cancelled' && (
             <BannerEditor tournamentId={t.tournamentId} />
