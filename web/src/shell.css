@@ -323,3 +323,11 @@
 }
 
 .shell-side { scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+/* phones: search row wraps under the logo instead of squeezing the header */
+@media (max-width: 860px) {
+  .shell-top { flex-wrap: wrap; }
+  .shell-top-right { flex-shrink: 0; }
+  .shell-top .button-link { white-space: nowrap; }
+  .brand-tag { white-space: nowrap; }
+  .shell-search.open { order: 3; flex: 1 1 100%; max-width: none; }
+}
