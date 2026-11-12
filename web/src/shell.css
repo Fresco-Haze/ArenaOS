@@ -323,11 +323,20 @@
 }
 
 .shell-side { scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
-/* phones: search row wraps under the logo instead of squeezing the header */
+/* phones: header stays one row; open search floats under it */
 @media (max-width: 860px) {
-  .shell-top { flex-wrap: wrap; }
-  .shell-top-right { flex-shrink: 0; }
   .shell-top .button-link { white-space: nowrap; }
-  .brand-tag { white-space: nowrap; }
-  .shell-search.open { order: 3; flex: 1 1 100%; max-width: none; }
+  .shell-top-right { flex-shrink: 0; }
+  .shell-search.open {
+    position: absolute;
+    top: calc(100% + var(--space-2));
+    left: var(--space-4);
+    right: var(--space-4);
+    z-index: 25;
+    max-width: none;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  }
+}
+@media (max-width: 860px) and (max-height: 700px) {
+  .shell-top { position: relative; }
 }
