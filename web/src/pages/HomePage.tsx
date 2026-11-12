@@ -270,7 +270,7 @@ export default function HomePage() {
               <Svg name="gamepad" />
               Popular Games
             </h2>
-            <Link to="/tournaments" className="panel-link">View All &rarr;</Link>
+            <Link to="/games" className="panel-link">View All &rarr;</Link>
           </div>
           {stats.error ? (
             <ErrorBanner message={stats.error} onRetry={stats.retry} />
