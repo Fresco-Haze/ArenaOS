@@ -18,6 +18,8 @@ import { gameBannerStyle } from '../lib/gameBanners'
 // The backend has no "featured" concept: the four newest public
 // tournaments that are open for registration or running.
 const FEATURED_STATES: readonly string[] = ['RegistrationOpen', 'InProgress']
+// Featured: open or running tournaments first, then the newest finished ones, up to this many.
+const FEATURED_COUNT = 3
 const POPULAR_COUNT = 3
 
 const PATHS = {
@@ -224,10 +226,14 @@ export default function HomePage() {
   const stats = useApi('/stats', PublicStatsView, true)
 
   const featured = list.data
-    ? list.data.tournaments
-        .filter((t) => FEATURED_STATES.includes(t.state))
-        .sort((a, b) => b.tournamentId - a.tournamentId)
-        .slice(0, 4)
+    ? [
+        ...list.data.tournaments
+          .filter((t) => FEATURED_STATES.includes(t.state))
+          .sort((a, b) => b.tournamentId - a.tournamentId),
+        ...list.data.tournaments
+          .filter((t) => t.state === 'Completed')
+          .sort((a, b) => b.tournamentId - a.tournamentId),
+      ].slice(0, FEATURED_COUNT)
     : null
   const s = stats.data
 
