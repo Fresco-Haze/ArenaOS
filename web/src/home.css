@@ -264,6 +264,6 @@
 .urow-art { position: relative; overflow: hidden; }
 
 /* phones: one column so a lone tile or card fills the width */
-@media (max-width: 600px) {
+@media (max-width: 700px) {
   .gtiles, .tcards-featured { grid-template-columns: minmax(0, 1fr); }
 }

@@ -106,3 +106,8 @@
 
 /* v0.12 card button click-through: the hover filter lifts the span above the link overlay, so let clicks pass through to the link */
 .tcard-cta { pointer-events: none; }
+
+/* phones: tournament cards one column */
+@media (max-width: 700px) {
+  .tcards { grid-template-columns: minmax(0, 1fr); }
+}
