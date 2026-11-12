@@ -1385,3 +1385,10 @@ img.avatar, img.profile-avatar { object-fit: cover; border-radius: 50%; display:
 .pf-team-name { font-weight: 600; }
 
 .pf-bio { margin: var(--space-1) 0 0; color: var(--muted); max-width: 28rem; overflow-wrap: anywhere; }
+
+/* phones: profile stats fill the row */
+@media (max-width: 700px) {
+  .pf-head { padding: var(--space-4); }
+  .pf-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; }
+  .pf-stat { min-width: 0; padding: var(--space-3) var(--space-2); }
+}
