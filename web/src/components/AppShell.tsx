@@ -322,11 +322,13 @@ export default function AppShell({ children }: { children: ReactNode }) {
     if (searchOpen) document.getElementById('shell-search-input')?.focus()
   }, [searchOpen])
   const { pathname } = useLocation()
+  const { user } = useAuth()
+  const landing = !user && pathname === '/'
   if (pathname === '/login' || pathname === '/register') {
     return <main id="main" className="bare">{children}</main>
   }
   return (
-    <div className="shell">
+    <div className="shell" style={landing ? { gridTemplate: '"top" auto "main" 1fr "foot" auto / minmax(0, 1fr)', paddingBottom: 0 } : undefined}>
       <a className="skip-link" href="#main">Skip to content</a>
       <header className="shell-top">
         <Link to="/" className="brand brand-wrap" aria-label="SweatLobby home">
@@ -348,7 +350,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
           <UserMenu />
         </div>
       </header>
-      <SideNav />
+      {!landing && <SideNav />}
       <main id="main" className="shell-main">
         {children}
       </main>
@@ -357,7 +359,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
         <p>Tournament management for competitive gaming.</p>
         <p className="muted"><Link to="/privacy">Privacy</Link> &middot; <Link to="/terms">Terms</Link></p>
       </footer>
-      <TabBar />
+      {!landing && <TabBar />}
     </div>
   )
 }

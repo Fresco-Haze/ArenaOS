@@ -60,6 +60,22 @@ function Hero() {
   )
 }
 
+function GuestHero() {
+  const wrap = { whiteSpace: 'normal' as const }
+  return (
+    <section className="hero" aria-labelledby="hero-title">
+      <div className="hero-copy">
+        <h1 id="hero-title" className="hero-title">
+          <span style={wrap}>Set up a tournament in minutes.</span>
+          <span className="hero-accent" style={wrap}>Brackets and results run themselves.</span>
+        </h1>
+        <p className="hero-text">Sign-ups, brackets and live results in one place.</p>
+        <Link to="/register?next=%2Fme%2Fnew" className="button-link btn-primary">Start your tournament &rarr;</Link>
+      </div>
+    </section>
+  )
+}
+
 const num = (n: number) => n.toLocaleString('en-US')
 
 function BandItem({ icon, label, value }: { icon: IconName; label: string; value: string }) {
@@ -238,9 +254,9 @@ export default function HomePage() {
   const s = stats.data
 
   return (
-    <div className="home-grid">
+    <div className={user ? "home-grid" : undefined}>
       <div className="home-main">
-        <Hero />
+        {user ? <Hero /> : <GuestHero />}
 
         <section className="panel" aria-labelledby="featured-heading">
           <div className="panel-head">
@@ -270,6 +286,7 @@ export default function HomePage() {
           )}
         </section>
 
+        {user && (<>
         <section className="panel" aria-labelledby="popular-heading">
           <div className="panel-head">
             <h2 id="popular-heading" className="panel-title">
@@ -320,8 +337,10 @@ export default function HomePage() {
             </ul>
           )}
         </section>
+        </>)}
       </div>
 
+      {user && (
       <aside className="home-rail" aria-label="Side panels">
         {user ? (
           <NextMatchPanel />
@@ -334,6 +353,7 @@ export default function HomePage() {
         <ActivityPanel />
         <TopPlayersPanel />
       </aside>
+      )}
     </div>
   )
 }
