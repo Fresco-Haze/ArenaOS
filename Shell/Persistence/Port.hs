@@ -39,12 +39,21 @@ module Shell.Persistence.Port
   ,JoinRequestRepository(..)
   ,NotificationRepository(..)
   ,AvatarRepository(..)
+  ,TeamLogoRepository(..)
+  ,TeamInviteRepository(..)
+  ,MatchRoomRepository(..)
+  ,MatchHistoryRepository(..)
+  ,TeamProfileRepository(..)
+  ,SubstitutionRepository(..)
   ,BannerRepository(..)
   ,LobbyRepository(..)
   ,CheckInRepository(..)
+  ,CheckInDeadlineRepository(..)
   ,IdentityRepository(..)
   ,HandoffPayload(..)
   ,PredictionRepository(..)
+  ,AnnouncementRepository(..)
+  ,PrizeSplitRepository(..)
   
   ) where
 
@@ -52,6 +61,7 @@ import Domain.Tournament (Game)
 import Domain.Tournament (TournamentKind)
 import Domain.Lobby (LobbySettings, GameEntry)
 import Domain.Prediction (Pick)
+import Domain.Announcement (Announcement)
 import Domain.Participant (Player, PlayerName, Team, TeamName, Participant, ParticipantId)
 import Domain.Tournament (Tournament, TournamentId, TournamentName, OrganizerName, TournamentFormat, Visibility, TournamentState
  , ParticipantMode, TournamentDetails, PublicStats)
@@ -66,6 +76,9 @@ import Domain.Role (Role(..))
 import Domain.Audit (AuditEvent(..))
 import Domain.Scoreable (EFootballScore)
 import Domain.JoinRequest (JoinRequestStatus)
+import Domain.TeamInvite (TeamInviteStatus)
+import Domain.TeamProfile (TeamProfile)
+import Domain.Substitution (Substitution, SubstitutionStatus)
 import Domain.Notification (NotificationKind, Notification)
 import Data.Map.Strict (Map)
 import Data.Text (Text)
@@ -321,3 +334,81 @@ class Monad m => IdentityRepository m where
   createHandoff    :: Text -> HandoffPayload -> Int -> m ()
   consumeHandoff   :: Text -> Int -> m (Maybe HandoffPayload)
   purgeExpiredHandoffs :: Int -> m ()
+
+-- Team logos: one JPEG per team, looked up by team name (case-insensitive).
+class Monad m => TeamLogoRepository m where
+  setTeamLogo    :: TeamName -> ByteString -> m ()
+  getTeamLogo    :: TeamName -> m (Maybe ByteString)
+  hasTeamLogo    :: TeamName -> m Bool
+  deleteTeamLogo :: TeamName -> m ()
+
+-- Team invites: an owner invites a registered player by username; the player accepts or declines.
+class Monad m => TeamInviteRepository m where
+  createTeamInvite       :: TeamName -> UserId -> UserId -> m ()
+  setTeamInviteStatus    :: TeamName -> UserId -> TeamInviteStatus -> m ()
+  getTeamInvite          :: TeamName -> UserId -> m (Maybe TeamInviteStatus)
+  deleteTeamInvite       :: TeamName -> UserId -> m ()
+  listPendingTeamInvites :: TeamName -> m [UserId]
+  listInvitesForUser     :: UserId -> m [(TeamName, UserId)]
+  listTeamNamesByMember  :: PlayerName -> m [TeamName]
+
+-- Match room: referees per tournament, one lobby code per match, evidence screenshots per match.
+class Monad m => MatchRoomRepository m where
+  addReferee          :: TournamentId -> UserId -> m ()
+  removeReferee       :: TournamentId -> UserId -> m ()
+  listReferees        :: TournamentId -> m [UserId]
+  setLobbyCode        :: MatchId -> UserId -> Text -> m ()
+  getLobbyCode        :: MatchId -> m (Maybe Text)
+  addEvidence         :: MatchId -> UserId -> Maybe Text -> ByteString -> m Int
+  listEvidence        :: MatchId -> m [(Int, UserId, Maybe Text, Text)]
+  getEvidenceImage    :: MatchId -> Int -> m (Maybe ByteString)
+  getEvidenceUploader :: MatchId -> Int -> m (Maybe UserId)
+  deleteEvidence      :: MatchId -> Int -> m ()
+  countEvidence       :: MatchId -> m Int
+  addMatchMessage     :: MatchId -> Maybe UserId -> Text -> Text -> m Int
+  listMatchMessages   :: MatchId -> Int -> m [(Int, Maybe UserId, Text, Text, Text)]
+
+-- A player's completed matches, newest first. The player is matched by name, either directly
+-- or as a member of a team that played.
+class Monad m => MatchHistoryRepository m where
+  listMatchIdsForPlayer :: PlayerName -> Int -> m [MatchId]
+
+
+-- Announcements: text updates the tournament owner posts, newest first.
+-- deleteAnnouncement says whether a row was removed (False = no such announcement on this tournament).
+class Monad m => AnnouncementRepository m where
+  addAnnouncement    :: TournamentId -> UserId -> Text -> m Int
+  listAnnouncements  :: TournamentId -> m [Announcement]
+  deleteAnnouncement :: TournamentId -> Int -> m Bool
+
+
+-- Prize split: the percentage each place receives, in place order (1st first).
+-- An empty list means no split is set. savePrizeSplit replaces the whole split,
+-- so callers run it inside withTxN.
+class Monad m => PrizeSplitRepository m where
+  getPrizeSplit   :: TournamentId -> m [Int]
+  savePrizeSplit  :: TournamentId -> [Int] -> m ()
+  clearPrizeSplit :: TournamentId -> m ()
+
+-- Team profile: tag, primary game, region and recruitment status, plus a record counted from
+-- the completed matches the team played (wins, losses). Draws are not counted.
+class Monad m => TeamProfileRepository m where
+  setTeamProfile :: TeamName -> TeamProfile -> m ()
+  getTeamProfile :: TeamName -> m (Maybe TeamProfile)
+  getTeamRecord  :: TeamName -> m (Int, Int)
+
+-- Optional check-in deadline per tournament, stored as an ISO UTC string
+-- ("2026-11-19T18:30:00Z") so two of them compare correctly as plain text.
+class Monad m => CheckInDeadlineRepository m where
+  setCheckInDeadline :: TournamentId -> Maybe String -> m ()
+  getCheckInDeadline :: TournamentId -> m (Maybe String)
+
+-- Roster lock and substitutions: which tournaments a team is registered in, and the
+-- substitution requests (swap one member for another) that staff approve or decline.
+class Monad m => SubstitutionRepository m where
+  listTournamentIdsForTeam       :: TeamName -> m [TournamentId]
+  createSubstitution             :: TeamName -> TournamentId -> String -> UserId -> UserId -> m Int
+  listSubstitutionsForTournament :: TournamentId -> m [Substitution]
+  listSubstitutionsForTeam       :: TeamName -> m [Substitution]
+  getSubstitution                :: Int -> m (Maybe Substitution)
+  setSubstitutionStatus          :: Int -> UserId -> SubstitutionStatus -> m ()

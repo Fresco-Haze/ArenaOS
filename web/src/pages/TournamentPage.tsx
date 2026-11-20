@@ -25,12 +25,19 @@ import PlayerLookup from '../components/PlayerLookup'
 import LobbyStandings from '../components/LobbyStandings'
 import Tabs from '../components/Tabs'
 import JoinBar from '../components/JoinBar'
+import Announcements from '../components/Announcements'
+import PrizeSplit from '../components/PrizeSplit'
+import { PrizeSplitView } from '../lib/prizeSplit'
+import { AnnouncementList } from '../lib/announcements'
+import { useApi } from '../hooks/useApi'
+import Countdown from '../components/Countdown'
 import BannerImg from '../components/BannerImg'
 import BannerEditor from '../components/BannerEditor'
 import ConfirmDialog from '../components/ConfirmDialog'
+import CheckInCountdown from '../components/CheckInCountdown'
 import { checkInSelf, removeParticipant, setCheckedIn } from '../lib/tournamentActions'
 
-type TabId = 'overview' | 'bracket' | 'predictions' | 'players'
+type TabId = 'overview' | 'bracket' | 'predictions' | 'players' | 'rules' | 'announcements'
 
 function PeopleIcon() {
   return (
@@ -67,6 +74,10 @@ export default function TournamentPage({ id }: { id: string }) {
   const [removing, setRemoving] = useState<Participant | null>(null)
   const [ckBusy, setCkBusy] = useState(false)
   const [ckError, setCkError] = useState<string | null>(null)
+  const ann = useApi(`/tournaments/${id}/announcements`, AnnouncementList, true)
+  const annCount = ann.data ? ann.data.announcements.length : 0
+  const split = useApi(`/tournaments/${id}/prize-split`, PrizeSplitView, true)
+  const [copied, setCopied] = useState(false)
 
   if (state.kind === 'loading') {
     return <LoadingBlock label="Loading tournament" rows={4} />
@@ -110,6 +121,7 @@ export default function TournamentPage({ id }: { id: string }) {
   const mode = squads ? 'Squad' : '1v1'
   const gameName = t.game && t.game !== 'Other' ? gameLabel[t.game] : null
   const when = t.startTime ? formatCardDate(t.startTime) : ''
+  const slotPct = t.maxParticipants > 0 ? Math.min(100, Math.round((view.participants.length / t.maxParticipants) * 100)) : 0
   const canRemove = view.viewerIsOwner && (t.state === 'RegistrationOpen' || t.state === 'RegistrationClosed')
   const platformName = PLATFORMS.find((p) => p.value === t.platform)?.label ?? null
   const feeText = t.entryFee == null ? null : t.entryFee === 0 ? 'Free' : formatKes(t.entryFee)
@@ -122,6 +134,16 @@ export default function TournamentPage({ id }: { id: string }) {
   const ckKey = (p: Participant) => p.type + ':' + participantName(p).toLowerCase()
   const checkedNames = new Set((checkIn?.checkedIn ?? []).map(ckKey))
   const checkInInfo = checkIn !== null && (checkIn.open || checkIn.checkedIn.length > 0) ? checkIn : null
+
+  async function copyLink() {
+    try {
+      await navigator.clipboard.writeText(window.location.href)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 2000)
+    } catch {
+      setCopied(false)
+    }
+  }
 
   async function runCheckIn(action: () => Promise<void>) {
     setCkBusy(true)
@@ -167,18 +189,24 @@ export default function TournamentPage({ id }: { id: string }) {
             <li>Up to {t.maxParticipants} {unit}</li>
             <li>Organized by {t.organizer}</li>
           </ul>
-          {(when || t.prize != null) && (
-            <ul className="tp-facts">
-              {when && <li><CalendarIcon />{when}</li>}
-              {t.prize != null && <li className="tp-prize"><TrophyIcon />{formatKes(t.prize)}</li>}
-            </ul>
-          )}
+          <dl className="tp-stats">
+            {t.prize != null && <div className="tp-stat"><dt><TrophyIcon />Prize pool</dt><dd className="num">{formatKes(t.prize)}</dd></div>}
+            {when && <div className="tp-stat"><dt><CalendarIcon />Starts</dt><dd>{when}</dd></div>}
+            {feeText && <div className="tp-stat"><dt>Entry fee</dt><dd>{feeText}</dd></div>}
+          </dl>
           {t.registrationDeadline && <p className="muted">Registration closes {formatCardDate(t.registrationDeadline)}</p>}
 
           </div>
         <div className="tp-info-side">
           <JoinBar tournament={t} signedIn={!!user} registered={view.viewerIsRegistered} requestStatus={view.viewerRequestStatus} onDone={reload} />
+          <div className="tp-slots" role="progressbar" aria-valuenow={slotPct} aria-valuemin={0} aria-valuemax={100} aria-label="Slots filled">
+            <div className="tp-slots-fill" style={{ width: slotPct + '%' }} />
+          </div>
           <p className="muted tp-count">{view.participants.length}/{t.maxParticipants} registered</p>
+          <button type="button" className="tp-share" aria-live="polite" onClick={() => void copyLink()}>{copied ? 'Link copied' : 'Copy link'}</button>
+          {t.state === 'RegistrationOpen' && (
+            <p className="muted tp-closes"><Countdown to={t.registrationDeadline} label="Registration closes in" /></p>
+          )}
           {view.viewerIsRegistered && checkIn && checkInPhase && (checkIn.open || checkIn.viewerCheckedIn) && (
             checkIn.viewerCheckedIn ? (
               <p role="status" className="tp-checkin">You&rsquo;re checked in.</p>
@@ -202,6 +230,8 @@ export default function TournamentPage({ id }: { id: string }) {
           { id: 'bracket', label: t.kind === 'Lobby' ? 'Standings' : 'Bracket' },
           ...(hasPredictions ? [{ id: 'predictions' as const, label: 'Predictions' }] : []),
           { id: 'players', label: squads ? 'Teams' : 'Players', count: view.participants.length },
+          ...(rulesList.length > 0 ? [{ id: 'rules' as const, label: 'Rules' }] : []),
+          ...(annCount > 0 || view.viewerIsOwner ? [{ id: 'announcements' as const, label: 'Announcements', count: annCount }] : []),
         ]}
       />
 
@@ -242,17 +272,46 @@ export default function TournamentPage({ id }: { id: string }) {
                 </p>
               </>
             )}
-            {rulesList.length > 0 && (
-              <>
-                <h3 className="tp-rules-title">Tournament rules</h3>
-                <ul className="tp-rules">
-                  {rulesList.map((r, i) => (
-                    <li key={i}>{r}</li>
-                  ))}
-                </ul>
-              </>
-            )}
           </section>
+
+          <PrizeSplit
+            tournamentId={t.tournamentId}
+            prize={t.prize ?? null}
+            isOwner={view.viewerIsOwner}
+            canEdit={t.state !== 'InProgress' && t.state !== 'Paused' && t.state !== 'Completed' && t.state !== 'Cancelled'}
+            data={split.data}
+            error={split.error}
+            onChanged={split.retry}
+          />
+          {(t.registrationDeadline || when) && (
+            <section className="tp-card tp-schedule">
+              <h2 className="tp-section-title">Schedule</h2>
+              <ol className="tp-timeline">
+                {t.registrationDeadline && (
+                  <li><span className="tp-dot" aria-hidden="true" /><div><strong>Registration closes</strong><span className="muted">{formatCardDate(t.registrationDeadline)}</span></div></li>
+                )}
+                {when && (
+                  <li><span className="tp-dot" aria-hidden="true" /><div><strong>Tournament starts</strong><span className="muted">{when}</span></div></li>
+                )}
+              </ol>
+            </section>
+          )}
+          {checkInInfo && (
+            <section className="tp-card tp-checkin-card">
+              <h2 className="tp-section-title">Check-in</h2>
+              <p className="tp-checkin-count">
+                <span className="num">{checkInInfo.checkedIn.length}</span>
+                <span className="muted"> of {view.participants.length} checked in</span>
+              </p>
+              <div className="tp-slots" role="progressbar" aria-valuenow={checkInInfo.checkedIn.length} aria-valuemin={0} aria-valuemax={view.participants.length} aria-label="Checked in">
+                <div className="tp-slots-fill" style={{ width: (view.participants.length > 0 ? Math.round((checkInInfo.checkedIn.length / view.participants.length) * 100) : 0) + '%' }} />
+              </div>
+              <p className="muted">
+                {checkInInfo.open ? 'Check-in is open.' : 'Check-in is closed.'}
+                {checkInInfo.open && checkInInfo.closesAt ? <> <CheckInCountdown closesAt={checkInInfo.closesAt} /></> : null}
+              </p>
+            </section>
+          )}
         </div>
       ) : tab === 'bracket' && t.kind === 'Lobby' ? (
         <div role="tabpanel" id="panel-bracket" aria-labelledby="tab-bracket">
@@ -280,6 +339,21 @@ export default function TournamentPage({ id }: { id: string }) {
               The bracket appears here once the organizer generates it.
             </EmptyState>
           )}
+        </div>
+      ) : tab === 'announcements' ? (
+        <div role="tabpanel" id="panel-announcements" aria-labelledby="tab-announcements">
+          <Announcements tournamentId={t.tournamentId} isOwner={view.viewerIsOwner} items={ann.data ? ann.data.announcements : null} error={ann.error} onChanged={ann.retry} />
+        </div>
+      ) : tab === 'rules' ? (
+        <div role="tabpanel" id="panel-rules" aria-labelledby="tab-rules">
+          <section className="tp-card">
+            <h2 className="tp-section-title">Rules &amp; format</h2>
+            <ul className="tp-rules">
+              {rulesList.map((r, i) => (
+                <li key={i}>{r}</li>
+              ))}
+            </ul>
+          </section>
         </div>
       ) : tab === 'predictions' && hasPredictions ? (
         <div role="tabpanel" id="panel-predictions" aria-labelledby="tab-predictions">

@@ -1,6 +1,14 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Main (main) where
 
+import qualified Engine.PrizeSplit as PSplit
+import qualified Application.UseCases.Announcements as AnnUC
+import qualified Data.Text as AnnT
+import qualified Application.UseCases.GetRankings as GrkP
+import qualified Engine.Rankings as ErkP
+import qualified Domain.Participant as DPart
+import qualified Data.Time as AcrTime
+import qualified Application.UseCases.CloseRegistration as AcrClose
 import Domain.Tournament (mkGame, gameName, legacyGameName)
 import Test.Hspec
 import Control.Monad (forM_)
@@ -122,6 +130,19 @@ import Shell.Persistence.SQLite.EFootballScoreRepository ()
 import Shell.Persistence.SQLite.JoinRequestRepository ()
 import Shell.Persistence.SQLite.NotificationRepository ()
 import Shell.Persistence.SQLite.AvatarRepository ()
+import Shell.Persistence.SQLite.TeamLogoRepository ()
+import Shell.Persistence.SQLite.TeamInviteRepository ()
+import Shell.Persistence.SQLite.MatchRoomRepository ()
+import qualified Application.UseCases.MatchRoom as MRoom
+import Shell.Persistence.SQLite.MatchHistoryRepository ()
+import Shell.Persistence.SQLite.TeamProfileRepository ()
+import qualified Application.UseCases.TeamProfile as TProf
+import Domain.TeamProfile (TeamProfile(..), Recruitment(..))
+import Shell.Persistence.SQLite.CheckInDeadlineRepository ()
+import qualified Application.UseCases.CheckInDeadline as CkDl
+import Shell.Persistence.SQLite.SubstitutionRepository ()
+import qualified Application.UseCases.Substitutions as Subs
+import qualified Application.UseCases.TeamInvites as TInv
 import Shell.Persistence.SQLite.LobbyRepository ()
 import Shell.Persistence.SQLite.CheckInRepository ()
 import qualified Application.UseCases.CheckIn as CkIn
@@ -327,6 +348,11 @@ spec = before_ resetTestDb $ do
   statsSpec
   gamesSpec
   publicFilterSpec
+  statusFormatFeeFilterSpec
+  autoCloseRegistrationSpec
+  rankingsPlayedSpec
+  announcementSpec
+  prizeSplitSpec
   upcomingFilterSpec
   prizePoolSpec
   descriptionSpec
@@ -6636,6 +6662,191 @@ spec = before_ resetTestDb $ do
         pure (none, got, has, other, gone)
       result `shouldBe` Right (Nothing, Just (BSX.pack [4, 5, 6, 7]), True, False, False)
 
+    it "Substitutions: a locked roster refuses invites, and a swap is requested by the owner and approved by staff" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "sb-owner"
+        capU <- createTestUser "sb-cap"
+        newU <- createTestUser "sb-new"
+        let cap = Player (PlayerName "sb-cap")
+            bench = Player (PlayerName "sb-bench")
+            tn = TeamName "sb-team"
+        _ <- unwrap =<< createTeam (Team tn cap [cap, bench])
+        Repo.setTeamOwner tn capU
+        tid <- stOpen owner "Sub Cup" 8
+        _ <- unwrap =<< RPC.joinTournamentAsTeam stNow capU tid "sb-team"
+        _ <- TInv.inviteToTeam capU tn "sb-new"
+        notLockedYet <- Subs.requestSubstitution capU tn tid "sb-bench" "sb-new"
+        _ <- unwrap =<< AcrClose.closeRegistration owner tid
+        lockedInvite <- Subs.inviteToTeamUnlocked capU tn "sb-new"
+        lockedAccept <- Subs.acceptTeamInviteUnlocked newU tn
+        notOwner <- Subs.requestSubstitution newU tn tid "sb-bench" "sb-new"
+        capOut <- Subs.requestSubstitution capU tn tid "sb-cap" "sb-new"
+        unknown <- Subs.requestSubstitution capU tn tid "sb-bench" "sb-nobody"
+        r1 <- Subs.requestSubstitution capU tn tid "sb-bench" "sb-new"
+        r2 <- Subs.requestSubstitution capU tn tid "sb-bench" "sb-new"
+        notStaff <- case r1 of
+          Right sid -> Subs.decideSubstitution newU tid sid True
+          Left e    -> pure (Left e)
+        approved <- case r1 of
+          Right sid -> Subs.decideSubstitution owner tid sid True
+          Left e    -> pure (Left e)
+        team <- Repo.getTeam tn
+        again <- case r1 of
+          Right sid -> Subs.decideSubstitution owner tid sid True
+          Left e    -> pure (Left e)
+        let names = [ n | Player (PlayerName n) <- teamMembers team ]
+        pure ( fmap (const ()) notLockedYet
+             , lockedInvite, lockedAccept
+             , fmap (const ()) notOwner, fmap (const ()) capOut, fmap (const ()) unknown
+             , fmap (const ()) r1, fmap (const ()) r2
+             , notStaff, approved
+             , "sb-new" `elem` names, "sb-bench" `elem` names
+             , again )
+      result `shouldBe` Right
+        ( Left Subs.SubRosterNotLocked
+        , Left TInv.InviteRosterLocked, Left TInv.InviteRosterLocked
+        , Left Subs.SubNotOwner, Left Subs.SubBadOutPlayer, Left Subs.SubInUserNotFound
+        , Right (), Left Subs.SubAlreadyPending
+        , Left Subs.SubNotStaff, Right ()
+        , True, False
+        , Left Subs.SubNotPending )
+    it "Check-in deadline: it is stored and cleared, and a self check-in after it is refused" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "cd-owner"
+        tid <- createOpenTournament owner "Deadline Cup" 4
+        none <- Repo.getCheckInDeadline tid
+        Repo.setCheckInDeadline tid (Just "2026-01-01T00:00:00Z")
+        got <- Repo.getCheckInDeadline tid
+        late <- CkDl.checkInSelfAt "2026-06-01T00:00:00Z" owner tid
+        Repo.setCheckInDeadline tid Nothing
+        cleared <- Repo.getCheckInDeadline tid
+        pure (none, got, late, cleared)
+      result `shouldBe` Right (Nothing, Just "2026-01-01T00:00:00Z", Left CkIn.CheckInNotOpen, Nothing)
+
+    it "Team profiles: only the owner saves one, bad values are refused, and a new team has an empty record" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "tp-owner"
+        stranger <- createTestUser "tp-stranger"
+        let cap = Player (PlayerName "tp-owner")
+        _ <- unwrap =<< createTeam (Team (TeamName "Profile Squad") cap [cap])
+        Repo.setTeamOwner (TeamName "Profile Squad") owner
+        none <- TProf.readTeamProfile (TeamName "Profile Squad")
+        bad <- TProf.updateTeamProfile owner (TeamName "Profile Squad") (TeamProfile "TOOLONGTAG" "" "" InviteOnly)
+        badRegion <- TProf.updateTeamProfile owner (TeamName "Profile Squad") (TeamProfile "PSQ" "" "Mars" InviteOnly)
+        notOwner <- TProf.updateTeamProfile stranger (TeamName "Profile Squad") (TeamProfile "PSQ" "" "" InviteOnly)
+        ok <- TProf.updateTeamProfile owner (TeamName "Profile Squad") (TeamProfile "psq" "Valorant" "NA East" OpenTryouts)
+        got <- TProf.readTeamProfile (TeamName "Profile Squad")
+        pure ( tpvEmpty none, bad, badRegion, notOwner, ok
+             , TProf.tpvProfile got, TProf.tpvWins got, TProf.tpvLosses got )
+      result `shouldBe` Right
+        ( True, Left TProf.ProfileInvalid, Left TProf.ProfileInvalid, Left TProf.ProfileNotOwner, Right ()
+        , TeamProfile "PSQ" "Valorant" "NA East" OpenTryouts, 0, 0 )
+
+    it "Match room storage: messages are listed after a given id, and match history is empty for a new player" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        u <- createTestUser "mh-user"
+        let m = MatchId 9002
+        a <- Repo.addMatchMessage m (Just u) "chat" "hello"
+        _ <- Repo.addMatchMessage m Nothing "log" "set the lobby code"
+        everything <- Repo.listMatchMessages m 0
+        later <- Repo.listMatchMessages m a
+        hist <- Repo.listMatchIdsForPlayer (PlayerName "mh-user") 5
+        pure (map (\(_, _, k, _, _) -> k) everything, length later, hist)
+      result `shouldBe` Right (["chat", "log"], 1, [])
+
+    it "Match room: referees can be assigned and removed, and only the tournament owner may do it" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "mr-owner"
+        ref <- createTestUser "mr-ref"
+        other <- createTestUser "mr-other"
+        tid <- createOpenTournament owner "Referee Cup" 4
+        notOwner <- MRoom.assignReferee other tid "mr-ref"
+        unknown <- MRoom.assignReferee owner tid "mr-nobody"
+        ok <- MRoom.assignReferee owner tid "mr-ref"
+        again <- MRoom.assignReferee owner tid "mr-ref"
+        listed <- MRoom.listTournamentReferees other tid
+        gone <- MRoom.unassignReferee owner tid ref
+        after <- MRoom.listTournamentReferees other tid
+        pure (notOwner, unknown, ok, again, fmap (map snd) listed, gone, fmap length after)
+      result `shouldBe` Right (Left MRoom.RoomForbidden, Left MRoom.RoomUserNotFound, Right (), Left MRoom.RoomAlreadyReferee, Right ["mr-ref"], Right (), Right 0)
+
+    it "Match room storage: lobby codes are replaced, and evidence is listed, read back and removed" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        u <- createTestUser "mr-store"
+        let m = MatchId 9001
+        none <- Repo.getLobbyCode m
+        Repo.setLobbyCode m u "AAA-111"
+        Repo.setLobbyCode m u "BBB-222"
+        code <- Repo.getLobbyCode m
+        e1 <- Repo.addEvidence m u (Just "scoreboard") (BSX.pack [1, 2, 3])
+        _  <- Repo.addEvidence m u Nothing (BSX.pack [4, 5])
+        listed <- Repo.listEvidence m
+        img <- Repo.getEvidenceImage m e1
+        up <- Repo.getEvidenceUploader m e1
+        Repo.deleteEvidence m e1
+        remaining <- Repo.countEvidence m
+        pure (none, code, map (\(_, _, n, _) -> n) listed, img, up == Just u, remaining)
+      result `shouldBe` Right (Nothing, Just "BBB-222", [Just "scoreboard", Nothing], Just (BSX.pack [1, 2, 3]), True, 1)
+
+    it "Team invites: the owner invites a player, who accepts and joins the roster" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "ti-owner"
+        guest <- createTestUser "ti-guest"
+        let cap = Player (PlayerName "ti-owner")
+        _ <- unwrap =<< createTeam (Team (TeamName "Invite Squad") cap [cap])
+        Repo.setTeamOwner (TeamName "Invite Squad") owner
+        r1 <- TInv.inviteToTeam owner (TeamName "Invite Squad") "ti-guest"
+        r2 <- TInv.inviteToTeam owner (TeamName "Invite Squad") "ti-guest"
+        mine <- TInv.listMyTeamInvites guest
+        pending <- TInv.listPendingForTeam owner (TeamName "Invite Squad")
+        a <- TInv.acceptTeamInvite guest (TeamName "Invite Squad")
+        team <- Repo.getTeam (TeamName "Invite Squad")
+        mine2 <- TInv.listMyTeamInvites guest
+        joined <- TInv.listJoinedTeams guest
+        pure (r1, r2, length mine, fmap length pending, a, length (teamMembers team), length mine2, length joined)
+      result `shouldBe` Right (Right (), Left TInv.InviteAlreadyPending, 1, Right 1, Right (), 2, 0, 1)
+
+    it "Team invites: only the owner can invite, unknown and existing members are refused, and a declined invite can be sent again" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "ti2-owner"
+        other <- createTestUser "ti2-other"
+        let cap = Player (PlayerName "ti2-owner")
+        _ <- unwrap =<< createTeam (Team (TeamName "Invite Rules") cap [cap])
+        Repo.setTeamOwner (TeamName "Invite Rules") owner
+        notOwner <- TInv.inviteToTeam other (TeamName "Invite Rules") "ti2-owner"
+        unknown <- TInv.inviteToTeam owner (TeamName "Invite Rules") "nobody-here"
+        member <- TInv.inviteToTeam owner (TeamName "Invite Rules") "ti2-owner"
+        _ <- TInv.inviteToTeam owner (TeamName "Invite Rules") "ti2-other"
+        d <- TInv.declineTeamInvite other (TeamName "Invite Rules")
+        again <- TInv.inviteToTeam owner (TeamName "Invite Rules") "ti2-other"
+        revoke <- TInv.revokeTeamInvite owner (TeamName "Invite Rules") other
+        none <- TInv.acceptTeamInvite other (TeamName "Invite Rules")
+        pure (notOwner, unknown, member, d, again, revoke, none)
+      result `shouldBe` Right (Left TInv.InviteNotOwner, Left TInv.InviteUserNotFound, Left TInv.InviteAlreadyMember, Right (), Right (), Right (), Left TInv.InviteNotFound)
+
+    it "Team logos: a logo can be saved, replaced, read back, checked and removed" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        let cap = Player (PlayerName "logo-cap")
+        _ <- unwrap =<< createTeam (Team (TeamName "Logo Squad") cap [cap])
+        none <- Repo.getTeamLogo (TeamName "Logo Squad")
+        Repo.setTeamLogo (TeamName "Logo Squad") (BSX.pack [1, 2, 3])
+        Repo.setTeamLogo (TeamName "Logo Squad") (BSX.pack [4, 5, 6, 7])
+        got <- Repo.getTeamLogo (TeamName "logo squad")
+        has <- Repo.hasTeamLogo (TeamName "Logo Squad")
+        Repo.deleteTeamLogo (TeamName "Logo Squad")
+        gone <- Repo.hasTeamLogo (TeamName "Logo Squad")
+        pure (none, got, has, gone)
+      result `shouldBe` Right (Nothing, Just (BSX.pack [4, 5, 6, 7]), True, False)
+
     it "Rankings: equal titles and wins share a rank, and the next rank skips" $ do
       map fst (Rk.assignRanks [Rk.RankingEntry "a" 1 3, Rk.RankingEntry "b" 0 2, Rk.RankingEntry "c" 0 2, Rk.RankingEntry "d" 0 1])
         `shouldBe` [1, 2, 2, 4]
@@ -10922,3 +11133,171 @@ identityPurgeSpec = describe "Identity storage: purging old handoffs" $ do
     a <- Repo.consumeHandoff "old" 50
     c <- Repo.consumeHandoff "live" 300
     pure (a, map SQ.fromOnly n, c == Just (Repo.HandoffLogin u))
+
+
+-- v0.15: status, format and fee filters on the public list.
+sfTemplate :: Tournament
+sfTemplate = case LP.selectPublic 1 plAll of
+  (t:_) -> t
+  []    -> error "sfTemplate: plAll has no public tournament"
+
+sfMake :: Int -> TournamentState -> TournamentFormat -> Maybe Int -> Tournament
+sfMake n st fm fee = sfTemplate
+  { tournamentId = TournamentId (fromIntegral n)
+  , tournamentState = st
+  , tournamentFormat = fm
+  , tournamentEntryFee = fee
+  }
+
+sfList :: [Tournament]
+sfList =
+  [ sfMake 1 RegistrationOpen SingleElimination Nothing
+  , sfMake 2 InProgress DoubleElimination (Just 0)
+  , sfMake 3 Paused RoundRobin (Just 500)
+  , sfMake 4 Completed SingleElimination (Just 500)
+  , sfMake 5 Cancelled SingleElimination Nothing
+  , sfMake 6 RegistrationClosed SingleElimination (Just 100)
+  ]
+
+statusFormatFeeFilterSpec :: Spec
+statusFormatFeeFilterSpec = describe "Public list status, format and fee filters" $ do
+  let base = LP.defaultPublicFilter
+      ids f = map (\t -> fromIntegral (unTournamentId (tournamentId t)) :: Int) (LP.selectPublicFiltered f sfList)
+  it "status=open keeps only tournaments open for registration" $
+    ids (base { LP.pfStatus = Just LP.StatusOpen }) `shouldBe` [1]
+  it "status=live keeps in-progress and paused tournaments" $
+    ids (base { LP.pfStatus = Just LP.StatusLive }) `shouldBe` [3, 2]
+  it "status=finished keeps only completed tournaments" $
+    ids (base { LP.pfStatus = Just LP.StatusFinished }) `shouldBe` [4]
+  it "with no status filter everything public is listed, cancelled included" $
+    ids base `shouldBe` [6, 5, 4, 3, 2, 1]
+  it "format=single keeps single elimination" $
+    ids (base { LP.pfFormat = Just SingleElimination }) `shouldBe` [6, 5, 4, 1]
+  it "format=double keeps double elimination" $
+    ids (base { LP.pfFormat = Just DoubleElimination }) `shouldBe` [2]
+  it "format=roundrobin keeps round robin" $
+    ids (base { LP.pfFormat = Just RoundRobin }) `shouldBe` [3]
+  it "fee=free keeps no fee or a fee of 0" $
+    ids (base { LP.pfFee = Just LP.FeeFree }) `shouldBe` [5, 2, 1]
+  it "fee=paid keeps only fees above 0" $
+    ids (base { LP.pfFee = Just LP.FeePaid }) `shouldBe` [6, 4, 3]
+  it "filters combine" $
+    ids (base { LP.pfStatus = Just LP.StatusFinished, LP.pfFee = Just LP.FeePaid, LP.pfFormat = Just SingleElimination }) `shouldBe` [4]
+  it "status and fee together" $
+    ids (base { LP.pfStatus = Just LP.StatusLive, LP.pfFee = Just LP.FeePaid }) `shouldBe` [3]
+  it "the total ignores the page size" $ do
+    let f = base { LP.pfStatus = Just LP.StatusLive, LP.pfLimit = 1 }
+    ids f `shouldBe` [3]
+    length (LP.selectPublicMatching f sfList) `shouldBe` 2
+
+
+-- v0.15: registrations close by themselves at their deadline.
+acrNow :: AcrTime.UTCTime
+acrNow = ucfNow
+
+acrAgo, acrAhead :: AcrTime.UTCTime
+acrAgo = AcrTime.addUTCTime (-3600) acrNow
+acrAhead = AcrTime.addUTCTime 3600 acrNow
+
+acrT :: Int -> TournamentState -> Maybe AcrTime.UTCTime -> Tournament
+acrT n st dl = (sfMake n st SingleElimination Nothing) { tournamentRegistrationDeadline = dl }
+
+autoCloseRegistrationSpec :: Spec
+autoCloseRegistrationSpec = describe "Auto-closing registration at the deadline" $ do
+  let ids = map (\t -> fromIntegral (unTournamentId (tournamentId t)) :: Int) . AcrClose.selectExpiredRegistrations acrNow
+  it "selects an open tournament whose deadline has passed" $
+    ids [acrT 1 RegistrationOpen (Just acrAgo)] `shouldBe` [1]
+  it "leaves a future deadline alone" $
+    ids [acrT 1 RegistrationOpen (Just acrAhead)] `shouldBe` []
+  it "leaves a tournament with no deadline alone" $
+    ids [acrT 1 RegistrationOpen Nothing] `shouldBe` []
+  it "a deadline equal to now is not expired yet" $
+    ids [acrT 1 RegistrationOpen (Just acrNow)] `shouldBe` []
+  it "only touches tournaments that are open for registration" $
+    ids [ acrT 1 st (Just acrAgo) | st <- [RegistrationClosed, InProgress, Paused, Completed, Cancelled] ] `shouldBe` []
+  it "keeps the input order when several have expired" $
+    ids [ acrT 3 RegistrationOpen (Just acrAgo), acrT 2 RegistrationOpen (Just acrAhead), acrT 1 RegistrationOpen (Just acrAgo) ] `shouldBe` [3, 1]
+
+
+-- v0.15: matches played per player, for the rankings page.
+rkpP :: String -> DPart.Participant
+rkpP n = DPart.Individual (DPart.Player (DPart.PlayerName n))
+
+rankingsPlayedSpec :: Spec
+rankingsPlayedSpec = describe "Matches played in rankings" $ do
+  it "counts one match for each player who took part" $ do
+    let m = ErkP.computePlayed [rkpP "alice", rkpP "bob"]
+    ErkP.playedCount m "alice" `shouldBe` 1
+    ErkP.playedCount m "bob" `shouldBe` 1
+  it "adds matches up across the list" $ do
+    let m = ErkP.computePlayed [rkpP "alice", rkpP "bob", rkpP "alice", rkpP "cy"]
+    ErkP.playedCount m "alice" `shouldBe` 2
+    ErkP.playedCount m "cy" `shouldBe` 1
+  it "treats names that differ only by case as one player" $ do
+    let m = ErkP.computePlayed [rkpP "Alice", rkpP "ALICE", rkpP "alice"]
+    ErkP.playedCount m "aLiCe" `shouldBe` 3
+  it "gives zero for a player with no matches" $
+    ErkP.playedCount (ErkP.computePlayed [rkpP "alice"]) "nobody" `shouldBe` 0
+  it "honours the game filter, like the rankings do" $ do
+    let ef  = sfTemplate { tournamentGame = Just GameEFootball }
+        cod = sfTemplate { tournamentGame = Just GameCallOfDuty }
+        facts = [ GrkP.PublicFact ef [] Nothing [] [rkpP "alice", rkpP "bob"]
+                , GrkP.PublicFact cod [] Nothing [] [rkpP "alice", rkpP "cy"] ]
+    ErkP.playedCount (GrkP.playedFrom Nothing facts) "alice" `shouldBe` 2
+    ErkP.playedCount (GrkP.playedFrom (Just GameEFootball) facts) "alice" `shouldBe` 1
+    ErkP.playedCount (GrkP.playedFrom (Just GameEFootball) facts) "cy" `shouldBe` 0
+
+
+-- v0.15: tournament announcements (the pure message rules).
+announcementSpec :: Spec
+announcementSpec = describe "Announcements" $ do
+  it "keeps a normal message" $
+    AnnUC.cleanAnnouncementBody (AnnT.pack "Bracket is live") `shouldBe` Right (AnnT.pack "Bracket is live")
+  it "trims spaces around the message" $
+    AnnUC.cleanAnnouncementBody (AnnT.pack "  hello  ") `shouldBe` Right (AnnT.pack "hello")
+  it "rejects an empty message" $
+    AnnUC.cleanAnnouncementBody (AnnT.pack "") `shouldBe` Left AnnUC.AnnouncementBodyEmpty
+  it "rejects a message of only spaces and line breaks" $
+    AnnUC.cleanAnnouncementBody (AnnT.pack "   \n  ") `shouldBe` Left AnnUC.AnnouncementBodyEmpty
+  it "accepts exactly 2000 characters" $
+    AnnUC.cleanAnnouncementBody (AnnT.replicate 2000 (AnnT.pack "a")) `shouldBe` Right (AnnT.replicate 2000 (AnnT.pack "a"))
+  it "rejects 2001 characters" $
+    AnnUC.cleanAnnouncementBody (AnnT.replicate 2001 (AnnT.pack "a")) `shouldBe` Left AnnUC.AnnouncementBodyTooLong
+
+
+-- v0.15: prize split rules (pure).
+prizeSplitSpec :: Spec
+prizeSplitSpec = describe "Prize split rules" $ do
+  it "accepts 50, 30, 20" $
+    PSplit.validateSplit [50, 30, 20] `shouldBe` Right [50, 30, 20]
+  it "accepts a single place with everything" $
+    PSplit.validateSplit [100] `shouldBe` Right [100]
+  it "accepts equal places" $
+    PSplit.validateSplit [50, 50] `shouldBe` Right [50, 50]
+  it "rejects no places" $
+    PSplit.validateSplit [] `shouldBe` Left PSplit.SplitNoPlaces
+  it "rejects more than 8 places" $
+    PSplit.validateSplit [12, 12, 12, 12, 12, 12, 12, 12, 4] `shouldBe` Left PSplit.SplitTooManyPlaces
+  it "accepts exactly 8 places" $
+    PSplit.validateSplit [13, 13, 13, 13, 12, 12, 12, 12] `shouldBe` Right [13, 13, 13, 13, 12, 12, 12, 12]
+  it "rejects a place under 1 percent" $
+    PSplit.validateSplit [60, 40, 0] `shouldBe` Left PSplit.SplitPercentTooSmall
+  it "rejects a lower place getting more than the one above" $
+    PSplit.validateSplit [20, 30, 50] `shouldBe` Left PSplit.SplitNotNonIncreasing
+  it "rejects a total under 100" $
+    PSplit.validateSplit [40, 30] `shouldBe` Left PSplit.SplitTotalNot100
+  it "rejects a total over 100" $
+    PSplit.validateSplit [60, 50] `shouldBe` Left PSplit.SplitTotalNot100
+  it "splits a round prize exactly" $
+    PSplit.splitAmounts 100000 [50, 30, 20] `shouldBe` [50000, 30000, 20000]
+  it "gives the leftover shilling to first place" $
+    PSplit.splitAmounts 1001 [50, 30, 20] `shouldBe` [501, 300, 200]
+  it "gives the leftover to first place on a tiny prize" $
+    PSplit.splitAmounts 7 [50, 30, 20] `shouldBe` [4, 2, 1]
+  it "has no amounts without places" $
+    PSplit.splitAmounts 5000 [] `shouldBe` []
+  it "always adds up to the prize" $
+    mapM_ (\prize -> sum (PSplit.splitAmounts prize [40, 25, 20, 10, 5]) `shouldBe` prize) [1, 7, 99, 1001, 12345, 50000, 99999]
+
+tpvEmpty :: TProf.TeamProfileView -> Bool
+tpvEmpty v = TProf.tpvProfile v == TeamProfile "" "" "" InviteOnly && TProf.tpvWins v == 0 && TProf.tpvLosses v == 0

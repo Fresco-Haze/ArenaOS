@@ -6,6 +6,8 @@ import { useAuth } from '../auth/context'
 import { safeNext } from '../lib/safeNext'
 import { retrySeconds, useCooldown } from '../lib/rateLimit'
 import AuthBrand from '../components/AuthBrand'
+import AuthSplit from '../components/AuthSplit'
+import AuthTabs from '../components/AuthTabs'
 import AuthField from '../components/AuthField'
 import GoogleButton from '../components/GoogleButton'
 import { googleErrorMessage } from '../lib/googleSignIn'
@@ -43,8 +45,10 @@ export default function LoginPage() {
   }
 
   return (
+    <AuthSplit>
     <div className="auth-page">
       <AuthBrand />
+      <AuthTabs next={next} />
       <h1 className="auth-title">Welcome Back</h1>
       <p className="muted auth-sub">Sign in to continue to your account</p>
       {notice && <p role="status" className="form-notice">{notice}</p>}
@@ -91,5 +95,6 @@ export default function LoginPage() {
         <Link to={`/register?next=${encodeURIComponent(next)}`}>Register</Link>
       </p>
     </div>
+    </AuthSplit>
   )
 }

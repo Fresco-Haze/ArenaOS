@@ -6,6 +6,7 @@ import { fetchNotifications, markNotificationsRead } from '../lib/tournamentActi
 import { timeAgo } from '../lib/cardDate'
 import type { NotificationItem, NotificationList } from '../model'
 import Logo from './Logo'
+import AuthSplit from './AuthSplit'
 import Avatar from './Avatar'
 
 const ICONS = {
@@ -17,6 +18,7 @@ const ICONS = {
   players: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21c0-4 4-6 8-6s8 2 8 6',
   rankings: 'M5 20V10M12 20V4M19 20v-7',
   plus: 'M12 5v14M5 12h14',
+  settings: 'M4 7h9M17 7h3M4 17h3M11 17h9M15 4v6M9 14v6',
   search: 'M11 18a7 7 0 1 1 0-14 7 7 0 0 1 0 14zM20 20l-4-4',
   chevron: 'M6 9l6 6 6-6',
   bell: 'M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15zM10 20a2 2 0 0 0 4 0',
@@ -37,6 +39,17 @@ function SearchBar({ open, onDone }: { open: boolean; onDone: () => void }) {
   const { search } = useLocation()
   const current = new URLSearchParams(search).get('q') ?? ''
 
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault()
+        document.getElementById('shell-search-input')?.focus()
+      }
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [])
+
   function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
     const q = String(new FormData(e.currentTarget).get('q') ?? '').trim()
@@ -56,6 +69,7 @@ function SearchBar({ open, onDone }: { open: boolean; onDone: () => void }) {
         placeholder="Search tournaments by name"
         autoComplete="off"
       />
+      <kbd className="search-kbd" aria-hidden="true">Ctrl K</kbd>
     </form>
   )
 }
@@ -252,7 +266,7 @@ function Bell() {
 function SideLink({ to, icon, end, children }: { to: string; icon: IconName; end?: boolean; children: ReactNode }) {
   return (
     <li>
-      <NavLink to={to} end={end} className="side-link">
+      <NavLink to={to} end={end} className="side-link" title={typeof children === 'string' ? children : undefined}>
         <Icon name={icon} />
         <span>{children}</span>
       </NavLink>
@@ -260,22 +274,25 @@ function SideLink({ to, icon, end, children }: { to: string; icon: IconName; end
   )
 }
 
-function SideNav() {
+function SideNav({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
   const { user } = useAuth()
   return (
     <aside className="shell-side">
       <nav aria-label="Main">
+        <span className="side-label" aria-hidden="true">Compete</span>
         <ul className="side-list">
           <SideLink to="/" icon="home" end>Home</SideLink>
           <SideLink to="/tournaments" icon="trophy">Tournaments</SideLink>
           {user && <SideLink to="/me" icon="list" end>My Tournaments</SideLink>}
-          <SideLink to="/teams/new" icon="teams">Teams</SideLink>
+          <SideLink to="/teams" icon="teams">Teams</SideLink>
         </ul>
         <hr className="side-rule" />
+        <span className="side-label" aria-hidden="true">Explore</span>
         <ul className="side-list" aria-label="Explore">
           <SideLink to="/games" icon="games">Games</SideLink>
           <SideLink to="/players" icon="players">Players</SideLink>
           <SideLink to="/rankings" icon="rankings">Rankings</SideLink>
+          {user && <SideLink to="/settings" icon="settings">Settings</SideLink>}
         </ul>
       </nav>
       <section aria-labelledby="quick-actions-heading">
@@ -291,6 +308,10 @@ function SideNav() {
           </Link>
         </div>
       </section>
+    <button type="button" className="side-collapse" onClick={onToggle} aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
+      <svg className="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6" /></svg>
+      <span>Collapse</span>
+    </button>
     </aside>
   )
 }
@@ -311,30 +332,84 @@ function TabBar() {
       <TabLink to="/" icon="home" end>Home</TabLink>
       <TabLink to="/tournaments" icon="trophy">Tournaments</TabLink>
       <TabLink to="/me" icon="list" end>My Tournaments</TabLink>
-      <TabLink to="/teams/new" icon="teams">Teams</TabLink>
+      <TabLink to="/teams" icon="teams">Teams</TabLink>
       <TabLink to={user ? '/profile' : '/login'} icon="players" end>{user ? 'Profile' : 'Sign in'}</TabLink>
     </nav>
   )
 }
+function LandingNav() {
+  return (
+    <nav className="landing-nav" aria-label="Site">
+      <Link to="/tournaments">Tournaments</Link>
+      <Link to="/rankings">Leaderboards</Link>
+      <Link to="/games">Games</Link>
+      <a href="#organizers">For Organizers</a>
+    </nav>
+  )
+}
+const PAGE_TITLES: Record<string, string> = {
+  '/tournaments': 'Tournaments',
+  '/rankings': 'Rankings',
+  '/games': 'Games',
+  '/players': 'Players',
+  '/help': 'Help',
+  '/privacy': 'Privacy Policy',
+  '/terms': 'Terms of Use',
+  '/settings': 'Settings',
+  '/profile': 'Profile',
+  '/login': 'Sign in',
+  '/register': 'Create account',
+  '/forgot-password': 'Forgot password',
+  '/reset-password': 'Reset password',
+  '/login/google': 'Google sign-in',
+  '/me': 'My Tournaments',
+  '/me/new': 'Create tournament',
+  '/teams': 'Teams',
+  '/teams/new': 'Create team',
+}
+
+function titleFor(pathname: string): string {
+  const p = pathname.replace(/\/+$/, '') || '/'
+  if (p === '/') return 'SweatLobby'
+  const known = PAGE_TITLES[p]
+  if (known) return known + ' | SweatLobby'
+  if (/^\/tournaments\/\d+\/match\//.test(p)) return 'Match room | SweatLobby'
+  if (/^\/tournaments\/\d+$/.test(p)) return 'Tournament | SweatLobby'
+  if (p.startsWith('/players/')) return 'Player | SweatLobby'
+  return 'SweatLobby'
+}
+
 export default function AppShell({ children }: { children: ReactNode }) {
   const [searchOpen, setSearchOpen] = useState(false)
+  const [collapsed, setCollapsed] = useState(() => {
+    try { return localStorage.getItem('sl-side-collapsed') === '1' } catch { return false }
+  })
+  useEffect(() => {
+    try { localStorage.setItem('sl-side-collapsed', collapsed ? '1' : '0') } catch { /* storage blocked */ }
+  }, [collapsed])
   useEffect(() => {
     if (searchOpen) document.getElementById('shell-search-input')?.focus()
   }, [searchOpen])
   const { pathname } = useLocation()
+  useEffect(() => {
+    document.title = titleFor(pathname)
+  }, [pathname])
   const { user } = useAuth()
   const landing = !user && pathname === '/'
-  if (pathname === '/login' || pathname === '/register') {
-    return <main id="main" className="bare">{children}</main>
+  const authPaths = ['/login', '/register', '/forgot-password', '/reset-password', '/login/google']
+  if (authPaths.includes(pathname)) {
+    const selfWrapped = pathname === '/login' || pathname === '/register'
+    return <main id="main" className="bare">{selfWrapped ? children : <AuthSplit>{children}</AuthSplit>}</main>
   }
   return (
-    <div className="shell" style={landing ? { gridTemplate: '"top" auto "main" 1fr "foot" auto / minmax(0, 1fr)', paddingBottom: 0 } : undefined}>
+    <div className={'shell' + (collapsed ? ' shell-collapsed' : '')} style={landing ? { gridTemplate: '"top" auto "main" 1fr "foot" auto / minmax(0, 1fr)', paddingBottom: 0 } : undefined}>
       <a className="skip-link" href="#main">Skip to content</a>
       <header className="shell-top">
         <Link to="/" className="brand brand-wrap" aria-label="SweatLobby home">
           <Logo />
           <span className="brand-tag">Play &middot; Compete &middot; Connect</span>
         </Link>
+        {landing && <LandingNav />}
         <SearchBar open={searchOpen} onDone={() => setSearchOpen(false)} />
         <div className="shell-top-right">
           <button
@@ -350,7 +425,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
           <UserMenu />
         </div>
       </header>
-      {!landing && <SideNav />}
+      {!landing && <SideNav collapsed={collapsed} onToggle={() => setCollapsed((c) => !c)} />}
       <main id="main" className="shell-main">
         {children}
       </main>

@@ -3,7 +3,9 @@ import { Link } from 'react-router'
 import { ApiError } from '../api'
 import { cancelJoinRequest, joinTournament, withdrawFromTournament } from '../lib/tournamentActions'
 import type { JoinRequestStatus, Tournament } from '../model'
+import ConfirmDialog from './ConfirmDialog'
 import JoinTeam from './JoinTeam'
+import RegisterSummary from './RegisterSummary'
 
 export default function JoinBar({
   tournament: t,
@@ -20,6 +22,7 @@ export default function JoinBar({
 }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [confirmOpen, setConfirmOpen] = useState(false)
   const [now] = useState(() => Date.now())
 
   async function run(action: () => Promise<void>) {
@@ -100,10 +103,23 @@ export default function JoinBar({
 
   return (
     <div className="tp-join">
-      <button className="btn-primary" onClick={() => void run(() => joinTournament(t.tournamentId))} disabled={busy}>
-        {busy ? (t.requireApproval ? 'Requesting' : 'Registering') : (t.requireApproval ? 'Request to join' : 'Register Now')}
+      <button className="btn-primary" onClick={() => setConfirmOpen(true)}>
+        {t.requireApproval ? 'Request to join' : 'Register Now'}
       </button>
-      {error && <p role="alert" className="form-error">{error}</p>}
+      <ConfirmDialog
+        open={confirmOpen}
+        title={t.requireApproval ? 'Request to join' : 'Register for this tournament'}
+        confirmLabel={t.requireApproval ? 'Send request' : 'Confirm registration'}
+        className="dialog-wide"
+        onConfirm={async () => {
+          await joinTournament(t.tournamentId)
+          await onDone()
+        }}
+        onClose={() => setConfirmOpen(false)}
+      >
+        <RegisterSummary tournament={t} />
+        {t.requireApproval && <p className="muted">The organizer reviews every request.</p>}
+      </ConfirmDialog>
     </div>
   )
 }

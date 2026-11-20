@@ -1,4 +1,6 @@
 import { createContext, useContext, useState } from 'react'
+import type { CSSProperties } from 'react'
+import { Link } from 'react-router'
 import { formatDateTime } from '../lib/dates'
 import { layoutSection, layoutSingleElim, TREE } from '../lib/bracket'
 import type { TreeLayout } from '../lib/bracket'
@@ -92,6 +94,7 @@ function NodeCard({ node, nodeLabels }: { node: BracketNode; nodeLabels: Map<num
   const state = cardState(node)
   const cancelled = useContext(CancelledContext)
   const stopped = cancelled && (state === 'live' || state === 'scheduled')
+  const tid = useContext(TournamentIdContext)
   if (state === 'bye') {
     const filled = [node.slotA, node.slotB].find((s) => s.type === 'Filled')
     return (
@@ -111,6 +114,9 @@ function NodeCard({ node, nodeLabels }: { node: BracketNode; nodeLabels: Map<num
       <p className="match-status">
         {state === 'live' && !stopped && <span className="live-dot" aria-hidden="true" />}
         {stopped ? <span className="badge badge-danger">Cancelled</span> : <MatchStatus node={node} />}
+        {tid !== null && node.match && !stopped && (
+          <Link className="match-room-link" to={`/tournaments/${tid}/match/${node.nodeId}`}>Room</Link>
+        )}
       </p>
     </div>
   )
@@ -359,12 +365,42 @@ function RoundSwitcher({
   )
 }
 
+function BracketLegend() {
+  return (
+    <ul className="bracket-legend" aria-label="Legend">
+      <li><span className="legend-swatch legend-win" aria-hidden="true" />Winner</li>
+      <li><span className="legend-swatch legend-live" aria-hidden="true" />Live</li>
+      <li><span className="legend-swatch legend-wait" aria-hidden="true" />Waiting</li>
+    </ul>
+  )
+}
+const ZOOMS = [0.75, 1, 1.25] as const
+
+function ZoomBar({ zoom, onChange }: { zoom: number; onChange: (z: number) => void }) {
+  return (
+    <div className="zoom-bar" role="group" aria-label="Bracket zoom">
+      {ZOOMS.map((z) => (
+        <button key={z} type="button" className={'zoom-btn' + (zoom === z ? ' zoom-on' : '')} aria-pressed={zoom === z} onClick={() => onChange(z)}>
+          {Math.round(z * 100)}%
+        </button>
+      ))}
+    </div>
+  )
+}
 const CancelledContext = createContext(false)
+const TournamentIdContext = createContext<number | null>(null)
 
 export default function Bracket({ bracket, tournamentState, game }: { bracket: BracketView; tournamentState?: string; game?: string | null }) {
+  const [zoom, setZoom] = useState(1)
   return (
     <CancelledContext.Provider value={tournamentState === 'Cancelled'}>
-      <BracketInner bracket={bracket} game={game} />
+      <TournamentIdContext.Provider value={bracket.tournamentId}>
+        <BracketLegend />
+        {bracket.format !== 'RoundRobin' && <ZoomBar zoom={zoom} onChange={setZoom} />}
+        <div className="bracket-zoomable" style={{ '--bz': zoom } as CSSProperties}>
+          <BracketInner bracket={bracket} game={game} />
+        </div>
+      </TournamentIdContext.Provider>
     </CancelledContext.Provider>
   )
 }

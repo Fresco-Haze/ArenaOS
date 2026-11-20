@@ -133,6 +133,7 @@ export const CheckInView = z.object({
   open: z.boolean(),
   checkedIn: z.array(Participant),
   viewerCheckedIn: z.boolean().default(false),
+  closesAt: z.string().nullish(),
 })
 export type CheckInView = z.infer<typeof CheckInView>
 
@@ -157,7 +158,7 @@ export const ActivityItem = z.object({
 export type ActivityItem = z.infer<typeof ActivityItem>
 export const ActivityList = z.object({ activity: z.array(ActivityItem) })
 
-export const RankingRow = z.object({ rank: z.number(), player: z.string(), titles: z.number(), wins: z.number() })
+export const RankingRow = z.object({ rank: z.number(), player: z.string(), titles: z.number(), wins: z.number(), played: z.number().default(0) })
 export const RankingList = z.object({ rankings: z.array(RankingRow) })
 
 export const MeProfile = z.object({
@@ -258,3 +259,72 @@ export const MyMatchSummary = z.object({
   tournamentsWon: z.number(),
 })
 export type MyMatchSummary = z.infer<typeof MyMatchSummary>
+
+export const MyTeamInvite = z.object({ team: z.string(), invitedBy: z.string() })
+export const MyTeamInviteList = z.object({ invites: z.array(MyTeamInvite) })
+export const TeamInvitePending = z.object({ userId: z.number(), username: z.string() })
+export const TeamInvitePendingList = z.object({ invites: z.array(TeamInvitePending) })
+
+export const LobbyCodeView = z.object({ code: z.string().nullable(), canEdit: z.boolean() })
+export const EvidenceItem = z.object({
+  id: z.number(),
+  uploadedBy: z.string(),
+  note: z.string().nullable(),
+  at: z.string(),
+  canDelete: z.boolean(),
+})
+export const EvidenceList = z.object({ evidence: z.array(EvidenceItem) })
+export const RefereeList = z.object({
+  referees: z.array(z.object({ userId: z.number(), username: z.string() })),
+})
+
+export const MatchHistoryItem = z.object({
+  matchId: z.number(),
+  tournamentId: z.number(),
+  tournament: z.string(),
+  opponent: z.string(),
+  result: z.enum(['Win', 'Loss', 'Draw']),
+  at: z.string().nullable(),
+})
+export const MatchHistoryList = z.object({
+  matches: z.array(MatchHistoryItem),
+  played: z.number().default(0),
+  wins: z.number().default(0),
+  losses: z.number().default(0),
+})
+export type MatchHistoryItem = z.infer<typeof MatchHistoryItem>
+export const ChatMessage = z.object({
+  id: z.number(),
+  kind: z.enum(['chat', 'log']),
+  author: z.string(),
+  body: z.string(),
+  at: z.string(),
+})
+export type ChatMessage = z.infer<typeof ChatMessage>
+export const ChatMessageList = z.object({ messages: z.array(ChatMessage) })
+
+export const TeamProfileView = z.object({
+  tag: z.string(),
+  game: z.string(),
+  region: z.string(),
+  recruitment: z.enum(['OpenTryouts', 'InviteOnly']),
+  wins: z.number(),
+  losses: z.number(),
+})
+export type TeamProfileView = z.infer<typeof TeamProfileView>
+
+export const SubstitutionItem = z.object({
+  id: z.number(),
+  team: z.string(),
+  tournamentId: z.number(),
+  out: z.string(),
+  incoming: z.string(),
+  by: z.string(),
+  status: z.enum(['Pending', 'Approved', 'Declined']),
+})
+export type SubstitutionItem = z.infer<typeof SubstitutionItem>
+export const SubstitutionList = z.object({ requests: z.array(SubstitutionItem) })
+export const SubstitutionState = z.object({
+  locked: z.object({ tournamentId: z.number(), name: z.string() }).nullable(),
+  requests: z.array(SubstitutionItem),
+})

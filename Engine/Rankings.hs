@@ -5,6 +5,8 @@ module Engine.Rankings
   ( RankingEntry(..)
   , computeRankings
   , assignRanks
+  , computePlayed
+  , playedCount
   ) where
 
 import Data.Char (toLower)
@@ -49,3 +51,12 @@ computeRankings facts = sortBy order (map toEntry (Map.toList totals))
 assignRanks :: [RankingEntry] -> [(Int, RankingEntry)]
 assignRanks es = [ (1 + length (takeWhile ((/= key e) . key) es), e) | e <- es ]
   where key x = (rankTitles x, rankWins x)
+
+-- v0.15: matches played per player, from the participants of every completed
+-- match with a result. Names that differ only by case are one player.
+-- Individual players only, like the rankings themselves.
+computePlayed :: [Participant] -> Map.Map String Int
+computePlayed ps = Map.fromListWith (+) [ (map toLower n, 1) | Individual (Player (PlayerName n)) <- ps ]
+
+playedCount :: Map.Map String Int -> String -> Int
+playedCount m name = Map.findWithDefault 0 (map toLower name) m

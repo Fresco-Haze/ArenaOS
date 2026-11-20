@@ -198,6 +198,7 @@ function PasswordForm() {
   return (
     <form onSubmit={onSubmit} className="form">
       <h2 className="form-section-title">Password</h2>
+      <p className="muted">At least 8 characters.</p>
       <label>
         Current password
         <input type="password" value={current} onChange={(e) => setCurrent(e.target.value)} autoComplete="current-password" required />
@@ -221,11 +222,17 @@ function PasswordForm() {
 export default function SettingsPage() {
   return (
     <>
-      <PageHeader title="Settings" />
+      <PageHeader title="Settings" meta="Manage your profile and password" />
+      <div className="settings-grid">
+      <div className="settings-col">
       <AvatarForm />
       <NameForm />
       <BioForm />
+      </div>
+      <div className="settings-col">
       <PasswordForm />
+      </div>
+      </div>
     </>
   )
 }

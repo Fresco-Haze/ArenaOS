@@ -222,8 +222,8 @@ export function removeParticipant(id: number, p: Participant) {
   })
 }
 
-export function startCheckIn(id: number) {
-  return apiVoid(`/tournaments/${id}/check-in/open`, { method: 'POST' })
+export function startCheckIn(id: number, minutes?: number) {
+  return apiVoid(`/tournaments/${id}/check-in/open`, minutes === undefined ? { method: 'POST' } : { method: 'POST', body: JSON.stringify({ minutes }) })
 }
 
 export function stopCheckIn(id: number) {

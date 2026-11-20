@@ -30,3 +30,7 @@ build-output.txt
 test-output.txt
 .env
 .env.*
+
+# local safety copies made by patch scripts
+*.pre-*
+*.bak-*

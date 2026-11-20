@@ -13,6 +13,7 @@ import ErrorBanner from '../components/ErrorBanner'
 import LoadingBlock from '../components/LoadingBlock'
 import TournamentCard from '../components/TournamentCard'
 import BannerImg from '../components/BannerImg'
+import LandingPage from './LandingPage'
 import { gameBannerStyle } from '../lib/gameBanners'
 
 // The backend has no "featured" concept: the four newest public
@@ -41,41 +42,21 @@ function Svg({ name }: { name: IconName }) {
   )
 }
 
-function Hero() {
+function DashboardHeader() {
+  const { user } = useAuth()
   return (
-    <section className="hero" aria-labelledby="hero-title">
-      <div className="hero-copy">
-        <p className="hero-eyebrow">Welcome to SweatLobby</p>
-        <h1 id="hero-title" className="hero-title">
-          <span>Real players.</span>
-          <span className="hero-accent">Real tournaments.</span>
-          <span className="hero-accent">Your stage.</span>
-        </h1>
-        <p className="hero-text">
-          Compete in exciting tournaments, build your team, climb the ranks and be part of a growing gaming community.
-        </p>
-        <Link to="/tournaments" className="button-link btn-primary">Explore Tournaments &rarr;</Link>
+    <header className="dash-head">
+      <div>
+        <p className="dash-kicker">Welcome back{user ? ', ' + user.username : ''}</p>
+        <h1 className="dash-title">Dashboard</h1>
       </div>
-    </section>
+      <div className="dash-actions">
+        <Link to="/tournaments" className="button-link">Browse tournaments</Link>
+        <Link to="/me/new" className="button-link btn-primary">Create tournament</Link>
+      </div>
+    </header>
   )
 }
-
-function GuestHero() {
-  const wrap = { whiteSpace: 'normal' as const }
-  return (
-    <section className="hero" aria-labelledby="hero-title">
-      <div className="hero-copy">
-        <h1 id="hero-title" className="hero-title">
-          <span style={wrap}>Set up a tournament in minutes.</span>
-          <span className="hero-accent" style={wrap}>Brackets and results run themselves.</span>
-        </h1>
-        <p className="hero-text">Sign-ups, brackets and live results in one place.</p>
-        <Link to="/register?next=%2Fme%2Fnew" className="button-link btn-primary">Start your tournament &rarr;</Link>
-      </div>
-    </section>
-  )
-}
-
 const num = (n: number) => n.toLocaleString('en-US')
 
 function BandItem({ icon, label, value }: { icon: IconName; label: string; value: string }) {
@@ -161,17 +142,26 @@ function TopPlayersPanel() {
       ) : rows.length === 0 ? (
         <p className="muted rail-empty">Rankings appear once matches have been played.</p>
       ) : (
-        <ol className="rrows">
-          {rows.map((r) => (
-            <li key={r.player} className="rrow">
-              <span className="rrow-rank num">{r.rank}</span>
-              <Link to={`/players/${encodeURIComponent(r.player)}`} className="rrow-name">{r.player}</Link>
-              <span className="rrow-stat num">
-                {r.titles} {r.titles === 1 ? 'title' : 'titles'} &bull; {r.wins} {r.wins === 1 ? 'win' : 'wins'}
-              </span>
-            </li>
-          ))}
-        </ol>
+        <table className="rtable top-table">
+          <thead>
+            <tr>
+              <th className="num">#</th>
+              <th>Player</th>
+              <th className="num">Titles</th>
+              <th className="num">Wins</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.player}>
+                <td className="num">{r.rank}</td>
+                <td><Link to={`/players/${encodeURIComponent(r.player)}`} className="rrow-name">{r.player}</Link></td>
+                <td className="num">{r.titles}</td>
+                <td className="num">{r.wins}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       )}
     </RailPanel>
   )
@@ -236,7 +226,7 @@ function NextMatchPanel() {
   )
 }
 
-export default function HomePage() {
+function SignedInHome() {
   const { user } = useAuth()
   const list = useApi('/tournaments', TournamentList, true)
   const stats = useApi('/stats', PublicStatsView, true)
@@ -256,7 +246,7 @@ export default function HomePage() {
   return (
     <div className={user ? "home-grid" : undefined}>
       <div className="home-main">
-        {user ? <Hero /> : <GuestHero />}
+        <DashboardHeader />
 
         <section className="panel" aria-labelledby="featured-heading">
           <div className="panel-head">
@@ -356,4 +346,9 @@ export default function HomePage() {
       )}
     </div>
   )
+}
+
+export default function HomePage() {
+  const { user } = useAuth()
+  return user ? <SignedInHome /> : <LandingPage />
 }

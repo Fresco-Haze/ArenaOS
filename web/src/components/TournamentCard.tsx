@@ -47,6 +47,7 @@ export default function TournamentCard({ tournament: t, showOrganizer = false }:
   const mode = t.participantMode === 'SquadOnly' ? 'Squad' : '1v1'
   const gameName = t.game && t.game !== 'Other' ? gameLabel[t.game] : null
   const when = t.startTime ? formatCardDate(t.startTime) : ''
+  const pct = t.registeredCount != null && t.maxParticipants ? Math.min(100, Math.round((t.registeredCount / t.maxParticipants) * 100)) : null
   return (
     <li className="tcard">
       <div className="tcard-art" data-game={t.game ?? 'none'} style={gameBannerStyle(t.game, t.tournamentId)}>
@@ -66,6 +67,11 @@ export default function TournamentCard({ tournament: t, showOrganizer = false }:
             <li><PeopleIcon />{t.registeredCount}/{t.maxParticipants} registered</li>
           )}
         </ul>
+        {pct != null && (
+          <div className="tcard-slots" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} aria-label="Slots filled">
+            <div className="tcard-slots-fill" style={{ width: pct + '%' }} />
+          </div>
+        )}
         {showOrganizer && <p className="tcard-organizer">Organized by {t.organizer}</p>}
       </div>
       <span className="tcard-cta" aria-hidden="true">View details &rarr;</span>

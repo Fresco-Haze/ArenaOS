@@ -7,11 +7,13 @@ module Shell.Persistence.SQLite.NotificationRepository () where
 import Control.Exception (throwIO)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Reader (asks)
-import Database.SQLite.Simple (Only(..), execute, query)
+import Database.SQLite.Simple (Only(..), changes, execute, lastInsertRowId, query)
 
+import Data.Text (Text)
+import Domain.Announcement (Announcement(..))
 import Domain.Ids (UserId(..), TournamentId(..))
 import Domain.Notification (Notification(..), NotificationKind(..))
-import Shell.Persistence.Port (NotificationRepository(..))
+import Shell.Persistence.Port (AnnouncementRepository(..), NotificationRepository(..), PrizeSplitRepository(..))
 import Shell.Persistence.SQLite.Connection (SQLiteEnv(..), SQLiteM)
 import Shell.Persistence.SQLite.Error (PersistenceError(..))
 
@@ -82,3 +84,65 @@ instance NotificationRepository SQLiteM where
       "UPDATE notifications SET read_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') \
       \WHERE user_id = ? AND read_at IS NULL"
       (Only uidInt)
+
+
+-- Announcements live in this module for now; they can move to their own module later.
+instance AnnouncementRepository SQLiteM where
+
+  addAnnouncement :: TournamentId -> UserId -> Text -> SQLiteM Int
+  addAnnouncement (TournamentId tidInt) (UserId uidInt) body = do
+    conn <- asks envConnection
+    liftIO $ do
+      execute conn
+        "INSERT INTO announcements (tournament_id, user_id, body, created_at) \
+        \VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))"
+        (tidInt, uidInt, body)
+      fromIntegral <$> lastInsertRowId conn
+
+  listAnnouncements :: TournamentId -> SQLiteM [Announcement]
+  listAnnouncements (TournamentId tidInt) = do
+    conn <- asks envConnection
+    rows <- liftIO $
+      (query conn
+        "SELECT id, body, created_at FROM announcements WHERE tournament_id = ? ORDER BY id DESC"
+        (Only tidInt)
+       :: IO [(Int, Text, String)])
+    pure [ Announcement { announcementId = i, announcementBody = b, announcementAt = at } | (i, b, at) <- rows ]
+
+  deleteAnnouncement :: TournamentId -> Int -> SQLiteM Bool
+  deleteAnnouncement (TournamentId tidInt) aid = do
+    conn <- asks envConnection
+    liftIO $ do
+      execute conn "DELETE FROM announcements WHERE id = ? AND tournament_id = ?" (aid, tidInt)
+      (> 0) <$> changes conn
+
+
+-- Prize splits live in this module for now, next to announcements.
+instance PrizeSplitRepository SQLiteM where
+
+  getPrizeSplit :: TournamentId -> SQLiteM [Int]
+  getPrizeSplit (TournamentId tidInt) = do
+    conn <- asks envConnection
+    rows <- liftIO $
+      (query conn
+        "SELECT percent FROM prize_splits WHERE tournament_id = ? ORDER BY place"
+        (Only tidInt)
+       :: IO [Only Int])
+    pure [ pct | Only pct <- rows ]
+
+  savePrizeSplit :: TournamentId -> [Int] -> SQLiteM ()
+  savePrizeSplit (TournamentId tidInt) percents = do
+    conn <- asks envConnection
+    liftIO $ do
+      execute conn "DELETE FROM prize_splits WHERE tournament_id = ?" (Only tidInt)
+      mapM_
+        (\(place, pct) ->
+           execute conn
+             "INSERT INTO prize_splits (tournament_id, place, percent) VALUES (?, ?, ?)"
+             (tidInt, place, pct))
+        (zip [1 :: Int ..] percents)
+
+  clearPrizeSplit :: TournamentId -> SQLiteM ()
+  clearPrizeSplit (TournamentId tidInt) = do
+    conn <- asks envConnection
+    liftIO $ execute conn "DELETE FROM prize_splits WHERE tournament_id = ?" (Only tidInt)

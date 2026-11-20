@@ -40,7 +40,8 @@ export default function PlayersPage() {
           {q ? 'Try a different name.' : 'Players appear once they enter a public tournament.'}
         </EmptyState>
       ) : (
-        <table className="rtable">
+        <div className="players-card">
+        <table className="rtable players-table">
           <thead>
             <tr>
               <th scope="col">Player</th>
@@ -52,7 +53,7 @@ export default function PlayersPage() {
           <tbody>
             {rows.map((r) => (
               <tr key={r.name}>
-                <td><Link to={`/players/${encodeURIComponent(r.name)}`}>{r.name}</Link></td>
+                <td><Link to={`/players/${encodeURIComponent(r.name)}`} className="player-cell"><span className="player-cell-avatar" aria-hidden="true">{r.name.charAt(0).toUpperCase()}</span>{r.name}</Link></td>
                 <td className="num">{r.tournaments}</td>
                 <td className="num">{r.titles}</td>
                 <td className="num">{r.wins}</td>
@@ -60,6 +61,7 @@ export default function PlayersPage() {
             ))}
           </tbody>
         </table>
+        </div>
       )}
     </>
   )

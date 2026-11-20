@@ -22,6 +22,10 @@ import MyTournamentsPage from './pages/MyTournamentsPage'
 import CreateTournamentPage from './pages/CreateTournamentPage'
 import CreateTeamPage from './pages/CreateTeamPage'
 import AppShell from './components/AppShell'
+import TeamsPage from './pages/TeamsPage'
+import MatchRoomPage from './pages/MatchRoomPage'
+import './design.css'
+import './three-pages.css'
 
 function ExpiredNotice() {
   const { expired, dismissExpired } = useAuth()
@@ -52,6 +56,13 @@ function TournamentRoute() {
   const { id } = useParams()
   if (!id) return <NotFound />
   return <TournamentPage key={id} id={id} />
+}
+
+function MatchRoute() {
+  const { id, nodeId } = useParams()
+  const n = Number(nodeId)
+  if (!id || !Number.isInteger(n)) return <NotFound />
+  return <MatchRoomPage key={`${id}-${n}`} id={id} nodeId={n} />
 }
 
 export default function App() {
@@ -106,6 +117,8 @@ export default function App() {
             }
           />
           <Route path="/tournaments/:id" element={<TournamentRoute />} />
+          <Route path="/tournaments/:id/match/:nodeId" element={<MatchRoute />} />
+          <Route path="/teams" element={<ProtectedRoute><TeamsPage /></ProtectedRoute>} />
           <Route path="*" element={<NotFound />} />
           <Route
             path="/teams/new"

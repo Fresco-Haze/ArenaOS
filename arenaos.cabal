@@ -60,6 +60,10 @@ library
                       Application.UseCases.UpdateTournamentDetails
                       Application.UseCases.UpdateTournamentMaxParticipants
                       Application.UseCases.UpdateTournamentVisibility
+                      Application.UseCases.Announcements
+                      Application.UseCases.PrizeSplit
+                      Engine.PrizeSplit
+                      Domain.Announcement
                       Application.UseCases.UpdateTournamentFormat
                       Application.UseCases.GetOrganizerDashboard
                       Domain.TournamentHistory
@@ -101,6 +105,22 @@ library
                       Shell.Persistence.SQLite.JoinRequestRepository
                       Shell.Persistence.SQLite.NotificationRepository
                       Shell.Persistence.SQLite.AvatarRepository
+                      Shell.Persistence.SQLite.TeamLogoRepository
+                      Shell.Persistence.SQLite.TeamInviteRepository
+                      Domain.TeamInvite
+                      Application.UseCases.TeamInvites
+                      Shell.Persistence.SQLite.MatchRoomRepository
+                      Application.UseCases.MatchRoom
+                      Shell.Persistence.SQLite.MatchHistoryRepository
+                      Application.UseCases.MyMatchHistory
+                      Domain.TeamProfile
+                      Shell.Persistence.SQLite.TeamProfileRepository
+                      Application.UseCases.TeamProfile
+                      Shell.Persistence.SQLite.CheckInDeadlineRepository
+                      Application.UseCases.CheckInDeadline
+                      Domain.Substitution
+                      Shell.Persistence.SQLite.SubstitutionRepository
+                      Application.UseCases.Substitutions
                       Shell.Persistence.SQLite.LobbyRepository
                       Shell.Persistence.SQLite.CheckInRepository
                       Shell.Persistence.SQLite.IdentityRepository

@@ -7,6 +7,8 @@ import { registerUser } from '../auth/authActions'
 import { safeNext } from '../lib/safeNext'
 import { retrySeconds, useCooldown } from '../lib/rateLimit'
 import AuthBrand from '../components/AuthBrand'
+import AuthSplit from '../components/AuthSplit'
+import AuthTabs from '../components/AuthTabs'
 import AuthField from '../components/AuthField'
 import GoogleButton from '../components/GoogleButton'
 
@@ -74,11 +76,13 @@ export default function RegisterPage() {
   }
 
   return (
+    <AuthSplit>
     <div className="auth-page">
       <Link to={`/login?next=${encodeURIComponent(next)}`} className="auth-back" aria-label="Back to sign in">
         &larr; Back
       </Link>
       <AuthBrand />
+      <AuthTabs next={next} />
       <h1 className="auth-title">Create Your Account</h1>
       <p className="muted auth-sub">Join the SweatLobby community</p>
       <form onSubmit={onSubmit} className="auth-form">
@@ -143,5 +147,6 @@ export default function RegisterPage() {
         <Link to={`/login?next=${encodeURIComponent(next)}`}>Sign In</Link>
       </p>
     </div>
+    </AuthSplit>
   )
 }

@@ -335,6 +335,17 @@ statements =
     \  read_at       TEXT \
     \)"
   , "CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id)"
+  , "CREATE TABLE IF NOT EXISTS team_logos (team_id INTEGER PRIMARY KEY REFERENCES teams(id), image BLOB NOT NULL, updated_at TEXT NOT NULL)"
+  , "CREATE TABLE IF NOT EXISTS team_invites (id INTEGER PRIMARY KEY, team_id INTEGER NOT NULL REFERENCES teams(id), user_id INTEGER NOT NULL REFERENCES users(id), invited_by INTEGER NOT NULL REFERENCES users(id), status TEXT NOT NULL CHECK (status IN ('Pending', 'Accepted', 'Declined')), created_at TEXT NOT NULL, UNIQUE (team_id, user_id))"
+  , "CREATE TABLE IF NOT EXISTS tournament_referees (tournament_id INTEGER NOT NULL REFERENCES tournaments(id), user_id INTEGER NOT NULL REFERENCES users(id), PRIMARY KEY (tournament_id, user_id))"
+  , "CREATE TABLE IF NOT EXISTS match_lobby_codes (match_id INTEGER PRIMARY KEY, code TEXT NOT NULL, set_by INTEGER NOT NULL REFERENCES users(id), updated_at TEXT NOT NULL)"
+  , "CREATE TABLE IF NOT EXISTS match_evidence (id INTEGER PRIMARY KEY, match_id INTEGER NOT NULL, uploaded_by INTEGER NOT NULL REFERENCES users(id), note TEXT, image BLOB NOT NULL, created_at TEXT NOT NULL)"
+  , "CREATE INDEX IF NOT EXISTS idx_match_evidence_match ON match_evidence(match_id)"
+  , "CREATE TABLE IF NOT EXISTS match_messages (id INTEGER PRIMARY KEY, match_id INTEGER NOT NULL, user_id INTEGER, kind TEXT NOT NULL CHECK (kind IN ('chat', 'log')), body TEXT NOT NULL, created_at TEXT NOT NULL)"
+  , "CREATE INDEX IF NOT EXISTS idx_match_messages_match ON match_messages(match_id)"
+  , "CREATE TABLE IF NOT EXISTS team_profiles (team_id INTEGER PRIMARY KEY REFERENCES teams(id), tag TEXT NOT NULL DEFAULT '', game TEXT NOT NULL DEFAULT '', region TEXT NOT NULL DEFAULT '', recruitment TEXT NOT NULL DEFAULT 'InviteOnly' CHECK (recruitment IN ('OpenTryouts', 'InviteOnly')))"
+  , "CREATE TABLE IF NOT EXISTS tournament_checkin_deadline (tournament_id INTEGER PRIMARY KEY REFERENCES tournaments(id), closes_at TEXT NOT NULL)"
+  , "CREATE TABLE IF NOT EXISTS team_substitutions (id INTEGER PRIMARY KEY, team_id INTEGER NOT NULL REFERENCES teams(id), tournament_id INTEGER NOT NULL REFERENCES tournaments(id), out_player TEXT NOT NULL, in_user_id INTEGER NOT NULL REFERENCES users(id), requested_by INTEGER NOT NULL REFERENCES users(id), status TEXT NOT NULL CHECK (status IN ('Pending', 'Approved', 'Declined')), created_at TEXT NOT NULL, decided_by INTEGER REFERENCES users(id))"
   , "CREATE TABLE IF NOT EXISTS user_avatars ( \
     \  user_id    INTEGER PRIMARY KEY REFERENCES users(id), \
     \  image      BLOB NOT NULL, \
@@ -381,6 +392,9 @@ migrateGames conn = do
 migratePredictions :: Connection -> IO ()
 migratePredictions conn = do
   execute_ conn "CREATE TABLE IF NOT EXISTS predictions (match_id INTEGER NOT NULL REFERENCES matches(id), user_id INTEGER NOT NULL REFERENCES users(id), pick TEXT NOT NULL CHECK (pick IN ('A', 'B', 'Draw')), created_at TEXT NOT NULL, PRIMARY KEY (match_id, user_id))"
+  execute_ conn "CREATE TABLE IF NOT EXISTS announcements (id INTEGER PRIMARY KEY, tournament_id INTEGER NOT NULL REFERENCES tournaments(id) ON DELETE CASCADE, user_id INTEGER NOT NULL REFERENCES users(id), body TEXT NOT NULL, created_at TEXT NOT NULL)"
+  execute_ conn "CREATE INDEX IF NOT EXISTS idx_announcements_tournament ON announcements(tournament_id)"
+  execute_ conn "CREATE TABLE IF NOT EXISTS prize_splits (tournament_id INTEGER NOT NULL REFERENCES tournaments(id) ON DELETE CASCADE, place INTEGER NOT NULL CHECK (place >= 1), percent INTEGER NOT NULL CHECK (percent >= 1 AND percent <= 100), PRIMARY KEY (tournament_id, place))"
   execute_ conn "CREATE INDEX IF NOT EXISTS idx_predictions_user ON predictions(user_id)"
 
 -- v0.14: lobby tournaments (battle royale style). Additive only. A tournament's

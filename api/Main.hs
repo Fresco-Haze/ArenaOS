@@ -19,6 +19,7 @@ import qualified Data.Text.Lazy as TL
 import Text.Read (readMaybe)
 import Control.Monad.IO.Class (liftIO)
 import Control.Concurrent.MVar (MVar, newMVar, withMVar)
+import qualified Control.Concurrent as Conc
 import Control.Exception (SomeException, try, bracket_, evaluate)
 import Control.Concurrent.QSem (QSem, newQSem, waitQSem, signalQSem)
 import Data.Maybe (isJust, fromMaybe)
@@ -103,6 +104,11 @@ import qualified Application.UseCases.CompleteTournament as Complete
 import qualified Application.UseCases.CancelTournament as Cancel
 import Domain.TournamentError (TournamentError(..))
 import qualified Application.UseCases.ListPublicTournaments as ListPublic
+import qualified Application.UseCases.Announcements as Ann
+import Domain.Announcement (Announcement(..))
+import qualified Application.UseCases.PrizeSplit as PrizeUC
+import qualified Engine.PrizeSplit as PrizeEng
+import qualified Domain.Tournament as DomainTournamentFmt
 import qualified Application.UseCases.UpdateTournamentThirdPlaceMatch as UTTP
 import qualified Application.UseCases.UpdateTournamentRequireApproval as UTRA
 import qualified Application.UseCases.UpdateTournamentName as UTN
@@ -121,6 +127,21 @@ import Shell.Persistence.SQLite.EFootballScoreRepository ()
 import Shell.Persistence.SQLite.JoinRequestRepository ()
 import Shell.Persistence.SQLite.NotificationRepository ()
 import Shell.Persistence.SQLite.AvatarRepository ()
+import Shell.Persistence.SQLite.TeamLogoRepository ()
+import Shell.Persistence.SQLite.TeamInviteRepository ()
+import Shell.Persistence.SQLite.MatchRoomRepository ()
+import qualified Application.UseCases.MatchRoom as MRoom
+import Shell.Persistence.SQLite.MatchHistoryRepository ()
+import qualified Application.UseCases.MyMatchHistory as MHist
+import Shell.Persistence.SQLite.TeamProfileRepository ()
+import qualified Application.UseCases.TeamProfile as TProf
+import qualified Domain.TeamProfile as TPDom
+import Shell.Persistence.SQLite.CheckInDeadlineRepository ()
+import qualified Application.UseCases.CheckInDeadline as CkDl
+import Shell.Persistence.SQLite.SubstitutionRepository ()
+import qualified Application.UseCases.Substitutions as Subs
+import qualified Domain.Substitution as SDom
+import qualified Application.UseCases.TeamInvites as TInv
 import qualified Data.ByteString.Lazy as BL
 import qualified Application.UseCases.JoinRequests as JRQ
 import Domain.JoinRequest (JoinRequestStatus(..))
@@ -779,8 +800,8 @@ instance FromJSON DetailsReq where
     pure (DetailsReq (TournamentDetails g st pz ds rd ef pf ru su))
 
 -- ?q= (name contains), ?game= (a game name, any case; old PubgMobile and CallOfDuty still work), ?limit= (1..100)
-parseListFilter :: UTCTime -> Maybe Text -> Maybe Text -> Maybe Text -> Maybe Text -> Maybe Text -> Either ApiError ListPublic.PublicFilter
-parseListFilter now mq mg ml mu mo = do
+parseListFilter :: UTCTime -> Maybe Text -> Maybe Text -> Maybe Text -> Maybe Text -> Maybe Text -> Maybe Text -> Maybe Text -> Maybe Text -> Either ApiError ListPublic.PublicFilter
+parseListFilter now mq mg ml mu mo ms mf mfee = do
   game <- case fmap T.strip mg of
     Nothing -> Right Nothing
     Just g
@@ -807,7 +828,30 @@ parseListFilter now mq mg ml mu mo = do
   let q = case fmap T.strip mq of
         Just s | not (T.null s) -> Just (T.unpack s)
         _                       -> Nothing
-  Right (ListPublic.PublicFilter q game limit upcoming offset)
+  statusF <- case fmap (T.toLower . T.strip) ms of
+    Nothing -> Right Nothing
+    Just v
+      | T.null v        -> Right Nothing
+      | v == "open"     -> Right (Just ListPublic.StatusOpen)
+      | v == "live"     -> Right (Just ListPublic.StatusLive)
+      | v == "finished" -> Right (Just ListPublic.StatusFinished)
+      | otherwise       -> Left (badParam "status")
+  formatF <- case fmap (T.toLower . T.strip) mf of
+    Nothing -> Right Nothing
+    Just v
+      | T.null v          -> Right Nothing
+      | v == "single"     -> Right (Just DomainTournamentFmt.SingleElimination)
+      | v == "double"     -> Right (Just DomainTournamentFmt.DoubleElimination)
+      | v == "roundrobin" -> Right (Just DomainTournamentFmt.RoundRobin)
+      | otherwise         -> Left (badParam "format")
+  feeF <- case fmap (T.toLower . T.strip) mfee of
+    Nothing -> Right Nothing
+    Just v
+      | T.null v    -> Right Nothing
+      | v == "free" -> Right (Just ListPublic.FeeFree)
+      | v == "paid" -> Right (Just ListPublic.FeePaid)
+      | otherwise   -> Left (badParam "fee")
+  Right (ListPublic.PublicFilter q game limit upcoming offset statusF formatF feeF)
   where
     badParam :: Text -> ApiError
     badParam f = ApiError status400 "VALIDATION_FAILED" "Invalid query parameter"
@@ -893,6 +937,14 @@ playerProfileJson p flags = object
   ]
   where s = GPL.ppSummary p
 
+rankingJsonPlayed :: Map.Map String Int -> (Int, Rk.RankingEntry) -> Value
+rankingJsonPlayed played (r, e) = object
+  [ "rank"   .= r
+  , "player" .= Rk.rankPlayer e
+  , "titles" .= Rk.rankTitles e
+  , "wins"   .= Rk.rankWins e
+  , "played" .= Rk.playedCount played (Rk.rankPlayer e)
+  ]
 rankingJson :: (Int, Rk.RankingEntry) -> Value
 rankingJson (r, e) = object
   [ "rank"   .= r
@@ -1009,6 +1061,173 @@ requestStatusText :: JoinRequestStatus -> Text
 requestStatusText JoinPending  = "Pending"
 requestStatusText JoinApproved = "Approved"
 requestStatusText JoinDeclined = "Declined"
+
+newtype ChatReq = ChatReq Text
+
+instance FromJSON ChatReq where
+  parseJSON = withObject "message" $ \o -> ChatReq <$> o .: "body"
+
+historyJson :: MHist.MatchHistoryEntry -> Value
+historyJson e = object
+  [ "matchId"      .= unMatchId (MHist.mheMatchId e)
+  , "tournamentId" .= unTournamentId (MHist.mheTournamentId e)
+  , "tournament"   .= MHist.mheTournamentName e
+  , "opponent"     .= MHist.mheOpponent e
+  , "result"       .= (case MHist.mheResult e of
+                         MHist.ResultWin  -> "Win" :: Text
+                         MHist.ResultLoss -> "Loss"
+                         MHist.ResultDraw -> "Draw")
+  , "at"           .= MHist.mheWhen e
+  ]
+
+newtype LobbyCodeReq = LobbyCodeReq Text
+
+instance FromJSON LobbyCodeReq where
+  parseJSON = withObject "lobby code" $ \o -> LobbyCodeReq <$> o .: "code"
+
+evidenceMaxBytes :: Int
+evidenceMaxBytes = 1048576
+
+evidenceTooLarge :: ApiError
+evidenceTooLarge = ApiError status400 "VALIDATION_FAILED" "The screenshot is too large"
+  (object ["field" .= ("evidence" :: Text)])
+
+fromRoom :: MRoom.MatchRoomError -> ApiError
+fromRoom MRoom.RoomForbidden =
+  ApiError status403 "NOT_ALLOWED" "You do not have permission to do this" (object [])
+fromRoom MRoom.RoomNotFound = notFoundApi
+fromRoom MRoom.RoomUserNotFound =
+  ApiError status404 "USER_NOT_FOUND" "No player has that username" (object [])
+fromRoom MRoom.RoomAlreadyReferee =
+  ApiError status409 "ALREADY_REFEREE" "That player is already a referee" (object [])
+fromRoom MRoom.RoomBadCode =
+  ApiError status400 "VALIDATION_FAILED" "The lobby code must be 1 to 64 characters"
+    (object ["field" .= ("code" :: Text)])
+fromRoom MRoom.RoomBadMessage =
+  ApiError status400 "VALIDATION_FAILED" "A message must be 1 to 500 characters"
+    (object ["field" .= ("message" :: Text)])
+fromRoom MRoom.RoomTooManyEvidence =
+  ApiError status409 "TOO_MANY_FILES" "This match already has the maximum number of screenshots" (object [])
+
+data ProfileReq = ProfileReq String String String TPDom.Recruitment
+
+instance FromJSON ProfileReq where
+  parseJSON = withObject "profile" $ \o -> do
+    tag <- o .: "tag"
+    game <- o .: "game"
+    region <- o .: "region"
+    rec <- (o .: "recruitment" :: Parser String)
+    r <- case rec of
+      "OpenTryouts" -> pure TPDom.OpenTryouts
+      "InviteOnly"  -> pure TPDom.InviteOnly
+      _             -> fail "recruitment must be OpenTryouts or InviteOnly"
+    pure (ProfileReq tag game region r)
+
+profileJson :: TProf.TeamProfileView -> Value
+profileJson (TProf.TeamProfileView p w l) = object
+  [ "tag"         .= TPDom.profileTag p
+  , "game"        .= TPDom.profileGame p
+  , "region"      .= TPDom.profileRegion p
+  , "recruitment" .= (case TPDom.profileRecruitment p of
+                        TPDom.OpenTryouts -> "OpenTryouts" :: Text
+                        TPDom.InviteOnly  -> "InviteOnly")
+  , "wins"        .= w
+  , "losses"      .= l
+  ]
+
+fromProfile :: TProf.TeamProfileError -> ApiError
+fromProfile TProf.ProfileNotOwner =
+  ApiError status403 "NOT_TEAM_OWNER" "Only the team owner can change team details" (object [])
+fromProfile TProf.ProfileInvalid =
+  ApiError status400 "VALIDATION_FAILED"
+    "The tag must be 3 to 4 letters or numbers, the game at most 40 characters, and the region one of the listed regions"
+    (object [])
+
+newtype OpenCheckInReq = OpenCheckInReq Int
+
+instance FromJSON OpenCheckInReq where
+  parseJSON = withObject "open check-in" $ \o -> OpenCheckInReq <$> o .: "minutes"
+
+checkInWithDeadline :: Maybe UserId -> TournamentId -> SQLiteM (Either CkIn.CheckInError (CkIn.CheckInView, Maybe String))
+checkInWithDeadline viewer tid = do
+  r <- CkIn.loadCheckIn viewer tid
+  case r of
+    Left e  -> pure (Left e)
+    Right v -> do
+      d <- Repo.getCheckInDeadline tid
+      pure (Right (v, d))
+
+checkInJsonAt :: CkIn.CheckInView -> Maybe String -> Value
+checkInJsonAt v d = object
+  [ "open"            .= CkIn.checkInOpen v
+  , "checkedIn"       .= map participantJson (CkIn.checkedInParticipants v)
+  , "viewerCheckedIn" .= CkIn.viewerCheckedIn v
+  , "closesAt"        .= d
+  ]
+
+data SubReq = SubReq Int String Text
+
+instance FromJSON SubReq where
+  parseJSON = withObject "substitution" $ \o -> SubReq <$> o .: "tournamentId" <*> o .: "out" <*> o .: "incoming"
+
+subJson :: Subs.SubView -> Value
+subJson v = object
+  [ "id"           .= Subs.svId v
+  , "team"         .= Subs.svTeam v
+  , "tournamentId" .= Subs.svTournament v
+  , "out"          .= Subs.svOut v
+  , "incoming"     .= Subs.svIncoming v
+  , "by"           .= Subs.svBy v
+  , "status"       .= (case Subs.svStatus v of
+                         SDom.SubPending  -> "Pending" :: Text
+                         SDom.SubApproved -> "Approved"
+                         SDom.SubDeclined -> "Declined")
+  ]
+
+fromSub :: Subs.SubstitutionError -> ApiError
+fromSub Subs.SubNotOwner =
+  ApiError status403 "NOT_TEAM_OWNER" "Only the team owner can request a substitution" (object [])
+fromSub Subs.SubNotStaff =
+  ApiError status403 "NOT_ALLOWED" "Only the organizer or a referee can decide substitutions" (object [])
+fromSub Subs.SubNotRegistered =
+  ApiError status409 "NOT_REGISTERED" "That team is not registered in that tournament" (object [])
+fromSub Subs.SubRosterNotLocked =
+  ApiError status409 "ROSTER_NOT_LOCKED" "The roster is not locked, so you can invite players directly" (object [])
+fromSub Subs.SubBadOutPlayer =
+  ApiError status400 "VALIDATION_FAILED" "Pick a team member who is not the captain" (object ["field" .= ("out" :: Text)])
+fromSub Subs.SubInUserNotFound =
+  ApiError status404 "USER_NOT_FOUND" "No player has that username" (object [])
+fromSub Subs.SubInAlreadyOnTeam =
+  ApiError status409 "ALREADY_MEMBER" "That player is already on the team" (object [])
+fromSub Subs.SubAlreadyPending =
+  ApiError status409 "SUBSTITUTION_PENDING" "This team already has a pending substitution request in that tournament" (object [])
+fromSub Subs.SubNotFound = notFoundApi
+fromSub Subs.SubNotPending =
+  ApiError status409 "NOT_PENDING" "That request has already been decided" (object [])
+
+newtype InviteReq = InviteReq Text
+
+instance FromJSON InviteReq where
+  parseJSON = withObject "invite" $ \o -> InviteReq <$> o .: "username"
+
+newtype TeamRefReq = TeamRefReq String
+
+instance FromJSON TeamRefReq where
+  parseJSON = withObject "team" $ \o -> TeamRefReq <$> o .: "team"
+
+fromTeamInvite :: TInv.TeamInviteError -> ApiError
+fromTeamInvite TInv.InviteNotOwner =
+  ApiError status403 "NOT_TEAM_OWNER" "Only the team owner can manage invites" (object [])
+fromTeamInvite TInv.InviteUserNotFound =
+  ApiError status404 "USER_NOT_FOUND" "No player has that username" (object [])
+fromTeamInvite TInv.InviteAlreadyMember =
+  ApiError status409 "ALREADY_MEMBER" "That player is already on the team" (object [])
+fromTeamInvite TInv.InviteAlreadyPending =
+  ApiError status409 "INVITE_PENDING" "That player already has a pending invite" (object [])
+fromTeamInvite TInv.InviteRosterLocked =
+  ApiError status409 "ROSTER_LOCKED" "This team's roster is locked while it plays in a tournament. Ask the organizer or a referee for a substitution" (object [])
+fromTeamInvite TInv.InviteNotFound =
+  ApiError status404 "NO_INVITE" "There is no pending invite" (object [])
 
 newtype TargetUserReq = TargetUserReq Int
 
@@ -1999,6 +2218,74 @@ runViewAction lock useCase toApiError onSuccess = do
 
 
 
+-- v0.15: close registrations whose deadline has passed. Runs once a minute,
+-- under the same lock as every request, so it never writes at the same time.
+closeExpiredLoop :: Env -> IO ()
+closeExpiredLoop env = go
+  where
+    go :: IO ()
+    go = do
+      now <- getCurrentTime
+      outcome <- tryAny (withMVar (envLock env) (\_ -> runSQLiteM (envDbPath env) (Close.closeExpiredRegistrations now)))
+      case outcome of
+        Left ex -> hPutStrLn stderr ("auto-close failed: " ++ show ex)
+        Right (Left perr) -> hPutStrLn stderr ("auto-close failed: " ++ show perr)
+        Right (Right closed) ->
+          if null closed
+            then pure ()
+            else hPutStrLn stderr ("auto-closed registration for " ++ show (length closed) ++ " tournament(s)")
+      Conc.threadDelay 60000000
+      go
+-- v0.15: tournament announcements.
+newtype AnnouncementReq = AnnouncementReq Text
+
+instance FromJSON AnnouncementReq where
+  parseJSON = withObject "announcement" $ \o -> AnnouncementReq <$> o .: "body"
+
+fromAnnouncement :: Ann.AnnouncementError -> ApiError
+fromAnnouncement (Ann.AnnouncementUnauthorized a) = fromAuthorization a
+fromAnnouncement Ann.AnnouncementBodyEmpty =
+  ApiError status400 "VALIDATION_FAILED" "Announcement text is required" (object ["field" .= ("body" :: Text)])
+fromAnnouncement Ann.AnnouncementBodyTooLong =
+  ApiError status400 "VALIDATION_FAILED" "Announcement must be 2000 characters or fewer" (object ["field" .= ("body" :: Text)])
+fromAnnouncement Ann.AnnouncementNotFound =
+  ApiError status404 "NOT_FOUND" "Resource not found" (object [])
+
+announcementJson :: Announcement -> Value
+announcementJson a = object
+  [ "id"        .= announcementId a
+  , "body"      .= announcementBody a
+  , "createdAt" .= announcementAt a
+  ]
+-- v0.15: prize split.
+newtype PrizeSplitReq = PrizeSplitReq [Int]
+
+instance FromJSON PrizeSplitReq where
+  parseJSON = withObject "prizeSplit" $ \o -> PrizeSplitReq <$> o .: "percents"
+
+prizeSplitMessage :: PrizeEng.PrizeSplitError -> Text
+prizeSplitMessage PrizeEng.SplitNoPlaces         = "Add at least one place"
+prizeSplitMessage PrizeEng.SplitTooManyPlaces    = "A split can have at most 8 places"
+prizeSplitMessage PrizeEng.SplitPercentTooSmall  = "Every place needs at least 1%"
+prizeSplitMessage PrizeEng.SplitNotNonIncreasing = "A lower place cannot get more than the place above it"
+prizeSplitMessage PrizeEng.SplitTotalNot100      = "The percentages must add up to 100"
+
+fromPrizeSplit :: PrizeUC.PrizeSplitUseCaseError -> ApiError
+fromPrizeSplit (PrizeUC.SplitUnauthorized a) = fromAuthorization a
+fromPrizeSplit (PrizeUC.SplitLifecycle l)    = fromLifecycle l
+fromPrizeSplit PrizeUC.SplitNeedsPrize =
+  ApiError status400 "VALIDATION_FAILED" "Set a prize before splitting it" (object ["field" .= ("prize" :: Text)])
+fromPrizeSplit (PrizeUC.SplitInvalid e) =
+  ApiError status400 "VALIDATION_FAILED" (prizeSplitMessage e) (object ["field" .= ("percents" :: Text)])
+
+prizeSplitJson :: PrizeUC.PrizeSplitView -> Value
+prizeSplitJson v = object
+  [ "prize"  .= PrizeUC.psvPrize v
+  , "places" .= [ object ["place" .= i, "percent" .= pct, "amount" .= amt]
+                | (i, pct, amt) <- zip3 [1 :: Int ..] (PrizeUC.psvPercents v) amounts ]
+  ]
+  where
+    amounts = maybe (map (const Nothing) (PrizeUC.psvPercents v)) (map Just) (PrizeUC.psvAmounts v)
 -- ===== Routes =====
 
 main :: IO ()
@@ -2029,6 +2316,7 @@ main = do
       atomicModifyIORef' (envFacts lock) (\_ -> (Just (warmedAt, fs), ()))
       hPutStrLn stderr "facts warmed"
     _ -> hPutStrLn stderr "facts warm-up skipped"
+  _ <- Conc.forkIO (closeExpiredLoop lock)
   let opts = Options
         { verbose  = 1
         , settings = setHost (fromString host) (setPort port defaultSettings)
@@ -2198,17 +2486,25 @@ main = do
                 fromRemove (\() -> status status204)
 
     post "/tournaments/:id/check-in/open" $
-      runTransition lock CkIn.startCheckIn fromCheckIn
+      do
+        raw <- body
+        nowT <- liftIO getCurrentTime
+        let mUntil = case eitherDecode raw of
+              Right (OpenCheckInReq n) | n >= 1 && n <= 720 -> Just (addUTCTime (fromIntegral (n * 60)) nowT)
+              _ -> Nothing
+        runTransition lock (CkDl.startCheckInUntil mUntil) fromCheckIn
 
     post "/tournaments/:id/check-in/close" $
       runTransition lock CkIn.stopCheckIn fromCheckIn
 
     post "/tournaments/:id/check-in" $
-      runTransition lock CkIn.checkInSelf fromCheckIn
+      do
+        nowT <- liftIO getCurrentTime
+        runTransition lock (CkDl.checkInSelfAt (CkDl.isoTime nowT)) fromCheckIn
 
     get "/tournaments/:id/check-in" $
-      runViewAction lock CkIn.loadCheckIn fromCheckIn $ \v ->
-        json (checkInJson v)
+      runViewAction lock checkInWithDeadline fromCheckIn $ \(v, d) ->
+        json (checkInJsonAt v d)
 
     post "/tournaments/:id/check-in/participant" $ do
       raw <- body
@@ -2241,6 +2537,41 @@ main = do
             Right (ts, counts) -> json (object
               [ "tournaments" .=
                   map (\(t, b) -> tournamentJsonListed (countFor counts t) b t) (sortOn (negate . unTournamentId . tournamentId . fst) ts) ])
+
+    get "/tournaments/:id/announcements" $
+      runViewAction lock Ann.listTournamentAnnouncements fromAnnouncement $ \items ->
+        json (object ["announcements" .= map announcementJson items])
+
+    post "/tournaments/:id/announcements" $ do
+      raw <- body
+      case eitherDecode raw of
+        Left reason -> sendError (invalidBody reason)
+        Right (AnnouncementReq txt) ->
+          runAction lock (\uid tid -> Ann.postAnnouncement uid tid txt) fromAnnouncement $ \newId -> do
+            status status201
+            json (object ["id" .= newId])
+
+    delete "/tournaments/:id/announcements/:aid" $ do
+      rawA <- pathParam "aid" :: ActionM Text
+      case readMaybe (T.unpack rawA) :: Maybe Int of
+        Nothing -> sendError notFoundApi
+        Just aid ->
+          runAction lock (\uid tid -> Ann.removeAnnouncement uid tid aid) fromAnnouncement $ \() ->
+            status status204
+
+    get "/tournaments/:id/prize-split" $
+      runViewAction lock PrizeUC.getPrizeSplitView fromPrizeSplit $ \v ->
+        json (prizeSplitJson v)
+
+    put "/tournaments/:id/prize-split" $ do
+      raw <- body
+      case eitherDecode raw of
+        Left reason -> sendError (invalidBody reason)
+        Right (PrizeSplitReq ps) ->
+          runTransition lock (\uid tid -> PrizeUC.setPrizeSplit uid tid ps) fromPrizeSplit
+
+    delete "/tournaments/:id/prize-split" $
+      runTransition lock PrizeUC.clearTournamentPrizeSplit fromPrizeSplit
 
     post "/tournaments/:id/join-team" $ do
       raw <- body
@@ -2844,10 +3175,10 @@ main = do
       case parseRankingsQuery gRaw lRaw of
         Left apiErr -> sendError apiErr
         Right (mGame, limitN) -> do
-          result <- fmap (fmap (GRK.rankingsFrom mGame limitN)) (cachedFacts lock)
+          result <- fmap (fmap (\fs -> (GRK.rankingsFrom mGame limitN fs, GRK.playedFrom mGame fs))) (cachedFacts lock)
           case result of
             Left apiErr -> sendError apiErr
-            Right es    -> json (object ["rankings" .= map rankingJson (Rk.assignRanks es)])
+            Right (es, played) -> json (object ["rankings" .= map (rankingJsonPlayed played) (Rk.assignRanks es)])
 
     -- public, no login: latest events of public tournaments past Draft
     get "/activity" $ do
@@ -2866,8 +3197,11 @@ main = do
           lRaw <- (queryParamMaybe "limit" :: ActionM (Maybe Text))
           uRaw <- (queryParamMaybe "upcoming" :: ActionM (Maybe Text))
           oRaw <- (queryParamMaybe "offset" :: ActionM (Maybe Text))
+          sRaw <- (queryParamMaybe "status" :: ActionM (Maybe Text))
+          fRaw <- (queryParamMaybe "format" :: ActionM (Maybe Text))
+          eRaw <- (queryParamMaybe "fee" :: ActionM (Maybe Text))
           nowT <- liftIO getCurrentTime
-          result <- case parseListFilter nowT qRaw gRaw lRaw uRaw oRaw of
+          result <- case parseListFilter nowT qRaw gRaw lRaw uRaw oRaw sRaw fRaw eRaw of
             Left apiErr -> pure (Left apiErr)
             Right flt   -> runUseCase lock (listWithBanners flt)
           case result of
@@ -2973,6 +3307,332 @@ main = do
               json (teamJson team)
 
               
+
+    put "/teams/:name/logo" $ do
+      rawName <- pathParam "name" :: ActionM Text
+      mUser <- currentUser lock
+      case mUser of
+        Nothing  -> sendError unauthenticated
+        Just uid -> do
+          let tn = TeamName (T.unpack rawName)
+          owner <- runUseCase lock (Repo.getTeamOwner tn)
+          case owner of
+            Left apiErr -> sendError apiErr
+            Right (Just o) | o == uid -> do
+              mLen <- header "Content-Length"
+              let declared = (mLen >>= readMaybe . TL.unpack) :: Maybe Int
+              case declared of
+                Just n | n > avatarMaxBytes -> sendError avatarTooLarge
+                _ -> do
+                  bytes <- body
+                  if BL.length bytes > fromIntegral avatarMaxBytes
+                    then sendError avatarTooLarge
+                    else if BL.take 3 bytes /= BL.pack [0xFF, 0xD8, 0xFF]
+                      then sendError avatarNotJpeg
+                      else do
+                        result <- runUseCase lock (Repo.setTeamLogo tn (BL.toStrict bytes))
+                        case result of
+                          Left apiErr -> sendError apiErr
+                          Right ()    -> status status204
+            Right _ -> sendError
+              (ApiError status403 "NOT_TEAM_OWNER" "Only the team owner can change the logo" (object []))
+
+    delete "/teams/:name/logo" $ do
+      rawName <- pathParam "name" :: ActionM Text
+      mUser <- currentUser lock
+      case mUser of
+        Nothing  -> sendError unauthenticated
+        Just uid -> do
+          let tn = TeamName (T.unpack rawName)
+          owner <- runUseCase lock (Repo.getTeamOwner tn)
+          case owner of
+            Left apiErr -> sendError apiErr
+            Right (Just o) | o == uid -> do
+              result <- runUseCase lock (Repo.deleteTeamLogo tn)
+              case result of
+                Left apiErr -> sendError apiErr
+                Right ()    -> status status204
+            Right _ -> sendError
+              (ApiError status403 "NOT_TEAM_OWNER" "Only the team owner can change the logo" (object []))
+
+    -- public: an <img> tag cannot send a login token
+    get "/teams/:name/logo" $ do
+      rawName <- pathParam "name" :: ActionM Text
+      result <- runUseCase lock (Repo.getTeamLogo (TeamName (T.unpack rawName)))
+      case result of
+        Left apiErr -> sendError apiErr
+        Right Nothing -> sendError (ApiError status404 "NOT_FOUND" "No logo" (object []))
+        Right (Just bytes) -> do
+          setHeader "Content-Type" "image/jpeg"
+          setHeader "X-Content-Type-Options" "nosniff"
+          setHeader "Cache-Control" "no-cache"
+          raw (BL.fromStrict bytes)
+
+    post "/teams/:name/invites" $ do
+      rawName <- pathParam "name" :: ActionM Text
+      mUser <- currentUser lock
+      raw <- body
+      case (mUser, eitherDecode raw) of
+        (Nothing, _) -> sendError unauthenticated
+        (_, Left reason) -> sendError (invalidBody reason)
+        (Just uid, Right (InviteReq who)) -> do
+          result <- runUseCase lock (Subs.inviteToTeamUnlocked uid (TeamName (T.unpack rawName)) who)
+          case result of
+            Left apiErr -> sendError apiErr
+            Right (Left e) -> sendError (fromTeamInvite e)
+            Right (Right ()) -> status status204
+
+    get "/teams/:name/invites" $ do
+      rawName <- pathParam "name" :: ActionM Text
+      mUser <- currentUser lock
+      case mUser of
+        Nothing  -> sendError unauthenticated
+        Just uid -> do
+          result <- runUseCase lock (TInv.listPendingForTeam uid (TeamName (T.unpack rawName)))
+          case result of
+            Left apiErr -> sendError apiErr
+            Right (Left e) -> sendError (fromTeamInvite e)
+            Right (Right es) -> json (object
+              [ "invites" .= map (\(TInv.PendingInvite (UserId u) n) -> object ["userId" .= u, "username" .= n]) es ])
+
+    delete "/teams/:name/invites/:userId" $ do
+      rawName <- pathParam "name" :: ActionM Text
+      rawId <- pathParam "userId" :: ActionM Text
+      mUser <- currentUser lock
+      case (mUser, readMaybe (T.unpack rawId) :: Maybe Int) of
+        (Nothing, _) -> sendError unauthenticated
+        (_, Nothing) -> sendError notFoundApi
+        (Just uid, Just target) -> do
+          result <- runUseCase lock (TInv.revokeTeamInvite uid (TeamName (T.unpack rawName)) (UserId target))
+          case result of
+            Left apiErr -> sendError apiErr
+            Right (Left e) -> sendError (fromTeamInvite e)
+            Right (Right ()) -> status status204
+
+    get "/me/team-invites" $ do
+      mUser <- currentUser lock
+      case mUser of
+        Nothing  -> sendError unauthenticated
+        Just uid -> do
+          result <- runUseCase lock (TInv.listMyTeamInvites uid)
+          case result of
+            Left apiErr -> sendError apiErr
+            Right xs -> json (object
+              [ "invites" .= map (\(TInv.MyInvite (TeamName t) by) -> object ["team" .= t, "invitedBy" .= by]) xs ])
+
+    post "/me/team-invites/accept" $ do
+      mUser <- currentUser lock
+      raw <- body
+      case (mUser, eitherDecode raw) of
+        (Nothing, _) -> sendError unauthenticated
+        (_, Left reason) -> sendError (invalidBody reason)
+        (Just uid, Right (TeamRefReq t)) -> do
+          result <- runUseCase lock (Subs.acceptTeamInviteUnlocked uid (TeamName t))
+          case result of
+            Left apiErr -> sendError apiErr
+            Right (Left e) -> sendError (fromTeamInvite e)
+            Right (Right ()) -> status status204
+
+    post "/me/team-invites/decline" $ do
+      mUser <- currentUser lock
+      raw <- body
+      case (mUser, eitherDecode raw) of
+        (Nothing, _) -> sendError unauthenticated
+        (_, Left reason) -> sendError (invalidBody reason)
+        (Just uid, Right (TeamRefReq t)) -> do
+          result <- runUseCase lock (TInv.declineTeamInvite uid (TeamName t))
+          case result of
+            Left apiErr -> sendError apiErr
+            Right (Left e) -> sendError (fromTeamInvite e)
+            Right (Right ()) -> status status204
+
+    get "/me/joined-teams" $ do
+      mUser <- currentUser lock
+      case mUser of
+        Nothing  -> sendError unauthenticated
+        Just uid -> do
+          result <- runUseCase lock (TInv.listJoinedTeams uid)
+          case result of
+            Left apiErr -> sendError apiErr
+            Right ts    -> json (object ["teams" .= map teamJson ts])
+
+    put "/matches/:id/lobby-code" $ do
+      raw <- body
+      case eitherDecode raw of
+        Left reason -> sendError (invalidBody reason)
+        Right (LobbyCodeReq code) ->
+          runMatchAction lock (\uid mid -> MRoom.setMatchLobbyCode uid mid code) fromRoom (\() -> status status204)
+
+    get "/matches/:id/lobby-code" $
+      runMatchAction lock MRoom.readMatchLobbyCode fromRoom $ \(MRoom.LobbyCodeView c canEdit) ->
+        json (object ["code" .= c, "canEdit" .= canEdit])
+
+    post "/matches/:id/evidence" $ do
+      mNote <- queryParamMaybe "note" :: ActionM (Maybe Text)
+      mLen <- header "Content-Length"
+      let declared = (mLen >>= readMaybe . TL.unpack) :: Maybe Int
+      case declared of
+        Just n | n > evidenceMaxBytes -> sendError evidenceTooLarge
+        _ -> do
+          bytes <- body
+          if BL.length bytes > fromIntegral evidenceMaxBytes
+            then sendError evidenceTooLarge
+            else if BL.take 3 bytes /= BL.pack [0xFF, 0xD8, 0xFF]
+              then sendError avatarNotJpeg
+              else runMatchAction lock
+                     (\uid mid -> MRoom.uploadEvidence uid mid mNote (BL.toStrict bytes))
+                     fromRoom
+                     (\eid -> do
+                        status status201
+                        json (object ["id" .= eid]))
+
+    get "/matches/:id/evidence" $
+      runMatchAction lock MRoom.listMatchEvidence fromRoom $ \items ->
+        json (object
+          [ "evidence" .= map (\(MRoom.EvidenceItem eid who note at canDel) ->
+              object [ "id" .= eid, "uploadedBy" .= who, "note" .= note, "at" .= at, "canDelete" .= canDel ]) items ])
+
+    get "/matches/:id/evidence/:eid/image" $ do
+      rawE <- pathParam "eid" :: ActionM Text
+      case readMaybe (T.unpack rawE) :: Maybe Int of
+        Nothing -> sendError notFoundApi
+        Just eid ->
+          runMatchAction lock (\uid mid -> MRoom.readEvidenceImage uid mid eid) fromRoom $ \mb ->
+            case mb of
+              Nothing -> sendError notFoundApi
+              Just bytes -> do
+                setHeader "Content-Type" "image/jpeg"
+                setHeader "X-Content-Type-Options" "nosniff"
+                setHeader "Cache-Control" "private, no-store"
+                raw (BL.fromStrict bytes)
+
+    delete "/matches/:id/evidence/:eid" $ do
+      rawE <- pathParam "eid" :: ActionM Text
+      case readMaybe (T.unpack rawE) :: Maybe Int of
+        Nothing -> sendError notFoundApi
+        Just eid ->
+          runMatchAction lock (\uid mid -> MRoom.removeEvidence uid mid eid) fromRoom (\() -> status status204)
+
+    post "/tournaments/:id/referees" $ do
+      raw <- body
+      case eitherDecode raw of
+        Left reason -> sendError (invalidBody reason)
+        Right (InviteReq who) ->
+          runAction lock (\uid tid -> MRoom.assignReferee uid tid who) fromRoom (\() -> status status204)
+
+    get "/tournaments/:id/referees" $
+      runAction lock MRoom.listTournamentReferees fromRoom $ \rs ->
+        json (object [ "referees" .= map (\(UserId u, n) -> object ["userId" .= u, "username" .= n]) rs ])
+
+    delete "/tournaments/:id/referees/:userId" $ do
+      rawU <- pathParam "userId" :: ActionM Text
+      case readMaybe (T.unpack rawU) :: Maybe Int of
+        Nothing -> sendError notFoundApi
+        Just target ->
+          runAction lock (\uid tid -> MRoom.unassignReferee uid tid (UserId target)) fromRoom (\() -> status status204)
+
+    get "/matches/:id/messages" $ do
+      mAfter <- queryParamMaybe "after" :: ActionM (Maybe Text)
+      let after = fromMaybe 0 (mAfter >>= readMaybe . T.unpack) :: Int
+      runMatchAction lock (\uid mid -> MRoom.listMatchChat uid mid after) fromRoom $ \items ->
+        json (object
+          [ "messages" .= map (\(MRoom.ChatItem i k who txt at) ->
+              object [ "id" .= i, "kind" .= k, "author" .= who, "body" .= txt, "at" .= at ]) items ])
+
+    post "/matches/:id/messages" $ do
+      raw <- body
+      case eitherDecode raw of
+        Left reason -> sendError (invalidBody reason)
+        Right (ChatReq txt) ->
+          runMatchAction lock (\uid mid -> MRoom.postMatchMessage uid mid txt) fromRoom (\() -> status status204)
+
+    get "/me/match-history" $ do
+      mUser <- currentUser lock
+      case mUser of
+        Nothing  -> sendError unauthenticated
+        Just uid -> do
+          result <- runUseCase lock (MHist.myMatchHistory uid 500)
+          case result of
+            Left apiErr -> sendError apiErr
+            Right es    -> json (object
+              [ "matches" .= map historyJson (take 8 es)
+              , "played"  .= length es
+              , "wins"    .= length [ () | e <- es, MHist.mheResult e == MHist.ResultWin ]
+              , "losses"  .= length [ () | e <- es, MHist.mheResult e == MHist.ResultLoss ]
+              ])
+
+    put "/teams/:name/profile" $ do
+      rawName <- pathParam "name" :: ActionM Text
+      mUser <- currentUser lock
+      raw <- body
+      case (mUser, eitherDecode raw) of
+        (Nothing, _) -> sendError unauthenticated
+        (_, Left reason) -> sendError (invalidBody reason)
+        (Just uid, Right (ProfileReq tag game region rec)) -> do
+          result <- runUseCase lock
+            (TProf.updateTeamProfile uid (TeamName (T.unpack rawName)) (TPDom.TeamProfile tag game region rec))
+          case result of
+            Left apiErr -> sendError apiErr
+            Right (Left e) -> sendError (fromProfile e)
+            Right (Right ()) -> status status204
+
+    get "/teams/:name/profile" $ do
+      rawName <- pathParam "name" :: ActionM Text
+      mUser <- currentUser lock
+      case mUser of
+        Nothing -> sendError unauthenticated
+        Just _  -> do
+          result <- runUseCase lock (TProf.readTeamProfile (TeamName (T.unpack rawName)))
+          case result of
+            Left apiErr -> sendError apiErr
+            Right v     -> json (profileJson v)
+
+    get "/teams/:name/substitutions" $ do
+      rawName <- pathParam "name" :: ActionM Text
+      mUser <- currentUser lock
+      case mUser of
+        Nothing -> sendError unauthenticated
+        Just uid -> do
+          result <- runUseCase lock (Subs.teamSubstitutionState uid (TeamName (T.unpack rawName)))
+          case result of
+            Left apiErr -> sendError apiErr
+            Right (Left e) -> sendError (fromSub e)
+            Right (Right (locked, rs)) -> json (object
+              [ "locked"   .= fmap (\(i, n) -> object ["tournamentId" .= i, "name" .= n]) locked
+              , "requests" .= map subJson rs ])
+
+    post "/teams/:name/substitutions" $ do
+      rawName <- pathParam "name" :: ActionM Text
+      mUser <- currentUser lock
+      raw <- body
+      case (mUser, eitherDecode raw) of
+        (Nothing, _) -> sendError unauthenticated
+        (_, Left reason) -> sendError (invalidBody reason)
+        (Just uid, Right (SubReq tidN outN inN)) -> do
+          result <- runUseCase lock
+            (Subs.requestSubstitution uid (TeamName (T.unpack rawName)) (TournamentId (fromIntegral tidN)) outN inN)
+          case result of
+            Left apiErr -> sendError apiErr
+            Right (Left e) -> sendError (fromSub e)
+            Right (Right sid) -> do
+              status status201
+              json (object ["id" .= sid])
+
+    get "/tournaments/:id/substitutions" $
+      runAction lock Subs.listTournamentSubstitutions fromSub $ \rs ->
+        json (object ["requests" .= map subJson rs])
+
+    post "/tournaments/:id/substitutions/:sid/approve" $ do
+      rawS <- pathParam "sid" :: ActionM Text
+      case readMaybe (T.unpack rawS) :: Maybe Int of
+        Nothing  -> sendError notFoundApi
+        Just sid -> runAction lock (\uid tid -> Subs.decideSubstitution uid tid sid True) fromSub (\() -> status status204)
+
+    post "/tournaments/:id/substitutions/:sid/decline" $ do
+      rawS <- pathParam "sid" :: ActionM Text
+      case readMaybe (T.unpack rawS) :: Maybe Int of
+        Nothing  -> sendError notFoundApi
+        Just sid -> runAction lock (\uid tid -> Subs.decideSubstitution uid tid sid False) fromSub (\() -> status status204)
 
     notFound $ sendError
       (ApiError status404 "ROUTE_NOT_FOUND" "No such endpoint" (object []))

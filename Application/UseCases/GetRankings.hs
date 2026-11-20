@@ -7,9 +7,12 @@ module Application.UseCases.GetRankings
   , loadMatchScores
   , rankingsFrom
   , lobbyChampionOf
+  , playedFrom
+  , tournamentPlayed
   ) where
 
 import Data.Maybe (mapMaybe)
+import qualified Data.Map.Strict as Map
 
 import qualified Domain.Match as M
 import qualified Domain.Tournament as T
@@ -19,7 +22,7 @@ import Domain.Registration (registrationParticipant)
 import Engine.Champion (matchOutcomeWinner, tournamentChampionWith)
 import Engine.Standings (MatchScores)
 import Domain.Scoreable (unEFootballScore)
-import Engine.Rankings (RankingEntry, computeRankings)
+import Engine.Rankings (RankingEntry, computeRankings, computePlayed)
 
 import Shell.Persistence.Port (TournamentRepository, BracketRepository, MatchRepository, RegistrationRepository, EFootballScoreRepository, LobbyRepository, ParticipantRepository)
 import qualified Engine.Lobby as EL
@@ -105,6 +108,7 @@ data PublicFact = PublicFact
   , pubEntrants   :: [Participant]
   , pubChampion   :: Maybe Participant
   , pubWinners    :: [Participant]
+  , pubPlayed     :: [Participant]
   }
 
 loadPublicFacts
@@ -120,10 +124,42 @@ loadPublicFacts = do
       let (champ, winners) = case fs of
             ((c, w) : _) -> (c, w)
             []           -> (Nothing, [])
-      pure (PublicFact t (map registrationParticipant regs) champ winners)
+      played <- tournamentPlayed t
+      pure (PublicFact t (map registrationParticipant regs) champ winners played)
 
 rankingsFrom :: Maybe T.Game -> Int -> [PublicFact] -> [RankingEntry]
 rankingsFrom mGame limitN facts =
   take limitN (computeRankings [ (pubChampion f, pubWinners f) | f <- facts, inGame (pubTournament f) ])
+  where
+    inGame t = maybe True (\g -> T.tournamentGame t == Just g) mGame
+
+
+-- v0.15: everyone who took part in a completed match of this tournament, once
+-- per match. A match with no result (NoContest) does not count as played.
+-- Lobbies have no matches, so they add nothing here.
+tournamentPlayed
+  :: (BracketRepository m, MatchRepository m)
+  => T.Tournament -> m [Participant]
+tournamentPlayed t
+  | T.tournamentKind t == T.LobbyKind = pure []
+  | otherwise = case T.tournamentBracket t of
+      Nothing  -> pure []
+      Just bid -> do
+        matches <- Repo.listMatchesForBracket bid
+        pure (concatMap participantsOf matches)
+  where
+    participantsOf m = case (M.matchStatus m, M.matchOutcome m) of
+      (M.Completed, Just (M.Winner _))           -> both m
+      (M.Completed, Just M.Draw)                 -> both m
+      (M.Completed, Just (M.Forfeit _))          -> both m
+      (M.Completed, Just (M.Disqualification _)) -> both m
+      _                                          -> []
+    both m = [M.matchCompetitorA m, M.matchCompetitorB m]
+
+-- v0.15: matches played per player (lowercased name), from the same facts the
+-- rankings use and with the same game filter.
+playedFrom :: Maybe T.Game -> [PublicFact] -> Map.Map String Int
+playedFrom mGame facts =
+  computePlayed (concat [ pubPlayed f | f <- facts, inGame (pubTournament f) ])
   where
     inGame t = maybe True (\g -> T.tournamentGame t == Just g) mGame

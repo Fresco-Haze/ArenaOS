@@ -19,10 +19,11 @@ import {
   pauseTournament, resumeTournament, reopenTournament, updateDetails, updateFormat,
   setRequireApproval, listJoinRequests, approveJoinRequest, declineJoinRequest,
   startLobby, completeLobby, recordLobbyRound, correctLobbyRound,
-  startCheckIn, stopCheckIn,
+  stopCheckIn,
 } from '../lib/tournamentActions'
 import { formatLabel, stateLabel } from '../model'
 import type { BracketView, CheckInView, JoinRequestRow, Team, Tournament, TournamentFormat } from '../model'
+import OpenCheckInButton from './OpenCheckInButton'
 
 function ActionButton({ label, busyLabel, onRun, primary }: { label: string; busyLabel?: string; primary?: boolean; onRun: () => Promise<void> }) {
   const [busy, setBusy] = useState(false)
@@ -308,7 +309,7 @@ function CheckInControls({ tournament, checkIn, participantCount, onDone }:
         {checkIn.open ? (
           <ActionButton label="Close check-in" onRun={async () => { await stopCheckIn(id); await onDone() }} />
         ) : (
-          <ActionButton primary label="Open check-in" onRun={async () => { await startCheckIn(id); await onDone() }} />
+          <OpenCheckInButton id={id} onDone={onDone} />
         )}
       </div>
       <p className="muted">

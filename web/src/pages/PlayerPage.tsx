@@ -1,11 +1,19 @@
 import { Link, useParams } from 'react-router'
 import { useApi } from '../hooks/useApi'
-import { PlayerProfileView } from '../model'
+import { PlayerProfileView, gameLabel } from '../model'
 import EmptyState from '../components/EmptyState'
 import ErrorBanner from '../components/ErrorBanner'
 import LoadingBlock from '../components/LoadingBlock'
-import PageHeader from '../components/PageHeader'
 import TournamentCard from '../components/TournamentCard'
+
+function Stat({ value, label }: { value: number; label: string }) {
+  return (
+    <li className="pf-stat">
+      <span className="num profile-stat-value">{value}</span>
+      <span className="profile-stat-label">{label}</span>
+    </li>
+  )
+}
 
 export default function PlayerPage() {
   const { name = '' } = useParams()
@@ -26,24 +34,40 @@ export default function PlayerPage() {
   if (p === null) return <LoadingBlock label="Loading player" />
 
   const won = p.history.filter((h) => h.champion)
+  const gameCounts = new Map<string, number>()
+  for (const h of p.history) {
+    const g = h.tournament.game
+    if (g && g !== 'Other') gameCounts.set(gameLabel[g], (gameCounts.get(gameLabel[g]) ?? 0) + 1)
+  }
+  const games = [...gameCounts.entries()].sort((a, b) => b[1] - a[1])
 
   return (
-    <>
-      <PageHeader title={p.name} meta="Based on public tournaments" />
-      <ul className="profile-stats">
-        <li>
-          <span className="num profile-stat-value">{p.tournaments}</span>
-          <span className="profile-stat-label">Tournaments</span>
-        </li>
-        <li>
-          <span className="num profile-stat-value">{p.titles}</span>
-          <span className="profile-stat-label">Titles</span>
-        </li>
-        <li>
-          <span className="num profile-stat-value">{p.wins}</span>
-          <span className="profile-stat-label">Match wins</span>
-        </li>
-      </ul>
+    <div className="pf">
+      <nav aria-label="Breadcrumb" className="tp-crumbs muted">
+        <Link to="/players">Players</Link>
+        <span aria-hidden="true">&rsaquo;</span>
+        <span>{p.name}</span>
+      </nav>
+
+      <section className="pf-head" aria-label="Player">
+        <div className="pf-id">
+          <span className="profile-avatar" aria-hidden="true">{p.name.charAt(0).toUpperCase()}</span>
+          <div>
+            <h1 className="profile-name">{p.name}</h1>
+            <p className="muted">Based on public tournaments</p>
+            {p.titles > 0 && (
+              <div className="pf-badges">
+                <span className="profile-chip">Champion</span>
+              </div>
+            )}
+          </div>
+        </div>
+        <ul className="pf-stats">
+          <Stat value={p.tournaments} label="Tournaments" />
+          <Stat value={p.titles} label="Titles" />
+          <Stat value={p.wins} label="Match wins" />
+        </ul>
+      </section>
 
       {won.length > 0 && (
         <>
@@ -58,12 +82,23 @@ export default function PlayerPage() {
         </>
       )}
 
+      {games.length > 0 && (
+        <>
+          <h2 className="tp-section-title">Games played</h2>
+          <ul className="pf-games">
+            {games.map(([name, count]) => (
+              <li key={name} className="pf-game"><span>{name}</span><span className="num">{count}</span></li>
+            ))}
+          </ul>
+        </>
+      )}
+
       <h2 className="tp-section-title">Tournaments</h2>
       <ul className="tcards">
         {p.history.map((h) => (
           <TournamentCard key={h.tournament.tournamentId} tournament={h.tournament} showOrganizer />
         ))}
       </ul>
-    </>
+    </div>
   )
 }

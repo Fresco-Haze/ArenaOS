@@ -4,6 +4,8 @@ module Application.UseCases.ListPublicTournaments
   , selectPublicMatching
   , listPublicTournamentsPage
   , PublicFilter(..)
+  , StatusFilter(..)
+  , FeeFilter(..)
   , defaultPublicFilter
   , selectPublicFiltered
   , listPublicTournamentsFiltered
@@ -14,7 +16,7 @@ import Data.List (dropWhileEnd, isInfixOf, sortOn)
 import Data.Time (UTCTime)
 
 import Domain.Tournament
-  ( Game, Tournament(..), TournamentId(..), TournamentName(..)
+  ( Game, Tournament(..), TournamentFormat(..), TournamentId(..), TournamentName(..)
   , TournamentState(..), Visibility(..) )
 import Shell.Persistence.Port (TournamentRepository)
 import qualified Shell.Persistence.Port as Repo
@@ -29,10 +31,21 @@ data PublicFilter = PublicFilter
   , pfLimit        :: Int
   , pfUpcomingFrom :: Maybe UTCTime
   , pfOffset       :: Int            -- skip this many matches (paging)
+  , pfStatus       :: Maybe StatusFilter
+  , pfFormat       :: Maybe TournamentFormat
+  , pfFee          :: Maybe FeeFilter
   } deriving (Eq, Show)
 
+-- v0.15: coarse status groups for the public list.
+-- open = registration open, live = in progress or paused, finished = completed.
+data StatusFilter = StatusOpen | StatusLive | StatusFinished
+  deriving (Eq, Show)
+
+-- v0.15: free = no entry fee or a fee of 0, paid = a fee above 0.
+data FeeFilter = FeeFree | FeePaid
+  deriving (Eq, Show)
 defaultPublicFilter :: PublicFilter
-defaultPublicFilter = PublicFilter Nothing Nothing 50 Nothing 0
+defaultPublicFilter = PublicFilter Nothing Nothing 50 Nothing 0 Nothing Nothing Nothing
 
 -- Pure selection: Public, past Draft, filtered, ordered, capped.
 selectPublicFiltered :: PublicFilter -> [Tournament] -> [Tournament]
@@ -47,6 +60,9 @@ selectPublicMatching f ts = ordered (filter keep ts)
           && matchesGame t
           && matchesQuery t
           && matchesUpcoming t
+          && matchesStatus t
+          && matchesFormat t
+          && matchesFee t
     matchesGame t = maybe True (\g -> tournamentGame t == Just g) (pfGame f)
     matchesQuery t = case pfQuery f of
       Nothing -> True
@@ -56,6 +72,16 @@ selectPublicMatching f ts = ordered (filter keep ts)
       Nothing  -> True
       Just now -> maybe False (>= now) (tournamentStartTime t)
                     && tournamentState t `notElem` [Completed, Cancelled]
+    matchesStatus t = case pfStatus f of
+      Nothing             -> True
+      Just StatusOpen     -> tournamentState t == RegistrationOpen
+      Just StatusLive     -> tournamentState t `elem` [InProgress, Paused]
+      Just StatusFinished -> tournamentState t == Completed
+    matchesFormat t = maybe True (== tournamentFormat t) (pfFormat f)
+    matchesFee t = case pfFee f of
+      Nothing      -> True
+      Just FeeFree -> maybe True (<= 0) (tournamentEntryFee t)
+      Just FeePaid -> maybe False (> 0) (tournamentEntryFee t)
     ordered = case pfUpcomingFrom f of
       Nothing -> sortOn (negate . unTournamentId . tournamentId)
       Just _  -> sortOn (\t -> (tournamentStartTime t, unTournamentId (tournamentId t)))
