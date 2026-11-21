@@ -1373,3 +1373,13 @@ a, button, summary, [role='tab'] { touch-action: manipulation; -webkit-tap-highl
 }
 /* game tiles: 16:9 art */
 .gtile-art { height: auto; aspect-ratio: 16 / 9; }
+/* tournament cards: show art in full */
+.tcard .tcard-art {
+  height: auto;
+  aspect-ratio: 16 / 9;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+}
+.tcard .tcard-art[data-game] { background-position: center; }
+.tcard .tcard-art .tp-banner-img { object-fit: contain; }
