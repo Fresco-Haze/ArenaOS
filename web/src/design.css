@@ -1383,3 +1383,31 @@ a, button, summary, [role='tab'] { touch-action: manipulation; -webkit-tap-highl
 }
 .tcard .tcard-art[data-game] { background-position: center; }
 .tcard .tcard-art .tp-banner-img { object-fit: contain; }
+/* phone: tournament page and hero art in full */
+@media (max-width: 860px) {
+  .tp-art.tp-art[data-game] {
+    height: auto;
+    min-height: 0;
+    aspect-ratio: 16 / 9;
+    background-size: contain;
+    background-repeat: no-repeat;
+    background-position: center;
+  }
+  .tp-art .tp-banner-img { object-fit: contain; }
+}
+@media (max-width: 900px) {
+  .dh-art.dh-art[data-game] {
+    height: auto;
+    min-height: 0;
+    aspect-ratio: 16 / 9;
+    background-size: contain;
+    background-repeat: no-repeat;
+    background-position: center;
+  }
+  .dh-art .tp-banner-img { object-fit: contain; }
+  .dh-art.dh-art::after { display: none; }
+}
+/* phone: hide discovery hero (duplicate of the list) */
+@media (max-width: 900px) {
+  .dh { display: none; }
+}
