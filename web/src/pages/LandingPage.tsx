@@ -214,6 +214,12 @@ export default function LandingPage() {
         .sort((a, b) => b.tournamentId - a.tournamentId)
         .slice(0, 3)
     : null
+  const recent = list.data
+    ? list.data.tournaments
+        .filter((t) => t.state === 'Completed')
+        .sort((a, b) => b.tournamentId - a.tournamentId)
+        .slice(0, 2)
+    : null
 
   return (
     <div className="lp">
@@ -259,6 +265,16 @@ export default function LandingPage() {
               <TournamentCard key={t.tournamentId} tournament={t} />
             ))}
           </ul>
+        )}
+        {recent && recent.length > 0 && (
+          <>
+            <h3 className="lp-sub-h">Recent results</h3>
+            <ul className="tcards tcards-featured">
+              {recent.map((t) => (
+                <TournamentCard key={t.tournamentId} tournament={t} />
+              ))}
+            </ul>
+          </>
         )}
       </section>
       <Features top={top} />
