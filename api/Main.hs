@@ -141,6 +141,8 @@ import qualified Application.UseCases.CheckInDeadline as CkDl
 import Shell.Persistence.SQLite.SubstitutionRepository ()
 import qualified Application.UseCases.Substitutions as Subs
 import qualified Domain.Substitution as SDom
+import Shell.Persistence.SQLite.SeriesRepository ()
+import qualified Application.UseCases.SeriesScoring as Ser
 import qualified Application.UseCases.TeamInvites as TInv
 import qualified Data.ByteString.Lazy as BL
 import qualified Application.UseCases.JoinRequests as JRQ
@@ -1204,6 +1206,54 @@ fromSub Subs.SubAlreadyPending =
 fromSub Subs.SubNotFound = notFoundApi
 fromSub Subs.SubNotPending =
   ApiError status409 "NOT_PENDING" "That request has already been decided" (object [])
+
+newtype BestOfReq = BestOfReq Int
+
+instance FromJSON BestOfReq where
+  parseJSON = withObject "series" $ \o -> BestOfReq <$> o .: "bestOf"
+
+data GameScoreReq = GameScoreReq Int Int
+
+instance FromJSON GameScoreReq where
+  parseJSON = withObject "game score" $ \o -> GameScoreReq <$> o .: "a" <*> o .: "b"
+
+seriesJson :: Ser.SeriesView -> Value
+seriesJson v = object
+  [ "bestOf"    .= Ser.srsBestOf v
+  , "games"     .= map gameJ (Ser.srsGames v)
+  , "canReport" .= Ser.srsCanReport v
+  , "staff"     .= Ser.srsStaff v
+  ]
+  where
+    gameJ g = object
+      [ "no"         .= Ser.gvNo g
+      , "a"          .= Ser.gvA g
+      , "b"          .= Ser.gvB g
+      , "confirmed"  .= Ser.gvConfirmed g
+      , "by"         .= Ser.gvBy g
+      , "canConfirm" .= Ser.gvCanConfirm g
+      ]
+
+fromSeries :: Ser.SeriesError -> ApiError
+fromSeries Ser.SeriesForbidden =
+  ApiError status403 "NOT_ALLOWED" "Only a captain, the organizer or a referee can do this" (object [])
+fromSeries Ser.SeriesMatchNotLive =
+  ApiError status409 "MATCH_NOT_LIVE" "Scores can only be reported while the match is in progress" (object [])
+fromSeries Ser.SeriesBadGame =
+  ApiError status400 "VALIDATION_FAILED" "That game number is outside this series" (object ["field" .= ("game" :: Text)])
+fromSeries Ser.SeriesBadScore =
+  ApiError status400 "VALIDATION_FAILED" "Enter two different scores between 0 and 999" (object ["field" .= ("score" :: Text)])
+fromSeries Ser.SeriesOutOfOrder =
+  ApiError status409 "GAME_OUT_OF_ORDER" "Earlier games must be confirmed first" (object [])
+fromSeries Ser.SeriesAlreadyConfirmed =
+  ApiError status409 "ALREADY_CONFIRMED" "That game is already confirmed" (object [])
+fromSeries Ser.SeriesNoGame =
+  ApiError status404 "NO_GAME" "No score has been reported for that game" (object [])
+fromSeries Ser.SeriesBadLength =
+  ApiError status400 "VALIDATION_FAILED" "A series is best of 1, 3 or 5" (object ["field" .= ("bestOf" :: Text)])
+fromSeries Ser.SeriesLocked =
+  ApiError status409 "SERIES_LOCKED" "The series length cannot change once games have been recorded" (object [])
+fromSeries (Ser.SeriesResultFailed e) = fromRecord e
 
 newtype InviteReq = InviteReq Text
 
@@ -3633,6 +3683,41 @@ main = do
       case readMaybe (T.unpack rawS) :: Maybe Int of
         Nothing  -> sendError notFoundApi
         Just sid -> runAction lock (\uid tid -> Subs.decideSubstitution uid tid sid False) fromSub (\() -> status status204)
+
+    put "/tournaments/:id/series" $ do
+      raw <- body
+      case eitherDecode raw of
+        Left reason -> sendError (invalidBody reason)
+        Right (BestOfReq n) ->
+          runAction lock (\uid tid -> Ser.setSeriesLength uid tid n) fromSeries (\() -> status status204)
+
+    get "/tournaments/:id/series" $ do
+      rawId <- pathParam "id" :: ActionM Text
+      case readMaybe (T.unpack rawId) :: Maybe Int of
+        Nothing -> sendError notFoundApi
+        Just n -> do
+          result <- runUseCase lock (Repo.getBestOf (TournamentId (fromIntegral n)))
+          case result of
+            Left apiErr -> sendError apiErr
+            Right bo    -> json (object ["bestOf" .= bo])
+
+    get "/matches/:id/series" $
+      runMatchAction lock Ser.readSeries fromSeries (json . seriesJson)
+
+    put "/matches/:id/games/:n" $ do
+      rawN <- pathParam "n" :: ActionM Text
+      raw <- body
+      case (readMaybe (T.unpack rawN) :: Maybe Int, eitherDecode raw) of
+        (Nothing, _) -> sendError notFoundApi
+        (_, Left reason) -> sendError (invalidBody reason)
+        (Just n, Right (GameScoreReq a b)) ->
+          runMatchAction lock (\uid mid -> Ser.reportGame uid mid n a b) fromSeries (\() -> status status204)
+
+    post "/matches/:id/games/:n/confirm" $ do
+      rawN <- pathParam "n" :: ActionM Text
+      case readMaybe (T.unpack rawN) :: Maybe Int of
+        Nothing -> sendError notFoundApi
+        Just n  -> runMatchAction lock (\uid mid -> Ser.confirmGame uid mid n) fromSeries (\() -> status status204)
 
     notFound $ sendError
       (ApiError status404 "ROUTE_NOT_FOUND" "No such endpoint" (object []))

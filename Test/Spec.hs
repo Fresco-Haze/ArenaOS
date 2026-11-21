@@ -142,6 +142,9 @@ import Shell.Persistence.SQLite.CheckInDeadlineRepository ()
 import qualified Application.UseCases.CheckInDeadline as CkDl
 import Shell.Persistence.SQLite.SubstitutionRepository ()
 import qualified Application.UseCases.Substitutions as Subs
+import Shell.Persistence.SQLite.SeriesRepository ()
+import qualified Application.UseCases.SeriesScoring as Ser
+import Domain.Series (MatchGame(..))
 import qualified Application.UseCases.TeamInvites as TInv
 import Shell.Persistence.SQLite.LobbyRepository ()
 import Shell.Persistence.SQLite.CheckInRepository ()
@@ -6711,6 +6714,67 @@ spec = before_ resetTestDb $ do
         , Left Subs.SubNotStaff, Right ()
         , True, False
         , Left Subs.SubNotPending )
+    it "Series scoring: captains report and confirm each game, and the majority settles the match" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "sx-owner"
+        a <- createTestUser "sx-a"
+        b <- createTestUser "sx-b"
+        outsider <- createTestUser "sx-out"
+        tid <- msTwo owner a b "Series Score Cup"
+        _ <- unwrap =<< Ser.setSeriesLength owner tid 3
+        t <- Repo.getTournament tid
+        let Just bid = tournamentBracket t
+        ms <- Repo.listMatchesForBracket bid
+        let m = head ms
+            mid = matchId m
+        notLive <- Ser.reportGame a mid 1 13 9
+        _ <- unwrap =<< startMatch owner mid
+        noOne <- Ser.reportGame outsider mid 1 13 9
+        tie <- Ser.reportGame a mid 1 7 7
+        outOfOrder <- Ser.reportGame a mid 2 13 9
+        r1 <- Ser.reportGame a mid 1 13 9
+        selfConfirm <- Ser.confirmGame a mid 1
+        okConfirm <- Ser.confirmGame b mid 1
+        again <- Ser.confirmGame b mid 1
+        mid1 <- Repo.getMatch mid
+        r2 <- Ser.reportGame b mid 2 13 5
+        c2 <- Ser.confirmGame a mid 2
+        done <- Repo.getMatch mid
+        gs <- Repo.listMatchGames mid
+        pure ( notLive, noOne, tie, outOfOrder, r1, selfConfirm, okConfirm, again
+             , matchStatus mid1, r2, c2, matchStatus done
+             , fmap (const ()) (matchOutcome done)
+             , [ (gameNo g, gameConfirmed g) | g <- gs ] )
+      result `shouldBe` Right
+        ( Left Ser.SeriesMatchNotLive, Left Ser.SeriesForbidden, Left Ser.SeriesBadScore
+        , Left Ser.SeriesOutOfOrder, Right (), Left Ser.SeriesForbidden, Right ()
+        , Left Ser.SeriesAlreadyConfirmed
+        , Match.InProgress, Right (), Right (), Match.Completed
+        , Just ()
+        , [(1, True), (2, True)] )
+    it "Series: best of defaults to 1, only the owner sets 1, 3 or 5 before games exist, and games are stored in order" $ do
+      result <- runSQLiteM testDbPath $ do
+        setupSchema
+        owner <- createTestUser "sr-owner"
+        other <- createTestUser "sr-other"
+        tid <- createOpenTournament owner "Series Cup" 4
+        d0 <- Repo.getBestOf tid
+        notOwner <- Ser.setSeriesLength other tid 3
+        bad <- Ser.setSeriesLength owner tid 2
+        ok <- Ser.setSeriesLength owner tid 3
+        d1 <- Repo.getBestOf tid
+        let m = MatchId 9100
+        Repo.upsertMatchGame m 1 13 9 False owner
+        Repo.upsertMatchGame m 1 13 9 True other
+        Repo.upsertMatchGame m 2 5 13 False owner
+        gs <- Repo.listMatchGames m
+        pure ( d0, notOwner, bad, ok, d1
+             , [ (gameNo g, gameScoreA g, gameScoreB g, gameConfirmed g, gameReportedBy g == other) | g <- gs ] )
+      result `shouldBe` Right
+        ( 1, Left Ser.SeriesForbidden, Left Ser.SeriesBadLength, Right (), 3
+        , [(1, 13, 9, True, True), (2, 5, 13, False, False)] )
+
     it "Check-in deadline: it is stored and cleared, and a self check-in after it is refused" $ do
       result <- runSQLiteM testDbPath $ do
         setupSchema

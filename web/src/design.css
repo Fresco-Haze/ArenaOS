@@ -1331,3 +1331,34 @@ a, button, summary, [role='tab'] { touch-action: manipulation; -webkit-tap-highl
     background: var(--brand-solid);
   }
 }
+
+/* ===== review fixes 1 ===== */
+.home-rail .panel-title { font-size: 1rem; }
+.home-rail .panel-head { gap: var(--space-2); }
+.shell:has(.lp) .shell-search { max-width: 26rem; }
+/* ===== review fixes 2 ===== */
+.dh .badge {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 18%, #0a0d12);
+  border: 1px solid currentColor;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.6875rem;
+}
+/* ===== review fixes 3 ===== */
+.dh .tp-stats { grid-template-columns: repeat(auto-fit, minmax(8.5rem, 15rem)); }
+/* ===== review fixes 4 ===== */
+.tp section[aria-label='Find your match'] {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  padding: var(--space-2) var(--space-3);
+}
+.tp section[aria-label='Find your match'] > h2 { margin: 0; font-size: 0.9375rem; white-space: nowrap; }
+.tp section[aria-label='Find your match'] .stack-label { font-size: 0; max-width: none; flex: 1 1 16rem; }
+.tp section[aria-label='Find your match'] .stack-label input { font-size: var(--font-sm); max-width: 24rem; }
+.tp section[aria-label='Find your match'] [role='status'] { flex: 1 1 100%; }
+
+.tp .bracket-round-heading { text-transform: none; letter-spacing: 0; font-size: 0.8125rem; font-weight: 500; }
+.tp .match-live { border-color: color-mix(in srgb, var(--live) 55%, var(--line)); }

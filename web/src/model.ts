@@ -328,3 +328,20 @@ export const SubstitutionState = z.object({
   locked: z.object({ tournamentId: z.number(), name: z.string() }).nullable(),
   requests: z.array(SubstitutionItem),
 })
+
+export const SeriesView = z.object({
+  bestOf: z.number(),
+  games: z.array(
+    z.object({
+      no: z.number(),
+      a: z.number(),
+      b: z.number(),
+      confirmed: z.boolean(),
+      by: z.string(),
+      canConfirm: z.boolean(),
+    }),
+  ),
+  canReport: z.boolean(),
+  staff: z.boolean(),
+})
+export type SeriesView = z.infer<typeof SeriesView>

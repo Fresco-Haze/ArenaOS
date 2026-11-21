@@ -121,6 +121,9 @@ library
                       Domain.Substitution
                       Shell.Persistence.SQLite.SubstitutionRepository
                       Application.UseCases.Substitutions
+                      Domain.Series
+                      Shell.Persistence.SQLite.SeriesRepository
+                      Application.UseCases.SeriesScoring
                       Shell.Persistence.SQLite.LobbyRepository
                       Shell.Persistence.SQLite.CheckInRepository
                       Shell.Persistence.SQLite.IdentityRepository

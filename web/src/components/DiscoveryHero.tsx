@@ -16,7 +16,7 @@ export default function DiscoveryHero({ items }: { items: Tournament[] }) {
   const upcoming = open
     .filter((t) => t.startTime && new Date(t.startTime).getTime() > now)
     .sort((a, b) => new Date(a.startTime ?? 0).getTime() - new Date(b.startTime ?? 0).getTime())
-  const t = upcoming[0] ?? open[0]
+  const t = upcoming[0] ?? open.find((x) => x.prize != null || x.startTime) ?? open[0]
   if (!t) return null
 
   const gameName = t.game && t.game !== 'Other' ? gameLabel[t.game] : null

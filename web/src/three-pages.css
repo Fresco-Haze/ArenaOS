@@ -279,3 +279,16 @@
 .mr-subs { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-3); }
 .mr-subs li { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-2); font-size: var(--font-sm); }
 .mr-subs-actions { display: flex; gap: var(--space-2); }
+
+/* series scoring */
+.mr-games { list-style: none; margin: 0 0 var(--space-3); padding: 0; display: grid; gap: var(--space-2); }
+.mr-games li { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-3); padding: var(--space-2) var(--space-3); border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg); font-size: var(--font-sm); }
+.mr-game-no { min-width: 4rem; font-weight: 600; }
+.mr-game-score { min-width: 4.5rem; font-family: var(--font-mono); font-size: 1.0625rem; }
+.mr-games .btn-primary { margin-left: auto; padding: var(--space-1) var(--space-3); font-size: var(--font-sm); }
+.mr-score-form { display: flex; flex-wrap: wrap; align-items: end; gap: var(--space-3); margin-bottom: var(--space-2); }
+.mr-score-form label { display: grid; gap: var(--space-1); font-size: var(--font-sm); font-weight: 600; }
+.mr-score-form input { width: 5.5rem; text-align: center; font-family: var(--font-mono); font-size: 1.125rem; }
+.mr-score-form select { min-width: 6rem; }
+.mr-series-hint { margin: var(--space-2) 0 0; font-size: 0.75rem; }
+.mr-series-length { display: flex; align-items: center; gap: var(--space-3); margin-top: var(--space-3); font-size: var(--font-sm); font-weight: 600; }

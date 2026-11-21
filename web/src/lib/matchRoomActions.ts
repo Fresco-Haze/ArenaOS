@@ -69,3 +69,15 @@ export async function resizeEvidence(file: File, maxSide = 1280): Promise<Blob> 
 export function postMatchMessage(matchId: number, body: string) {
   return apiVoid(`/matches/${matchId}/messages`, { method: 'POST', body: JSON.stringify({ body }) })
 }
+
+export function reportGame(matchId: number, gameNo: number, a: number, b: number) {
+  return apiVoid(`/matches/${matchId}/games/${gameNo}`, { method: 'PUT', body: JSON.stringify({ a, b }) })
+}
+
+export function confirmGame(matchId: number, gameNo: number) {
+  return apiVoid(`/matches/${matchId}/games/${gameNo}/confirm`, { method: 'POST' })
+}
+
+export function setSeriesLength(tournamentId: number, bestOf: number) {
+  return apiVoid(`/tournaments/${tournamentId}/series`, { method: 'PUT', body: JSON.stringify({ bestOf }) })
+}

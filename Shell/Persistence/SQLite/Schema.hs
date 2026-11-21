@@ -346,6 +346,8 @@ statements =
   , "CREATE TABLE IF NOT EXISTS team_profiles (team_id INTEGER PRIMARY KEY REFERENCES teams(id), tag TEXT NOT NULL DEFAULT '', game TEXT NOT NULL DEFAULT '', region TEXT NOT NULL DEFAULT '', recruitment TEXT NOT NULL DEFAULT 'InviteOnly' CHECK (recruitment IN ('OpenTryouts', 'InviteOnly')))"
   , "CREATE TABLE IF NOT EXISTS tournament_checkin_deadline (tournament_id INTEGER PRIMARY KEY REFERENCES tournaments(id), closes_at TEXT NOT NULL)"
   , "CREATE TABLE IF NOT EXISTS team_substitutions (id INTEGER PRIMARY KEY, team_id INTEGER NOT NULL REFERENCES teams(id), tournament_id INTEGER NOT NULL REFERENCES tournaments(id), out_player TEXT NOT NULL, in_user_id INTEGER NOT NULL REFERENCES users(id), requested_by INTEGER NOT NULL REFERENCES users(id), status TEXT NOT NULL CHECK (status IN ('Pending', 'Approved', 'Declined')), created_at TEXT NOT NULL, decided_by INTEGER REFERENCES users(id))"
+  , "CREATE TABLE IF NOT EXISTS tournament_series (tournament_id INTEGER PRIMARY KEY REFERENCES tournaments(id), best_of INTEGER NOT NULL CHECK (best_of IN (1, 3, 5)))"
+  , "CREATE TABLE IF NOT EXISTS match_games (match_id INTEGER NOT NULL, game_no INTEGER NOT NULL CHECK (game_no >= 1), score_a INTEGER NOT NULL CHECK (score_a >= 0), score_b INTEGER NOT NULL CHECK (score_b >= 0), confirmed INTEGER NOT NULL CHECK (confirmed IN (0, 1)), reported_by INTEGER NOT NULL REFERENCES users(id), PRIMARY KEY (match_id, game_no))"
   , "CREATE TABLE IF NOT EXISTS user_avatars ( \
     \  user_id    INTEGER PRIMARY KEY REFERENCES users(id), \
     \  image      BLOB NOT NULL, \

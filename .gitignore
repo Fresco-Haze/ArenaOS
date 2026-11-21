@@ -34,3 +34,11 @@ test-output.txt
 # local safety copies made by patch scripts
 *.pre-*
 *.bak-*
+
+# local backup copies made by patch scripts
+*.pre-*
+*.bak
+*.save
+*.save0
+
+apply-*.ps1

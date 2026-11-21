@@ -14,6 +14,7 @@ import MatchEvidence from '../components/MatchEvidence'
 import MatchLobbyCode from '../components/MatchLobbyCode'
 import MatchReferees from '../components/MatchReferees'
 import SubstitutionRequests from '../components/SubstitutionRequests'
+import MatchSeries from '../components/MatchSeries'
 import TeamCrest from '../components/TeamCrest'
 
 const STATUS_LABEL = {
@@ -149,6 +150,14 @@ export default function MatchRoomPage({ id, nodeId }: { id: string; nodeId: numb
         </div>
 
         <div className="mr-col">
+          <MatchSeries
+            matchId={m.matchId}
+            tournamentId={t.tournamentId}
+            nameA={participantName(m.competitorA)}
+            nameB={participantName(m.competitorB)}
+            isOwner={view.viewerIsOwner}
+            onSettled={reload}
+          />
           <section className="pc-card mr-card" aria-labelledby="mr-actions-h">
             <h2 id="mr-actions-h" className="pc-card-head">{view.viewerIsOwner ? 'Match controls' : 'Match info'}</h2>
             {view.viewerIsOwner ? (

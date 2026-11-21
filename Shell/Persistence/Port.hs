@@ -45,6 +45,7 @@ module Shell.Persistence.Port
   ,MatchHistoryRepository(..)
   ,TeamProfileRepository(..)
   ,SubstitutionRepository(..)
+  ,SeriesRepository(..)
   ,BannerRepository(..)
   ,LobbyRepository(..)
   ,CheckInRepository(..)
@@ -79,6 +80,7 @@ import Domain.JoinRequest (JoinRequestStatus)
 import Domain.TeamInvite (TeamInviteStatus)
 import Domain.TeamProfile (TeamProfile)
 import Domain.Substitution (Substitution, SubstitutionStatus)
+import Domain.Series (MatchGame)
 import Domain.Notification (NotificationKind, Notification)
 import Data.Map.Strict (Map)
 import Data.Text (Text)
@@ -412,3 +414,12 @@ class Monad m => SubstitutionRepository m where
   listSubstitutionsForTeam       :: TeamName -> m [Substitution]
   getSubstitution                :: Int -> m (Maybe Substitution)
   setSubstitutionStatus          :: Int -> UserId -> SubstitutionStatus -> m ()
+
+-- Best-of series: how many games a tournament'"'"'s matches are played over (1, 3 or 5; 1 when
+-- never set) and the per-game scores of a match.
+class Monad m => SeriesRepository m where
+  setBestOf       :: TournamentId -> Int -> m ()
+  getBestOf       :: TournamentId -> m Int
+  countSeriesGames :: TournamentId -> m Int
+  listMatchGames  :: MatchId -> m [MatchGame]
+  upsertMatchGame :: MatchId -> Int -> Int -> Int -> Bool -> UserId -> m ()
