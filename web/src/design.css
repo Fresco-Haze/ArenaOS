@@ -1363,11 +1363,13 @@ a, button, summary, [role='tab'] { touch-action: manipulation; -webkit-tap-highl
 .tp .bracket-round-heading { text-transform: none; letter-spacing: 0; font-size: 0.8125rem; font-weight: 500; }
 .tp .match-live { border-color: color-mix(in srgb, var(--live) 55%, var(--line)); }
 /* landing featured cards: 16:9 art, capped width */
-.shell-main .tcards.tcards-featured {
+.lp .tcards.tcards-featured {
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 17rem), 22rem));
   justify-content: start;
 }
-.shell-main .tcards.tcards-featured .tcard-art {
+.lp .tcards.tcards-featured .tcard-art {
   height: auto;
   aspect-ratio: 16 / 9;
 }
+/* game tiles: 16:9 art */
+.gtile-art { height: auto; aspect-ratio: 16 / 9; }
