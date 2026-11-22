@@ -3,6 +3,10 @@
 {$SITE_ADDRESS::80} {
     encode zstd gzip
 
+    # www is a duplicate of the bare domain: send it there permanently.
+    @www host www.sweatlobby.com
+    redir @www https://sweatlobby.com{uri} permanent
+
     header {
         X-Content-Type-Options nosniff
         X-Frame-Options DENY
