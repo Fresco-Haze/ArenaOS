@@ -202,6 +202,30 @@ function LandingFooter() {
     </footer>
   )
 }
+function HowItWorks() {
+  return (
+    <section className="lp-section" aria-labelledby="lp-how">
+      <h2 id="lp-how" className="lp-h2">How it works</h2>
+      <div className="lp-grid">
+        <article className="lp-card">
+          <p className="lp-label">Step 1</p>
+          <h3>Create &amp; share</h3>
+          <p className="muted">Pick your game, format (single, double or round robin), and prize and entry details. Share the tournament link once registration is open.</p>
+        </article>
+        <article className="lp-card">
+          <p className="lp-label">Step 2</p>
+          <h3>Brackets built for you</h3>
+          <p className="muted">Close registration and generate the bracket in one click. Seeds and byes are handled, with no spreadsheets.</p>
+        </article>
+        <article className="lp-card">
+          <p className="lp-label">Step 3</p>
+          <h3>Live results &amp; rankings</h3>
+          <p className="muted">Record each score as the match ends. The bracket advances and rankings update from the results.</p>
+        </article>
+      </div>
+    </section>
+  )
+}
 export default function LandingPage() {
   const stats = useApi('/stats', PublicStatsView, true)
   const list = useApi('/tournaments', TournamentList, true)
@@ -277,6 +301,7 @@ export default function LandingPage() {
           </>
         )}
       </section>
+      <HowItWorks />
       <Features top={top} />
       <Organizers />
       <Closing />
